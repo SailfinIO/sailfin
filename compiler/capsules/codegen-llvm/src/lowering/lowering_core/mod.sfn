@@ -23,6 +23,9 @@ import {
 import { apply_layout_manifest_to_module } from "../../imports";
 import {
     skip_module_globals,
+    target_cpu_for_lowering,
+    target_features_for_lowering,
+    target_frame_pointer_for_lowering,
     test_runner_active,
     test_runner_trace,
     trace_call_lowering,
@@ -44,7 +47,8 @@ import {
     index_of,
     number_to_string,
     stamp_lowering_diag_file_paths,
-    starts_with
+    starts_with,
+    substring
 } from "../../utils";
 import { emit_llvm_function } from "../emission";
 import {
@@ -106,6 +110,28 @@ import {
     hoist_closure_env_type_decls,
     hoist_named_fn_value_adapters
 } from "./finalization";
+
+fn _apply_object_profile_function_attributes(lines: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "define ") && line.length >= 2 && substring(line, line.length - 2, line.length) == " {" {
+            out.push(substring(line, 0, line.length - 2) + " #0 {");
+        } else { out.push(line); }
+        i += 1;
+    }
+    out.push("");
+    out.push("attributes #0 = { uwtable(sync) \"approx-func-fp-math\"=\"false\" \"frame-pointer\"=\""
+        + target_frame_pointer_for_lowering()
+        + "\" \"no-infs-fp-math\"=\"false\" \"no-nans-fp-math\"=\"false\" \"no-signed-zeros-fp-math\"=\"false\" \"no-trapping-math\"=\"false\" \"target-cpu\"=\""
+        + target_cpu_for_lowering()
+        + "\" \"target-features\"=\""
+        + target_features_for_lowering()
+        + "\" \"unsafe-fp-math\"=\"false\" }");
+    return out;
+}
 
 fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_arg: ParseNativeResult, import_context: ImportedModuleContext, mangle_symbols: boolean, native_text_override_path_in: string) -> LoweredLLVMLinesResult {
     set_syscall_lowering_module(native_module.module_name);
@@ -619,9 +645,8 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     // emit a byte-identical `declare <ret> @<sym>(...)` for the same symbol
     // (e.g. `sfn_array_sfn_map` is both a registered runtime helper and a
     // `runtime/prelude.sfn` import). LLVM's library API merges identical
-    // declares, but clang's textual-IR parser — the `clang -c <file>.ll`
-    // path `_emit_runtime_sfn_to_obj` (cli_main.sfn) uses to build runtime
-    // objects — rejects the repeat with "invalid redefinition of function",
+    // declares, but LLVM's textual-IR parser rejects the repeat with
+    // "invalid redefinition of function" while building runtime objects,
     // which breaks a cold `make test` (the cached `.o` masks it in CI). Run
     // the dedup here, after mangling so symbol names are final, keeping the
     // first occurrence and preserving order so the stage2==stage3 fixed
@@ -656,6 +681,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
         lines.push("!0 = distinct !{!0, !1}");
         lines.push("!1 = !{!\"llvm.loop.vectorize.enable\", i1 true}");
     }
+    lines = _apply_object_profile_function_attributes(lines);
     if debug_lowering { trace_log("emit-llvm: phase=mangle"); }
     if trace { trace_log("test llvm: mangling stage done"); }
 

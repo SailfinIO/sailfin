@@ -8,7 +8,8 @@
 // C source (`c-sources`), pre-written LLVM IR (`ll-sources`),
 // header roots (`include-dirs`), and link flags (`link-libs`)
 // declared in `capsule.toml`. The driver compiles each `.c` with
-// clang, assembles each `.ll` with clang, propagates `-I` flags
+// the configured foreign-C compiler, assembles each `.ll` with the LLVM
+// object provider, propagates `-I` flags
 // from the include roots, and appends the link flags to the final
 // link.
 //
@@ -75,8 +76,8 @@ struct RuntimeTargetArtifacts {
 }
 
 // Resolved per-runtime-capsule build inputs. All paths are
-// workspace-rooted; consumers feed them straight into
-// `process.run([...])` argv arrays for clang.
+// workspace-rooted; consumers feed them into the source-kind-specific
+// object providers.
 //
 // `link_libs` is intentionally not path-resolved — these are
 // linker flags (e.g. `-lm`, `-lpthread`), not files. They flow
@@ -87,7 +88,7 @@ struct RuntimeTargetArtifacts {
 // module the runtime capsule wants linked into every consumer
 // is declared in the manifest's `[build] sfn-sources` array.
 // The driver iterates each entry, spawns the compiler subprocess
-// to emit `.ll`, and runs `clang -c` to produce the `.o`. This
+// to emit `.ll`, and runs the LLVM object provider to produce the `.o`. This
 // path is what enables the Sailfin-native runtime modules
 // (`runtime/sfn/clock.sfn`, `runtime/sfn/io.sfn`, …) to ship
 // without per-module Makefile wiring.

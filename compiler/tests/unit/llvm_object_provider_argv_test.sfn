@@ -1,0 +1,214 @@
+// Structured argv and identity contract for the SFEP-0066 LLVM object
+// provider (SFN-952). These tests construct resolved providers directly so
+// every supported target profile is covered without depending on host tools.
+import { int_to_string } from "sfn/strings";
+import {
+    expect_eq_bool,
+    expect_eq_str,
+    expect_eq_str_array,
+    sfn_bin_abs_path,
+    with_tmp_dir
+} from "sfn/test";
+
+import {
+    LlvmArtifactRequest,
+    LlvmObjectProvider,
+    _clang_oracle_fingerprint,
+    _darwin_major_minor,
+    _effective_llvm_target_triple_with_deployment,
+    canonicalize_llvm_target_directives,
+    llvm_artifact_request_cache_key,
+    llvm_ir_matches_object_profile,
+    llvm_object_pipeline_argv,
+    llvm_object_profile_attributes,
+    llvm_object_provider_failure,
+    llvm_target_data_layout
+} from "../../src/build/artifact_compile";
+import { _darwin_host_arch_from_evidence } from "../../src/build/target";
+import { ParallelProcessPipelineTask, _cr_run_bounded_process_pipelines } from "../../src/capsule_emit_parallel";
+import { index_of } from "../../src/string_utils";
+
+fn _provider(triple: string, format: string, fingerprint: string) -> LlvmObjectProvider {
+    return LlvmObjectProvider {
+        ok: true,
+        kind: "llvm-cli",
+        target_triple: triple,
+        host_triple: "x86_64-unknown-linux-gnu",
+        object_format: format,
+        fingerprint: fingerprint,
+        llvm_as_path: "/llvm/bin/llvm-as",
+        opt_path: "/llvm/bin/opt",
+        llc_path: "/llvm/bin/llc",
+        clang_path: "",
+        diagnostic: ""
+    };
+}
+
+fn _request(opt_flag: string) -> LlvmArtifactRequest {
+    return LlvmArtifactRequest {
+        ir_path: "module.ll",
+        object_path: "module.o",
+        opt_flag: opt_flag
+    };
+}
+
+test "llvm object provider: linux x86-64 O2 pipeline is exact" ![pure] {
+    let pipeline = llvm_object_pipeline_argv(_request("-O2"), _provider("x86_64-unknown-linux-gnu", "elf", "family-a"));
+    assert expect_eq_bool(pipeline.ok, true).ok;
+    assert expect_eq_str_array(pipeline.stages[0], ["/llvm/bin/llvm-as", "module.ll", "-o", "module.o.verified.bc"]).ok;
+    assert expect_eq_str_array(pipeline.stages[1], ["/llvm/bin/opt", "-passes=default<O2>", "-mtriple=x86_64-unknown-linux-gnu", "-mcpu=x86-64", "module.o.verified.bc", "-o", "module.o.optimized.bc"]).ok;
+    assert expect_eq_str_array(pipeline.stages[2], ["/llvm/bin/llc", "-O2", "-mtriple=x86_64-unknown-linux-gnu", "-mcpu=x86-64", "-filetype=obj", "-relocation-model=pic", "-code-model=small", "-function-sections", "-data-sections", "-frame-pointer=none", "-exception-model=default", "-fp-contract=on", "module.o.optimized.bc", "-o", "module.o"]).ok;
+}
+
+test "llvm object provider: linux profiles distinguish O0 and aarch64" ![pure] {
+    let x64 = llvm_object_pipeline_argv(_request("-O0"), _provider("x86_64-unknown-linux-gnu", "elf", "family-a"));
+    assert expect_eq_str(x64.stages[1][1], "-passes=default<O0>").ok;
+    assert expect_eq_str(x64.stages[2][9], "-frame-pointer=all").ok;
+    let arm = llvm_object_pipeline_argv(_request("-O2"), _provider("aarch64-unknown-linux-gnu", "elf", "family-a"));
+    assert expect_eq_str(arm.stages[1][3], "-mcpu=generic").ok;
+    assert expect_eq_str(arm.stages[1][4], "-mattr=+neon,+v8a").ok;
+    assert expect_eq_str(arm.stages[2][10], "-frame-pointer=non-leaf").ok;
+}
+
+test "llvm object provider: Darwin and Windows select native object profiles" ![pure] {
+    assert expect_eq_str(_darwin_major_minor("15.4.1"), "15.4").ok;
+    assert expect_eq_str(_darwin_major_minor("15.4"), "15.4").ok;
+    assert expect_eq_str(_darwin_major_minor("15.4\n"), "15.4").ok;
+    assert expect_eq_str(_darwin_major_minor("15"), "").ok;
+    assert expect_eq_str(_darwin_host_arch_from_evidence("1\n"), "aarch64").ok;
+    assert expect_eq_str(_darwin_host_arch_from_evidence("0\n"), "x86_64").ok;
+    assert expect_eq_str(_effective_llvm_target_triple_with_deployment("arm64-apple-darwin", "15.0"), "arm64-apple-macosx15.0.0").ok;
+    assert expect_eq_str(_effective_llvm_target_triple_with_deployment("arm64-apple-darwin", ""), "").ok;
+    assert expect_eq_bool(_clang_oracle_fingerprint("/clang", "content", "version", "arm64-apple-macosx15.0.0") != _clang_oracle_fingerprint("/clang", "content", "version", "arm64-apple-macosx14.0.0"), true).ok;
+    let darwin = llvm_object_pipeline_argv(_request("-O2"), _provider("arm64-apple-macosx15.0.0", "macho", "family-a"));
+    assert expect_eq_str(darwin.stages[1][2], "-mtriple=arm64-apple-macosx15.0.0").ok;
+    assert expect_eq_str(darwin.stages[1][3], "-mcpu=apple-m1").ok;
+    assert expect_eq_str(darwin.stages[2][9], "-frame-pointer=non-leaf").ok;
+    let windows = llvm_object_pipeline_argv(_request("-O2"), _provider("x86_64-pc-windows-msvc", "coff", "family-a"));
+    assert expect_eq_str(windows.stages[2][10], "-exception-model=wineh").ok;
+    assert expect_eq_str(windows.stages[2][12], "-incremental-linker-compatible").ok;
+    let mingw = llvm_object_pipeline_argv(_request("-O2"), _provider("x86_64-w64-mingw32", "coff", "family-a"));
+    assert expect_eq_str(mingw.stages[2][12], "-emulated-tls").ok;
+}
+
+test "llvm object provider: cache identity covers family target format and optimization" ![pure] {
+    let base = "source-content";
+    let linux = _provider("x86_64-unknown-linux-gnu", "elf", "family-a");
+    let family_b = _provider("x86_64-unknown-linux-gnu", "elf", "family-b");
+    let windows = _provider("x86_64-pc-windows-msvc", "coff", "family-a");
+    let key = llvm_artifact_request_cache_key(base, _request("-O2"), linux);
+    assert expect_eq_bool(key != llvm_artifact_request_cache_key(base, _request("-O2"), family_b), true).ok;
+    assert expect_eq_bool(key != llvm_artifact_request_cache_key(base, _request("-O2"), windows), true).ok;
+    assert expect_eq_bool(key != llvm_artifact_request_cache_key(base, _request("-O0"), linux), true).ok;
+}
+
+test "llvm object provider: canonical IR profile includes optimization-dependent frame pointers" ![pure] {
+    let triple = "x86_64-unknown-linux-gnu";
+    let header = "target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"\n"
+        + "target triple = \""
+        + triple
+        + "\"\n";
+    let o0 = header + llvm_object_profile_attributes(triple, "-O0");
+    let o2 = header + llvm_object_profile_attributes(triple, "-O2");
+    assert expect_eq_bool(llvm_ir_matches_object_profile(o0, triple, "-O0"), true).ok;
+    assert expect_eq_bool(llvm_ir_matches_object_profile(o0, triple, "-O2"), false).ok;
+    assert expect_eq_bool(llvm_ir_matches_object_profile(o2, triple, "-O2"), true).ok;
+}
+
+test "llvm object provider: target directives are canonicalized ahead of entities" ![pure] {
+    let triple = "x86_64-pc-windows-msvc";
+    let ir = "source_filename = \"probe\"\n\ndefine i32 @probe() #0 {\n  ret i32 0\n}\n\ntarget triple = \""
+        + triple
+        + "\"\ntarget datalayout = \""
+        + llvm_target_data_layout(triple)
+        + "\"\n"
+        + llvm_object_profile_attributes(triple, "-O2");
+    let canonical = canonicalize_llvm_target_directives(ir, triple);
+    let expected_prefix = "source_filename = \"probe\"\ntarget datalayout = \""
+        + llvm_target_data_layout(triple)
+        + "\"\ntarget triple = \""
+        + triple
+        + "\"\n";
+    assert expect_eq_bool(index_of(canonical, expected_prefix) == 0, true).ok;
+    assert expect_eq_bool(index_of(canonical, "define i32 @probe()") > index_of(canonical, "target triple ="), true).ok;
+    assert expect_eq_str(canonicalize_llvm_target_directives(canonical, triple), canonical).ok;
+
+    let mut large_body = "@payload = private constant [4 x i8] c\"abc\\00\"\n";
+    let mut n: int = 0;
+    loop {
+        if n >= 14 { break; }
+        large_body = large_body + large_body;
+        n += 1;
+    }
+    let large_ir = "source_filename = \"large\"\n" + large_body
+        + "target datalayout = \""
+        + llvm_target_data_layout(triple)
+        + "\"\ntarget triple = \""
+        + triple
+        + "\"\n"
+        + llvm_object_profile_attributes(triple, "-O2");
+    let large_canonical = canonicalize_llvm_target_directives(large_ir, triple);
+    assert expect_eq_bool(index_of(large_canonical, large_body) > 0, true).ok;
+    assert expect_eq_bool(llvm_ir_matches_object_profile(large_canonical, triple, "-O2"), true).ok;
+
+    let wrong = "target datalayout = \"wrong\"\ntarget triple = \"x86_64-unknown-linux-gnu\"\n"
+        + llvm_object_profile_attributes(triple, "-O2");
+    let rejected = canonicalize_llvm_target_directives(wrong, triple);
+    assert expect_eq_bool(index_of(rejected, "target datalayout = \"wrong\"") >= 0, true).ok;
+    assert expect_eq_bool(index_of(rejected, "target triple = \"x86_64-unknown-linux-gnu\"") >= 0, true).ok;
+    assert expect_eq_bool(llvm_ir_matches_object_profile(rejected, triple, "-O2"), false).ok;
+}
+
+test "llvm object provider: clang exists only as explicit oracle stage" ![pure] {
+    let mut oracle = _provider("x86_64-pc-windows-msvc", "oracle", "oracle-a");
+    oracle.kind = "clang-oracle";
+    oracle.clang_path = "C:/oracle/clang.exe";
+    let pipeline = llvm_object_pipeline_argv(_request("-O2"), oracle);
+    assert expect_eq_str(pipeline.stage_names[0], "clang-oracle").ok;
+    assert expect_eq_str(pipeline.stages[0][0], "C:/oracle/clang.exe").ok;
+    assert expect_eq_str(pipeline.stages[0][3], "x86_64-pc-windows-msvc").ok;
+}
+
+test "llvm object provider: failure names stage tool target source and status" ![pure] {
+    let provider = _provider("aarch64-unknown-linux-gnu", "elf", "family-a");
+    let pipeline = llvm_object_pipeline_argv(_request("-O2"), provider);
+    let diagnostic = llvm_object_provider_failure(provider, pipeline, 1, "module.ll", 17);
+    assert expect_eq_bool(index_of(diagnostic, "stage opt") >= 0, true).ok;
+    assert expect_eq_bool(index_of(diagnostic, "tool=/llvm/bin/opt") >= 0, true).ok;
+    assert expect_eq_bool(index_of(diagnostic, "target=aarch64-unknown-linux-gnu") >= 0, true).ok;
+    assert expect_eq_bool(index_of(diagnostic, "source=module.ll") >= 0, true).ok;
+    assert expect_eq_bool(index_of(diagnostic, "exit status=17") >= 0, true).ok;
+    assert expect_eq_bool(index_of(diagnostic, "Sailfin compiler failure") >= 0, true).ok;
+}
+
+test "llvm object provider: serial and parallel pipelines preserve ordered results" ![io] {
+    let sfn = sfn_bin_abs_path();
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let source = dir + "/marker_source.sfn";
+        let serial_marker = dir + "/serial-skipped.ll";
+        let parallel_marker = dir + "/parallel-skipped.ll";
+        fs.writeFile(source, "fn marker() -> int { return 1; }\n");
+        let serial_tasks: ParallelProcessPipelineTask[] = [ParallelProcessPipelineTask {
+            stages: [[sfn, "--version"], [sfn, "--version"]]
+        }, ParallelProcessPipelineTask {
+            stages: [[sfn, "not-a-command"], [sfn, "emit", "-o", serial_marker, "llvm", source]]
+        }, ParallelProcessPipelineTask { stages: [[sfn, "--version"]] }];
+        let parallel_tasks: ParallelProcessPipelineTask[] = [ParallelProcessPipelineTask {
+            stages: [[sfn, "--version"], [sfn, "--version"]]
+        }, ParallelProcessPipelineTask {
+            stages: [[sfn, "not-a-command"], [sfn, "emit", "-o", parallel_marker, "llvm", source]]
+        }, ParallelProcessPipelineTask { stages: [[sfn, "--version"]] }];
+        let serial = _cr_run_bounded_process_pipelines(serial_tasks, 1);
+        let parallel = _cr_run_bounded_process_pipelines(parallel_tasks, 2);
+        assert expect_eq_str_array([int_to_string(serial.exit_codes[0]), int_to_string(serial.exit_codes[2])], ["0", "0"]).ok;
+        assert expect_eq_bool(serial.exit_codes[1] != 0, true).ok;
+        assert expect_eq_str_array([int_to_string(parallel.exit_codes[0]), int_to_string(parallel.exit_codes[2])], ["0", "0"]).ok;
+        assert expect_eq_bool(parallel.exit_codes[1] != 0, true).ok;
+        assert expect_eq_str_array([int_to_string(serial.failed_stages[0]), int_to_string(serial.failed_stages[1]), int_to_string(serial.failed_stages[2])], ["-1", "0", "-1"]).ok;
+        assert expect_eq_str_array([int_to_string(parallel.failed_stages[0]), int_to_string(parallel.failed_stages[1]), int_to_string(parallel.failed_stages[2])], ["-1", "0", "-1"]).ok;
+        assert expect_eq_bool(fs.exists(serial_marker), false).ok;
+        assert expect_eq_bool(fs.exists(parallel_marker), false).ok;
+        return 0;
+    });
+    assert outcome == 0;
+}

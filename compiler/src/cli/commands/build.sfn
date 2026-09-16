@@ -603,7 +603,7 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
         return 1;
     }
 
-    // Library builds stop after `clang -c` on the main .ll — no link,
+    // Library builds stop after the LLVM object provider on the main .ll — no link,
     // no main symbol required. Capsule deps remain as `.ll` files
     // under their canonical per-capsule `ir/` trees (compiled in
     // `prepare_project_capsules` but not lowered to `.o` here). Downstream consumers that need
@@ -614,12 +614,12 @@ fn _run_single_build(capsule_path: string, input_path_arg: string, out_path_arg:
         let rc_obj = backend.assemble(ll_path, out_path, "-O2");
         if rc_obj != 0 {
             if !json_flag {
-                print.err(format_backend_failure_banner(binary_dir, "clang -c", ll_path, rc_obj));
+                print.err(format_backend_failure_banner(binary_dir, "LLVM object provider", ll_path, rc_obj));
             }
             return rc_obj;
         }
         if json_flag {
-            // Library builds stop after `clang -c` — no runtime
+            // Library builds stop after object emission — no runtime
             // link, so there's no runtime object-cache activity to
             // fold; `capsule_result.stats` is the full total.
             _emit_build_report(input_path, out_path, "library", 0, capsule_result, cache_config, capsule_result.stats);

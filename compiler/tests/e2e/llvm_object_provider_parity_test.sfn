@@ -1,0 +1,185 @@
+// Differential migration-oracle acceptance for SFN-952. The fixture combines
+// numerical code, native TLS, and a sequentially-consistent atomic.
+// COMDAT has dedicated format-specific acceptance coverage; Mach-O rejects it.
+// Exception and concurrency behavior remain covered by their ordinary e2e
+// suites, which now build through the same default object provider.
+import {
+    clean_runner_env_without,
+    sfn_bin_path,
+    skip,
+    with_tmp_dir
+} from "sfn/test";
+
+import {
+    LlvmArtifactRequest,
+    LlvmObjectProvider,
+    llvm_object_pipeline_argv,
+    resolve_llvm_object_provider_for_target
+} from "../../src/build/artifact_compile";
+import { build_target_os, build_target_triple, target_exe_name } from "../../src/build/target";
+
+fn _run_pipeline(stages: string[][]) -> int ![io] {
+    let mut i: int = 0;
+    loop {
+        if i >= stages.length { break; }
+        let rc = process.run(stages[i]);
+        if rc != 0 { return rc; }
+        i += 1;
+    }
+    return 0;
+}
+
+fn _parity_ir(triple: string) -> string {
+    return "target triple = \"" + triple + "\"\n\n"
+        + "@tls_value = thread_local global i64 1\n\n"
+        + "define i64 @probe() {\nentry:\n"
+        + "  %old = atomicrmw add ptr @tls_value, i64 2 seq_cst\n"
+        + "  %sum = add i64 %old, 40\n  ret i64 %sum\n}\n\n"
+        + "define i32 @main() {\nentry:\n  %value = call i64 @probe()\n"
+        + "  %exit = trunc i64 %value to i32\n  ret i32 %exit\n}\n";
+}
+
+fn _behavior_source(as_test: boolean) -> string {
+    let body = "let g_ch = channel(2);\n" + "let mut g_sum: int = 0;\n"
+        + "fn produce() ![io] {\n"
+        + "    let mut i: int = 1;\n"
+        + "    loop { if i > 5 { break; } g_ch.send(i); i = i + 1; }\n"
+        + "}\n"
+        + "fn consume() ![io] {\n"
+        + "    let mut n: int = 0;\n"
+        + "    loop { if n >= 5 { break; } g_sum = g_sum + g_ch.receive(); n = n + 1; }\n"
+        + "}\n"
+        + "fn recovered() -> int {\n"
+        + "    try { throw \"provider-parity\"; } catch (message) {\n"
+        + "        if message == \"provider-parity\" { return 40; }\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n";
+    let exercise = "    let _h = parallel [\n"
+        + "        fn() -> int ![io] { produce(); return 0; },\n"
+        + "        fn() -> int ![io] { consume(); return 0; },\n"
+        + "    ];\n"
+        + "    assert g_sum == 15;\n"
+        + "    assert recovered() == 40;\n";
+    if as_test {
+        return body
+            + "test \"provider exception and concurrency parity\" ![io] {\n"
+            + exercise
+            + "}\n";
+    }
+    return body + "fn main() -> void ![io] {\n" + exercise
+        + "    print.info(\"provider parity ok\");\n}\n";
+}
+
+fn _configured_oracle() -> string ![io] {
+    let mut path = env.get("SAILFIN_CLANG_ORACLE");
+    if path.length == 0 { path = env.get("CLANG"); }
+    if path.length == 0 { path = "clang"; }
+    return path;
+}
+
+fn _provider_child_env(scratch: string, kind: string) -> string[] ![io] {
+    let mut child = clean_runner_env_without(scratch, ["SAILFIN_OBJECT_PROVIDER", "SAILFIN_CLANG_ORACLE"]);
+    child.push("SAILFIN_OBJECT_PROVIDER=" + kind);
+    if kind == "clang-oracle" {
+        child.push("SAILFIN_CLANG_ORACLE=" + _configured_oracle());
+    }
+    return child;
+}
+
+fn _run_provider(argv: string[], scratch: string, kind: string) -> int ![io] {
+    let rc = process.run_capture(argv, _provider_child_env(scratch, kind));
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if rc != 0 { print.err(kind + " parity child failed:\n" + out + err); }
+    return rc;
+}
+
+test "llvm object provider parity: O0 and O2 match the explicit clang oracle" ![io] {
+    let triple = build_target_triple();
+    let llvm = resolve_llvm_object_provider_for_target(triple);
+    let oracle_path = _configured_oracle();
+    let oracle_probe = process.run_capture([oracle_path, "--version"], process.environ());
+    let _oracle_out = process.capture_take_stdout();
+    let _oracle_err = process.capture_take_stderr();
+    if !llvm.ok || llvm.kind != "llvm-cli" || oracle_probe != 0 {
+        skip("LLVM 18 family and a clang oracle are required for differential object parity");
+        return;
+    }
+    let oracle = LlvmObjectProvider {
+        ok: true,
+        kind: "clang-oracle",
+        target_triple: llvm.target_triple,
+        host_triple: llvm.host_triple,
+        object_format: "oracle",
+        fingerprint: "test-oracle",
+        llvm_as_path: "",
+        opt_path: "",
+        llc_path: "",
+        clang_path: oracle_path,
+        diagnostic: ""
+    };
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let ir = dir + "/parity.ll";
+        fs.writeFile(ir, _parity_ir(llvm.target_triple));
+        let levels: string[] = ["-O0", "-O2"];
+        let mut i: int = 0;
+        loop {
+            if i >= levels.length { break; }
+            let llvm_obj = dir + "/llvm-" + levels[i] + ".o";
+            let oracle_obj = dir + "/oracle-" + levels[i] + ".o";
+            let llvm_pipeline = llvm_object_pipeline_argv(LlvmArtifactRequest {
+                ir_path: ir, object_path: llvm_obj, opt_flag: levels[i]
+            }, llvm);
+            let oracle_pipeline = llvm_object_pipeline_argv(LlvmArtifactRequest {
+                ir_path: ir, object_path: oracle_obj, opt_flag: levels[i]
+            }, oracle);
+            assert _run_pipeline(llvm_pipeline.stages) == 0;
+            assert _run_pipeline(oracle_pipeline.stages) == 0;
+            let llvm_exe = target_exe_name(dir + "/llvm-" + levels[i], build_target_os());
+            let oracle_exe = target_exe_name(dir + "/oracle-" + levels[i], build_target_os());
+            assert process.run([_configured_oracle(), llvm_obj, "-o", llvm_exe]) == 0;
+            assert process.run([_configured_oracle(), oracle_obj, "-o", oracle_exe]) == 0;
+            let llvm_exit = process.run([llvm_exe]);
+            let oracle_exit = process.run([oracle_exe]);
+            assert llvm_exit == 41;
+            assert llvm_exit == oracle_exit;
+            i += 1;
+        }
+        return 0;
+    });
+    assert outcome == 0;
+}
+
+test "llvm object provider parity: exceptions and concurrent channels match at O0 and O2" ![io] {
+    let triple = build_target_triple();
+    let llvm = resolve_llvm_object_provider_for_target(triple);
+    let oracle_path = _configured_oracle();
+    let oracle_probe = process.run_capture([oracle_path, "--version"], process.environ());
+    let _oracle_out = process.capture_take_stdout();
+    let _oracle_err = process.capture_take_stderr();
+    if !llvm.ok || llvm.kind != "llvm-cli" || oracle_probe != 0 {
+        skip("LLVM 18 family and a clang oracle are required for behavioral parity");
+        return;
+    }
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let test_src = dir + "/parity_o0_test.sfn";
+        let app_src = dir + "/parity_o2.sfn";
+        fs.writeFile(test_src, _behavior_source(true));
+        fs.writeFile(app_src, _behavior_source(false));
+        let sfn = sfn_bin_path();
+        let llvm_o0 = _run_provider([sfn, "test", test_src], dir + "/llvm-o0", "llvm-cli");
+        let oracle_o0 = _run_provider([sfn, "test", test_src], dir
+            + "/oracle-o0", "clang-oracle");
+        let llvm_o2 = _run_provider([sfn, "run", "--no-cache", app_src], dir
+            + "/llvm-o2", "llvm-cli");
+        let oracle_o2 = _run_provider([sfn, "run", "--no-cache", app_src], dir
+            + "/oracle-o2", "clang-oracle");
+        assert llvm_o0 == 0;
+        assert llvm_o0 == oracle_o0;
+        assert llvm_o2 == 0;
+        assert llvm_o2 == oracle_o2;
+        return 0;
+    });
+    assert outcome == 0;
+}

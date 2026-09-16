@@ -1,0 +1,46 @@
+// Cross-target object acceptance for the SFN-952 llvm-cli provider. This
+// exercises the real resolved LLVM family and checks the emitted COFF header;
+// hosts without a complete LLVM 18 Windows-capable family skip explicitly.
+import { free_bytes, read_bytes } from "sfn/fs";
+import { skip, with_tmp_dir } from "sfn/test";
+
+import {
+    LlvmArtifactRequest,
+    llvm_object_pipeline_argv,
+    resolve_llvm_object_provider_for_target
+} from "../../src/build/artifact_compile";
+
+test "cross windows: llvm-cli emits x86-64 COFF without clang" ![io] {
+    let provider = resolve_llvm_object_provider_for_target("x86_64-pc-windows-msvc");
+    if !provider.ok {
+        skip("complete LLVM 18 Windows object family is unavailable on this host");
+        return;
+    }
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let ir = dir + "/probe.ll";
+        let obj = dir + "/probe.obj";
+        fs.writeFile(ir, "target triple = \"x86_64-pc-windows-msvc\"\n\ndefine i32 @probe() {\nentry:\n  ret i32 7\n}\n");
+        let pipeline = llvm_object_pipeline_argv(LlvmArtifactRequest {
+            ir_path: ir, object_path: obj, opt_flag: "-O2"
+        }, provider);
+        assert pipeline.ok;
+        assert pipeline.stages.length == 3;
+        let mut stage: int = 0;
+        loop {
+            if stage >= pipeline.stages.length { break; }
+            assert pipeline.stages[stage][0] != "clang";
+            assert process.run(pipeline.stages[stage]) == 0;
+            stage += 1;
+        }
+        assert fs.exists(obj);
+        let bytes = read_bytes(obj);
+        assert bytes.status == 0;
+        assert bytes.length > 20;
+        // IMAGE_FILE_MACHINE_AMD64 (0x8664), little endian.
+        assert load_byte(bytes.addr) == 100;
+        assert load_byte(bytes.addr + 1) == 134;
+        free_bytes(bytes);
+        return 0;
+    });
+    assert outcome == 0;
+}

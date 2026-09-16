@@ -32,7 +32,7 @@ in citations across the repo.
 | Axis | Goal | State |
 |---|---|---|
 | **1 — C-source elimination** | No `.c` in the runtime; every line we author is Sailfin | **Done.** `runtime/native/` deleted (SFEP-0025) |
-| **2 — Toolchain independence** | No borrowed toolchain in the codegen and link path | **Partial.** Linux has a direct-link path with fallback; all supported targets still require clang for object emission (§2) |
+| **2 — Toolchain independence** | No borrowed toolchain in the codegen and link path | **Partial.** LLVM now owns first-party object emission through a coherent CLI family; final linking is not yet clang-independent on every supported target (§2) |
 | **3 — libc independence** | Reach the kernel directly, not through libc | **Primitive shipped, consumer unwritten** (§2) |
 
 Axis 1 finished on its own terms and deliberately kept libc: SFEP-0025's contract
@@ -68,8 +68,8 @@ each role." Measured against the tree on 2026-08-05:
 |---|---|---|
 | Lex / parse / typecheck / effect-check | **Sailfin** | `compiler/src/` |
 | Mid-level IR | **Split.** `.sfn-asm` is the live artifact; typed SSA exists but is off the build path | `native_ir.sfn` (342); `typed_ssa.sfn` (1160) + `_verify` (993) + `_render` (366) + `_produce` (284) |
-| Instruction selection, register allocation, optimization | **LLVM through clang's driver** | `compiler/capsules/codegen-llvm/src/` — 137 files, 62,830 lines of textual-IR printer |
-| Assemble (`.ll` → `.o`) | **clang, 100%** | `compiler/src/build/clang_argv.sfn` |
+| Instruction selection, register allocation, optimization | **LLVM CLI selected by Sailfin** | `compiler/src/build/artifact_compile.sfn` |
+| Assemble (`.ll` → `.o`) | **LLVM MC through `llc -filetype=obj`** | `compiler/src/build/artifact_compile.sfn` |
 | Link | **Sailfin direct route with clang fallback on Linux x86-64/aarch64; clang elsewhere** | `compiler/src/build/direct_link.sfn` (339) |
 | Raw syscall emission | **Sailfin primitive, no consumer** | `compiler/capsules/codegen-llvm/src/syscall.sfn` (156) |
 | Platform access | **libc/POSIX via `extern fn`** | 528 `extern fn` under `runtime/` |
@@ -86,14 +86,13 @@ present on disk; any miss falls back to clang with a traced reason, never
 silently. This means many Linux invocations link without clang, but the fallback
 prevents the required-owned claim until SFEP-0066's fail-closed gate lands.
 
-**LLVM validation now invokes the coherent family's selected `llvm-as`; the
-remaining first-party clang roles are object emission and non-Linux link
-driving.** Every `.ll` → `.o` still goes through `clang -c`.
-SFEP-0066 replaces that driver route with a coherent
-`llvm-as` → `opt` → `llc -filetype=obj` family: LLVM keeps optimization,
+**LLVM validation and object emission now invoke the coherent family's selected
+`llvm-as` → `opt` → `llc -filetype=obj` pipeline; the remaining first-party
+clang roles are final-link fallbacks/drivers.** LLVM keeps optimization,
 instruction selection, register allocation, MC encoding, and object writing,
 while Sailfin owns tool/target selection, cache identity, publication, and
-diagnostics. This removes clang, not LLVM, and is separate from the
+stage-aware diagnostics. The legacy `clang -c` route is available only as the
+explicit `clang-oracle` migration provider. This removes clang, not LLVM, and is separate from the
 seal-sufficient `sfn/codegen-native` provider.
 
 The destination native ownership matrix is explicit and fail-closed:
@@ -232,9 +231,10 @@ sketch, not a schedule; Linear owns sequencing.
   including the normative contract (§10 there). Worth doing even if a native
   backend never ships: it de-strings the LLVM path and gives the effect and
   ownership analyses a real substrate.
-- **Remove clang from LLVM object emission** — route every first-party LLVM
-  input through the coherent `llvm-as`/`opt`/`llc -filetype=obj` provider on
-  all supported targets. LLVM remains the owner of MC/object writing.
+- **Remove clang from LLVM object emission — landed.** Every first-party LLVM
+  input uses the coherent `llvm-as`/`opt`/`llc -filetype=obj` provider on the
+  supported target matrix. LLVM remains the owner of MC/object writing; the
+  explicit clang oracle remains only for migration parity evidence.
 - **Own the syscall layer** — write `runtime/sfn/platform/syscall_linux.sfn`
   against the shipped primitive. SFEP-0060 owns the design. Independent of the
   items above.

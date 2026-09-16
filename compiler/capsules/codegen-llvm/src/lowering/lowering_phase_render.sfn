@@ -8,7 +8,12 @@
 // Extracted from lowering_core/mod.sfn to reduce per-file memory footprint.
 import { NativeFunction } from "sfn/ir";
 
-import { target_uses_comdat, trace_log } from "../lowering_debug_state";
+import {
+    target_data_layout_for_lowering,
+    target_triple_for_lowering,
+    target_uses_comdat,
+    trace_log
+} from "../lowering_debug_state";
 import {
     extract_declared_symbol_names,
     render_enum_type_definitions,
@@ -39,6 +44,9 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     let mut lines: string[] = [];
     lines.push("source_filename = \"" + module_source_filename(module_name)
         + "\"");
+    lines.push("target datalayout = \"" + target_data_layout_for_lowering()
+        + "\"");
+    lines.push("target triple = \"" + target_triple_for_lowering() + "\"");
     lines.push("");
 
     // Trait metadata comments

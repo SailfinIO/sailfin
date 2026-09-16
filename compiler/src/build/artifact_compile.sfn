@@ -32,28 +32,43 @@
 // foreign-C object cannot alias even when their source basenames and
 // contents coincide.
 //
-// The LLVM path preserves the legacy clang argv. Foreign C now uses the
-// executable selected by SAILFIN_FOREIGN_C_COMPILER and does not inherit an
-// LLVM-only warning flag.
-// The dedicated `llvm-as`/`opt`/`llc` provider is resolved but unwired
-// (`./llvm_toolchain_resolver`, SFN-948) and is wired by SFN-952; the full
-// LLVM-family fingerprint SFEP-0066 §3.8 requires becomes part of these
-// namespaces then. Today a namespace records only which provider owns the
-// object, which is what the non-aliasing contract needs.
+// The default LLVM path is the coherent `llvm-as`/`opt`/`llc` family resolved
+// by `./llvm_toolchain_resolver` (SFN-948/SFN-952). The legacy clang argv is
+// reachable only through the explicit migration oracle. Foreign C uses the
+// executable selected by SAILFIN_FOREIGN_C_COMPILER and remains isolated.
 //
 // Like `./clang_argv`, this module must NOT import `../backend` — see that
 // file's header for the seed vtable-lowering hazard that constrains every
 // build-driver leaf.
-import { ends_with, int_to_string } from "sfn/strings";
+import {
+    ends_with,
+    int_to_string,
+    starts_with,
+    trim
+} from "sfn/strings";
 
+import { _get_env_cmd } from "../build_flags";
+import { index_of, substring } from "../string_utils";
+import { _free_file_bytes, _read_file_bytes, _sha256_of_file } from "./fs";
 import { sha256_hex_of_string } from "./hash";
-import { build_target_triple, host_target_triple, target_clang_flags } from "./target";
+import {
+    LlvmFamily,
+    LlvmTool,
+    _resolve_on_path,
+    resolve_llvm_toolchain
+} from "./llvm_toolchain_resolver";
+import {
+    build_host_os,
+    build_target_triple,
+    host_target_triple,
+    native_host_os,
+    target_clang_flags
+} from "./target";
 
 // Cache-namespace tags. Folded into every object cache key so the two
-// providers occupy disjoint key spaces. The `-v1` suffix is the schema
-// version: SFN-952 bumps it when the LLVM family fingerprint joins the
-// namespace.
-let _LLVM_ARTIFACT_NAMESPACE: string = "artifact-kind:llvm-v1";
+// providers occupy disjoint key spaces. LLVM v2 includes provider, complete
+// family/profile identity, target format, and optimization intent.
+let _LLVM_ARTIFACT_NAMESPACE: string = "artifact-kind:llvm-v2";
 let _FOREIGN_C_NAMESPACE: string = "artifact-kind:foreign-c-v1";
 
 // An LLVM text artifact lowered to a native object. Deliberately has no
@@ -62,6 +77,30 @@ struct LlvmArtifactRequest {
     ir_path: string;
     object_path: string;
     opt_flag: string;
+}
+
+struct LlvmObjectProvider {
+    ok: boolean;
+    kind: string;  // "llvm-cli" | "clang-oracle"
+    target_triple: string;
+    host_triple: string;
+    object_format: string;
+    fingerprint: string;
+    llvm_as_path: string;
+    opt_path: string;
+    llc_path: string;
+    clang_path: string;
+    diagnostic: string;
+}
+
+struct LlvmObjectPipeline {
+    ok: boolean;
+    stages: string[][];
+    stage_names: string[];
+    verified_path: string;
+    optimized_path: string;
+    profiled_path: string;
+    diagnostic: string;
 }
 
 // A foreign C source compiled by the configured external C compiler
@@ -88,8 +127,8 @@ fn classify_object_source(path: string) -> string {
 // `target_flags` carries the `-target <triple>` pair for a cross/Windows
 // target, or [] for the host default; it is spliced right after
 // `opt_flag`. LLVM requests never carry C include flags.
-fn _clang_object_argv(src: string, out: string, opt_flag: string, include_flags: string[], target_flags: string[]) -> string[] {
-    let mut args: string[] = ["clang", opt_flag];
+fn _clang_object_argv_with_driver(driver: string, src: string, out: string, opt_flag: string, include_flags: string[], target_flags: string[]) -> string[] {
+    let mut args: string[] = [driver, opt_flag];
     let mut ti: int = 0;
     loop {
         if ti >= target_flags.length { break; }
@@ -112,12 +151,570 @@ fn _clang_object_argv(src: string, out: string, opt_flag: string, include_flags:
     return args;
 }
 
-// Pure LLVM-artifact argv over explicit target flags. Returns [] when the
-// request's input is not an LLVM text artifact.
-fn llvm_artifact_argv_with_target(request: LlvmArtifactRequest, target_flags: string[]) -> string[] {
-    if classify_object_source(request.ir_path) != "llvm" { return []; }
-    let no_includes: string[] = [];
-    return _clang_object_argv(request.ir_path, request.object_path, request.opt_flag, no_includes, target_flags);
+fn _llvm_tool_path(family: LlvmFamily, role: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= family.tools.length { break; }
+        if family.tools[i].role == role { return family.tools[i].path; }
+        i += 1;
+    }
+    return "";
+}
+
+fn _clang_oracle_fingerprint(path: string, content: string, version: string, effective_triple: string) -> string {
+    return sha256_hex_of_string("clang-oracle-v1\n" + path + "\n" + content
+        + "\n"
+        + version
+        + "\n"
+        + effective_triple);
+}
+
+fn _failed_llvm_provider(kind: string, triple: string, message: string) -> LlvmObjectProvider {
+    return LlvmObjectProvider {
+        ok: false,
+        kind: kind,
+        target_triple: triple,
+        host_triple: "",
+        object_format: "",
+        fingerprint: "",
+        llvm_as_path: "",
+        opt_path: "",
+        llc_path: "",
+        clang_path: "",
+        diagnostic: message
+    };
+}
+
+fn _resolve_clang_oracle(triple: string) -> LlvmObjectProvider ![io] {
+    let configured = _get_env_cmd("SAILFIN_CLANG_ORACLE");
+    if configured.length == 0 {
+        return _failed_llvm_provider("clang-oracle", triple, "sfn build: SAILFIN_OBJECT_PROVIDER=clang-oracle requires SAILFIN_CLANG_ORACLE to name the migration oracle executable");
+    }
+    let mut path = configured;
+    if !fs.exists(path) {
+        path = _resolve_on_path(configured, build_host_os());
+        if path.length == 0 && build_host_os() == "Windows" {
+            path = _resolve_on_path(configured + ".exe", build_host_os());
+        }
+        if path.length == 0 {
+            return _failed_llvm_provider("clang-oracle", triple, "sfn build: SAILFIN_CLANG_ORACLE could not be resolved as a path or executable name: "
+                + configured);
+        }
+    }
+    let rc = process.run_capture([path, "--version"], process.environ());
+    let version = process.capture_take_stdout();
+    let version_err = process.capture_take_stderr();
+    if rc != 0 {
+        return _failed_llvm_provider("clang-oracle", triple, "sfn build: clang-oracle version probe failed for "
+            + path
+            + " with exit status "
+            + int_to_string(rc)
+            + ": "
+            + version_err);
+    }
+    let content = _sha256_of_file(path);
+    if content.length == 0 {
+        return _failed_llvm_provider("clang-oracle", triple, "sfn build: could not fingerprint SAILFIN_CLANG_ORACLE "
+            + path);
+    }
+    return LlvmObjectProvider {
+        ok: true,
+        kind: "clang-oracle",
+        target_triple: triple,
+        host_triple: host_target_triple(),
+        object_format: "oracle",
+        fingerprint: _clang_oracle_fingerprint(path, content, version, triple),
+        llvm_as_path: "",
+        opt_path: "",
+        llc_path: "",
+        clang_path: path,
+        diagnostic: ""
+    };
+}
+
+fn _darwin_major_minor(version: string) -> string {
+    let normalized = trim(version);
+    let first = index_of(normalized, ".");
+    if first < 0 { return ""; }
+    let tail = substring(normalized, first + 1, normalized.length);
+    let second = index_of(tail, ".");
+    if second < 0 { return normalized; }
+    return substring(normalized, 0, first + 1 + second);
+}
+
+fn darwin_deployment_target() -> string ![io] {
+    let explicit = _get_env_cmd("MACOSX_DEPLOYMENT_TARGET");
+    if explicit.length > 0 { return _darwin_major_minor(explicit); }
+    // A simulated Windows host still runs on Darwin and needs its native SDK version.
+    if native_host_os() != "Darwin" { return ""; }
+    let rc = process.run_capture(["sw_vers", "-productVersion"], process.environ());
+    let version = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    if rc != 0 { return ""; }
+    return _darwin_major_minor(version);
+}
+
+fn _effective_llvm_target_triple_with_deployment(triple: string, deployment: string) -> string {
+    if triple != "arm64-apple-darwin" { return triple; }
+    if deployment.length == 0 { return ""; }
+    return "arm64-apple-macosx" + deployment + ".0";
+}
+
+fn effective_llvm_target_triple(triple: string) -> string ![io] {
+    return _effective_llvm_target_triple_with_deployment(triple, darwin_deployment_target());
+}
+
+fn llvm_target_data_layout(triple: string) -> string {
+    if triple == "x86_64-unknown-linux-gnu" {
+        return "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128";
+    }
+    if triple == "aarch64-unknown-linux-gnu" {
+        return "e-m:e-p270:32:32-p271:32:32-p272:64:64-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128-Fn32";
+    }
+    if index_of(triple, "arm64-apple-macosx") == 0 {
+        return "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32";
+    }
+    if triple == "x86_64-pc-windows-msvc" {
+        return "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128";
+    }
+    if triple == "x86_64-w64-mingw32" {
+        return "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128";
+    }
+    return "";
+}
+
+fn resolve_llvm_object_provider_for_target(triple: string) -> LlvmObjectProvider ![io] {
+    let logical_triple = triple;
+    let selected = _get_env_cmd("SAILFIN_OBJECT_PROVIDER");
+    if selected == "clang-oracle" {
+        let oracle_triple = effective_llvm_target_triple(logical_triple);
+        if oracle_triple.length == 0 {
+            return _failed_llvm_provider("clang-oracle", logical_triple, "sfn build: target arm64-apple-darwin requires MACOSX_DEPLOYMENT_TARGET for a cross build or a readable native Darwin deployment version");
+        }
+        return _resolve_clang_oracle(oracle_triple);
+    }
+    if selected.length > 0 && selected != "llvm-cli" {
+        return _failed_llvm_provider(selected, logical_triple, "sfn build: invalid SAILFIN_OBJECT_PROVIDER '"
+            + selected
+            + "'; expected llvm-cli or clang-oracle");
+    }
+    let family = resolve_llvm_toolchain(logical_triple);
+    if !family.ok {
+        let mut message = "sfn build: could not resolve the llvm-cli object provider for target "
+            + logical_triple;
+        if family.diagnostic != null { message = family.diagnostic.message; }
+        return _failed_llvm_provider("llvm-cli", logical_triple, message);
+    }
+    let effective_triple = effective_llvm_target_triple(logical_triple);
+    if effective_triple.length == 0 {
+        return _failed_llvm_provider("llvm-cli", logical_triple, "sfn build: target arm64-apple-darwin requires MACOSX_DEPLOYMENT_TARGET for a cross build or a readable native Darwin deployment version");
+    }
+    let llvm_as_path = _llvm_tool_path(family, "llvm-as");
+    let opt_path = _llvm_tool_path(family, "opt");
+    let llc_path = _llvm_tool_path(family, "llc");
+    let llvm_as_digest = _sha256_of_file(llvm_as_path);
+    let opt_digest = _sha256_of_file(opt_path);
+    let llc_digest = _sha256_of_file(llc_path);
+    if llvm_as_digest.length == 0 || opt_digest.length == 0 || llc_digest.length == 0 {
+        return _failed_llvm_provider("llvm-cli", logical_triple, "sfn build: could not fingerprint every executable in the resolved llvm-cli object provider for target "
+            + logical_triple);
+    }
+    let profile_identity = "llvm-object-profile-v1\n" + effective_triple + "\n"
+        + family.object_format
+        + "\n"
+        + llvm_profile_cpu(logical_triple)
+        + "\n"
+        + llvm_profile_features(logical_triple)
+        + "\n"
+        + llvm_as_digest
+        + "\n"
+        + opt_digest
+        + "\n"
+        + llc_digest;
+    let mut provider = LlvmObjectProvider {
+        ok: true,
+        kind: "llvm-cli",
+        target_triple: effective_triple,
+        host_triple: host_target_triple(),
+        object_format: family.object_format,
+        fingerprint: "",
+        llvm_as_path: llvm_as_path,
+        opt_path: opt_path,
+        llc_path: llc_path,
+        clang_path: "",
+        diagnostic: ""
+    };
+    let capability = _probe_llvm_object_capability(provider);
+    if index_of(capability, "ok:") != 0 {
+        return _failed_llvm_provider("llvm-cli", logical_triple, capability);
+    }
+    provider.fingerprint = sha256_hex_of_string(family.fingerprint + "\n"
+        + profile_identity
+        + "\n"
+        + capability);
+    return provider;
+}
+
+fn resolve_llvm_object_provider() -> LlvmObjectProvider ![io] {
+    return resolve_llvm_object_provider_for_target(build_target_triple());
+}
+
+fn llvm_profile_cpu(triple: string) -> string {
+    if triple == "aarch64-unknown-linux-gnu" { return "generic"; }
+    if triple == "arm64-apple-darwin" || index_of(triple, "arm64-apple-macosx") == 0 {
+        return "apple-m1";
+    }
+    return "x86-64";
+}
+
+fn llvm_profile_features(triple: string) -> string {
+    if triple == "aarch64-unknown-linux-gnu" { return "+neon,+v8a"; }
+    return "";
+}
+
+fn llvm_profile_frame_pointer(triple: string, opt_flag: string) -> string {
+    if triple == "aarch64-unknown-linux-gnu" || triple == "arm64-apple-darwin"
+        || index_of(triple, "arm64-apple-macosx") == 0 { return "non-leaf"; }
+    if triple == "x86_64-unknown-linux-gnu" && opt_flag == "-O0" {
+        return "all";
+    }
+    return "none";
+}
+
+fn _llvm_profile_exception_model(triple: string) -> string {
+    if triple == "x86_64-pc-windows-msvc" { return "wineh"; }
+    return "default";
+}
+
+fn _llvm_opt_level(opt_flag: string) -> string {
+    if opt_flag == "-O0" { return "O0"; }
+    if opt_flag == "-O2" { return "O2"; }
+    return "";
+}
+
+fn llvm_object_pipeline_argv(request: LlvmArtifactRequest, provider: LlvmObjectProvider) -> LlvmObjectPipeline {
+    if classify_object_source(request.ir_path) != "llvm" {
+        return LlvmObjectPipeline {
+            ok: false,
+            stages: [],
+            stage_names: [],
+            verified_path: "",
+            optimized_path: "",
+            profiled_path: "",
+            diagnostic: "LLVM object provider received a non-.ll artifact"
+        };
+    }
+    if !provider.ok {
+        return LlvmObjectPipeline {
+            ok: false,
+            stages: [],
+            stage_names: [],
+            verified_path: "",
+            optimized_path: "",
+            profiled_path: "",
+            diagnostic: provider.diagnostic
+        };
+    }
+    if provider.kind == "clang-oracle" {
+        let target_flags = target_clang_flags(provider.target_triple, provider.host_triple);
+        let argv = _clang_object_argv_with_driver(provider.clang_path, request.ir_path, request.object_path, request.opt_flag, [], target_flags);
+        return LlvmObjectPipeline {
+            ok: true,
+            stages: [argv],
+            stage_names: ["clang-oracle"],
+            verified_path: "",
+            optimized_path: "",
+            profiled_path: "",
+            diagnostic: ""
+        };
+    }
+    if request.opt_flag != "-O0" && request.opt_flag != "-O2" {
+        return LlvmObjectPipeline {
+            ok: false,
+            stages: [],
+            stage_names: [],
+            verified_path: "",
+            optimized_path: "",
+            profiled_path: "",
+            diagnostic: "unsupported Sailfin LLVM optimization level: "
+                + request.opt_flag
+        };
+    }
+    let verified = request.object_path + ".verified.bc";
+    let optimized = request.object_path + ".optimized.bc";
+    let cpu = llvm_profile_cpu(provider.target_triple);
+    let features = llvm_profile_features(provider.target_triple);
+    let mut opt_argv: string[] = [provider.opt_path, "-passes=default<"
+        + _llvm_opt_level(request.opt_flag)
+        + ">", "-mtriple="
+        + provider.target_triple, "-mcpu="
+        + cpu];
+    if features.length > 0 { opt_argv.push("-mattr=" + features); }
+    opt_argv.push(verified);
+    opt_argv.push("-o");
+    opt_argv.push(optimized);
+    let mut llc_argv: string[] = [provider.llc_path, request.opt_flag, "-mtriple="
+        + provider.target_triple, "-mcpu="
+        + cpu];
+    if features.length > 0 { llc_argv.push("-mattr=" + features); }
+    llc_argv.push("-filetype=obj");
+    llc_argv.push("-relocation-model=pic");
+    llc_argv.push("-code-model=small");
+    llc_argv.push("-function-sections");
+    llc_argv.push("-data-sections");
+    llc_argv.push("-frame-pointer=" + llvm_profile_frame_pointer(provider.target_triple, request.opt_flag));
+    llc_argv.push("-exception-model=" + _llvm_profile_exception_model(provider.target_triple));
+    llc_argv.push("-fp-contract=on");
+    if provider.target_triple == "x86_64-pc-windows-msvc" {
+        llc_argv.push("-incremental-linker-compatible");
+    }
+    if provider.target_triple == "x86_64-w64-mingw32" {
+        llc_argv.push("-emulated-tls");
+    }
+    llc_argv.push(optimized);
+    llc_argv.push("-o");
+    llc_argv.push(request.object_path);
+    return LlvmObjectPipeline {
+        ok: true,
+        stages: [[provider.llvm_as_path, request.ir_path, "-o", verified], opt_argv, llc_argv],
+        stage_names: ["llvm-as", "opt", "llc"],
+        verified_path: verified,
+        optimized_path: optimized,
+        profiled_path: "",
+        diagnostic: ""
+    };
+}
+
+fn llvm_object_profile_attributes(triple: string, opt_flag: string) -> string {
+    return "attributes #0 = { uwtable(sync) \"approx-func-fp-math\"=\"false\" \"frame-pointer\"=\""
+        + llvm_profile_frame_pointer(triple, opt_flag)
+        + "\" \"no-infs-fp-math\"=\"false\" \"no-nans-fp-math\"=\"false\" \"no-signed-zeros-fp-math\"=\"false\" \"no-trapping-math\"=\"false\" \"target-cpu\"=\""
+        + llvm_profile_cpu(triple)
+        + "\" \"target-features\"=\""
+        + llvm_profile_features(triple)
+        + "\" \"unsafe-fp-math\"=\"false\" }";
+}
+
+fn _replace_profile_frame_pointer(ir: string, frame_pointer: string) -> string {
+    let marker = "\"frame-pointer\"=\"";
+    let start = index_of(ir, marker);
+    if start < 0 { return ""; }
+    let value_start = start + marker.length;
+    let tail = substring(ir, value_start, ir.length);
+    let value_end_rel = index_of(tail, "\"");
+    if value_end_rel < 0 { return ""; }
+    let value_end = value_start + value_end_rel;
+    return substring(ir, 0, value_start) + frame_pointer + substring(ir, value_end, ir.length);
+}
+
+// LLVM accepts module target directives only in the module header. Some
+// fixtures and runtime IR carry the right values after another top-level
+// entity; clang used to tolerate/rewrite that input, while llvm-as correctly
+// rejects it. Make the object-provider boundary authoritative by moving the
+// existing directives into a canonical header without changing the published
+// `.ll` artifact.
+fn _remove_llvm_directive_line(ir: string, line: string) -> string {
+    let at_start = line + "\n";
+    if starts_with(ir, at_start) {
+        return substring(ir, at_start.length, ir.length);
+    }
+    let embedded = "\n" + line + "\n";
+    let pos = index_of(ir, embedded);
+    if pos >= 0 {
+        return substring(ir, 0, pos) + substring(ir, pos + embedded.length - 1, ir.length);
+    }
+    if ends_with(ir, "\n" + line) {
+        return substring(ir, 0, ir.length - line.length - 1);
+    }
+    return ir;
+}
+
+fn canonicalize_llvm_target_directives(ir: string, triple: string) -> string {
+    let expected_layout = "target datalayout = \"" + llvm_target_data_layout(triple)
+        + "\"";
+    let expected_triple = "target triple = \"" + triple + "\"";
+    let mut source_end: int = 0;
+    if starts_with(ir, "source_filename = ") {
+        let newline = index_of(ir, "\n");
+        if newline >= 0 { source_end = newline + 1; }
+    }
+    let canonical_header = expected_layout + "\n" + expected_triple + "\n";
+    if starts_with(substring(ir, source_end, ir.length), canonical_header) {
+        return ir;
+    }
+    let without_layout = _remove_llvm_directive_line(ir, expected_layout);
+    let without_targets = _remove_llvm_directive_line(without_layout, expected_triple);
+    // Missing/mismatched directives must still fail profile validation.
+    if without_targets == ir || without_layout == ir || without_targets == without_layout {
+        return ir;
+    }
+    source_end = 0;
+    if starts_with(without_targets, "source_filename = ") {
+        let newline = index_of(without_targets, "\n");
+        if newline >= 0 { source_end = newline + 1; }
+    }
+    return substring(without_targets, 0, source_end) + canonical_header
+        + substring(without_targets, source_end, without_targets.length);
+}
+
+fn llvm_ir_matches_object_profile(ir: string, triple: string, opt_flag: string) -> boolean {
+    if index_of(ir, "target triple = \"" + triple + "\"") < 0 { return false; }
+    if index_of(ir, "target datalayout = \"" + llvm_target_data_layout(triple)
+        + "\"") < 0 { return false; }
+    if index_of(ir, llvm_object_profile_attributes(triple, opt_flag)) < 0 {
+        return false;
+    }
+    return true;
+}
+
+// Materialize the optimization-dependent function profile in a sibling input
+// before llvm-as. Runtime emit children can produce an IR snapshot before the
+// parent chooses O0/O2; this boundary makes the object request authoritative
+// without mutating the published/user-visible `.ll` artifact.
+fn prepare_llvm_object_pipeline(request: LlvmArtifactRequest, provider: LlvmObjectProvider) -> LlvmObjectPipeline ![io] {
+    let base = llvm_object_pipeline_argv(request, provider);
+    if !base.ok { return base; }
+    // Runtime object batches retain every pipeline until the bounded worker
+    // pool completes. The full IR and its canonical/profile copies are
+    // per-object scratch; construct the retained argv only after rewinding.
+    let scratch_mark = sailfin_intrinsic_runtime_arena_mark();
+    let scratch_path = request.object_path + ".profiled.ll";
+    let ir = fs.readFile(request.ir_path);
+    let canonical_ir = canonicalize_llvm_target_directives(ir, provider.target_triple);
+    let profiled_ir = _replace_profile_frame_pointer(canonical_ir, llvm_profile_frame_pointer(provider.target_triple, request.opt_flag));
+    let matches_profile = profiled_ir.length > 0
+        && llvm_ir_matches_object_profile(profiled_ir, provider.target_triple, request.opt_flag);
+    if matches_profile { fs.writeFile(scratch_path, profiled_ir); }
+    let materialized = matches_profile && fs.exists(scratch_path);
+    sailfin_intrinsic_runtime_arena_rewind(scratch_mark);
+    if !matches_profile {
+        let mut failed = base;
+        failed.ok = false;
+        failed.diagnostic = "LLVM object provider rejected module profile mismatch for target "
+            + provider.target_triple
+            + " at "
+            + request.ir_path;
+        return failed;
+    }
+    let profiled_path = request.object_path + ".profiled.ll";
+    if !materialized {
+        let mut failed = base;
+        failed.ok = false;
+        failed.diagnostic = "LLVM object provider could not materialize target profile at "
+            + profiled_path;
+        return failed;
+    }
+    let profiled_request = LlvmArtifactRequest {
+        ir_path: profiled_path,
+        object_path: request.object_path,
+        opt_flag: request.opt_flag
+    };
+    let mut pipeline = llvm_object_pipeline_argv(profiled_request, provider);
+    pipeline.profiled_path = profiled_path;
+    return pipeline;
+}
+
+fn _object_has_format(path: string, format: string) -> boolean ![io] {
+    let bytes = _read_file_bytes(path);
+    if bytes.status != 0 || bytes.length < 4 {
+        _free_file_bytes(bytes);
+        return false;
+    }
+    let mut ok: boolean = false;
+    if format == "elf" {
+        ok = load_byte(bytes.addr) == 127 && load_byte(bytes.addr + 1) == 69
+            && load_byte(bytes.addr
+            + 2) == 76
+            && load_byte(bytes.addr
+            + 3) == 70;
+    } else if format == "macho" {
+        ok = load_byte(bytes.addr) == 207 && load_byte(bytes.addr + 1) == 250
+            && load_byte(bytes.addr
+            + 2) == 237
+            && load_byte(bytes.addr
+            + 3) == 254;
+    } else if format == "coff" {
+        ok = load_byte(bytes.addr) == 100 && load_byte(bytes.addr + 1) == 134;
+    }
+    _free_file_bytes(bytes);
+    return ok;
+}
+
+fn _probe_temp_root() -> string ![io] {
+    let mut root = _get_env_cmd("TMPDIR");
+    if root.length == 0 { root = _get_env_cmd("TEMP"); }
+    if root.length == 0 { root = _get_env_cmd("TMP"); }
+    if root.length == 0 { root = "build"; }
+    return root;
+}
+
+fn _probe_llvm_object_capability(provider: LlvmObjectProvider) -> string ![io] {
+    let temp_root = _probe_temp_root();
+    let mut dir = fs.mkdtemp(temp_root + "/sfn-llvm-object-probe-");
+    // Nested builds can inherit a TMPDIR whose test-owned directory has
+    // already been removed. The caller's working directory is the reliable
+    // last resort for this small, immediately cleaned capability probe.
+    if dir.length == 0 { dir = fs.mkdtemp("./sfn-llvm-object-probe-"); }
+    if dir.length == 0 {
+        return "sfn build: could not create a temporary directory for the LLVM object-provider capability probe (temp root "
+            + temp_root
+            + "; working-directory fallback failed)";
+    }
+    let levels: string[] = ["-O0", "-O2"];
+    let mut i: int = 0;
+    loop {
+        if i >= levels.length { break; }
+        let ir_path = dir + "/probe" + levels[i] + ".ll";
+        let object_path = dir + "/probe" + levels[i] + ".o";
+        let ir = "target datalayout = \"" + llvm_target_data_layout(provider.target_triple)
+            + "\"\ntarget triple = \""
+            + provider.target_triple
+            + "\"\n\ndefine i32 @sfn_object_provider_probe() #0 {\nentry:\n  ret i32 0\n}\n\n"
+            + llvm_object_profile_attributes(provider.target_triple, levels[i])
+            + "\n";
+        fs.writeFile(ir_path, ir);
+        let pipeline = llvm_object_pipeline_argv(LlvmArtifactRequest {
+            ir_path: ir_path, object_path: object_path, opt_flag: levels[i]
+        }, provider);
+        let mut stage: int = 0;
+        loop {
+            if stage >= pipeline.stages.length { break; }
+            let rc = process.run_capture(pipeline.stages[stage], process.environ());
+            let _out = process.capture_take_stdout();
+            let err = process.capture_take_stderr();
+            if rc != 0 {
+                _cleanup_llvm_pipeline(pipeline);
+                fs.deleteFile(ir_path);
+                fs.deleteFile(object_path);
+                fs.removeDirectory(dir);
+                return "sfn build: LLVM object-provider capability probe failed at "
+                    + pipeline.stage_names[stage]
+                    + " for target "
+                    + provider.target_triple
+                    + " with exit status "
+                    + int_to_string(rc)
+                    + ": "
+                    + err;
+            }
+            stage += 1;
+        }
+        if !_object_has_format(object_path, provider.object_format) {
+            _cleanup_llvm_pipeline(pipeline);
+            fs.deleteFile(ir_path);
+            fs.deleteFile(object_path);
+            fs.removeDirectory(dir);
+            return "sfn build: LLVM object-provider capability probe emitted the wrong object format for target "
+                + provider.target_triple;
+        }
+        _cleanup_llvm_pipeline(pipeline);
+        fs.deleteFile(ir_path);
+        fs.deleteFile(object_path);
+        i += 1;
+    }
+    fs.removeDirectory(dir);
+    return "ok:llvm-object-capability-v1:" + provider.target_triple + ":"
+        + provider.object_format
+        + ":O0+O2";
 }
 
 // Pure foreign-C argv over explicit target flags. Returns [] when the
@@ -148,23 +745,83 @@ fn foreign_c_argv_with_target(request: ForeignCRequest, target_flags: string[]) 
     return args;
 }
 
-// Resolve the build target once, then build the LLVM-artifact argv. Every
-// `.ll` -> `.o` in the driver compiles for the same target as the final
-// link (SFN-52, SFN-774).
-fn llvm_artifact_argv(request: LlvmArtifactRequest) -> string[] ![io] {
-    return llvm_artifact_argv_with_target(request, target_clang_flags(build_target_triple(), host_target_triple()));
-}
-
 fn foreign_c_argv(request: ForeignCRequest) -> string[] ![io] {
     return foreign_c_argv_with_target(request, target_clang_flags(build_target_triple(), host_target_triple()));
 }
 
 // Spawn an LLVM-artifact compile directly (unpooled). Returns a non-zero
 // exit for a misrouted request rather than spawning anything.
+fn run_llvm_artifact_with_provider(request: LlvmArtifactRequest, provider: LlvmObjectProvider) -> int ![io] {
+    let pipeline = prepare_llvm_object_pipeline(request, provider);
+    if !pipeline.ok {
+        print.err(pipeline.diagnostic);
+        return 1;
+    }
+    let mut stage: int = 0;
+    loop {
+        if stage >= pipeline.stages.length { break; }
+        let rc = process.run(pipeline.stages[stage]);
+        if rc != 0 {
+            print.err(llvm_object_provider_failure(provider, pipeline, stage, request.ir_path, rc));
+            _cleanup_llvm_pipeline(pipeline);
+            return rc;
+        }
+        stage += 1;
+    }
+    _cleanup_llvm_pipeline(pipeline);
+    return 0;
+}
+
 fn run_llvm_artifact(request: LlvmArtifactRequest) -> int ![io] {
-    let argv = llvm_artifact_argv(request);
-    if argv.length == 0 { return 1; }
-    return process.run(argv);
+    return run_llvm_artifact_with_provider(request, resolve_llvm_object_provider());
+}
+
+fn _cleanup_llvm_pipeline(pipeline: LlvmObjectPipeline) ![io] {
+    if pipeline.verified_path.length > 0 && fs.exists(pipeline.verified_path) {
+        fs.deleteFile(pipeline.verified_path);
+    }
+    if pipeline.optimized_path.length > 0 && fs.exists(pipeline.optimized_path) {
+        fs.deleteFile(pipeline.optimized_path);
+    }
+    if pipeline.profiled_path.length > 0 && fs.exists(pipeline.profiled_path) {
+        fs.deleteFile(pipeline.profiled_path);
+    }
+}
+
+fn llvm_object_provider_failure(provider: LlvmObjectProvider, pipeline: LlvmObjectPipeline, stage: int, source: string, exit_status: int) -> string {
+    let mut stage_name = "unknown";
+    let mut tool = "unknown";
+    if stage >= 0 && stage < pipeline.stage_names.length {
+        stage_name = pipeline.stage_names[stage];
+    }
+    if stage >= 0 && stage < pipeline.stages.length && pipeline.stages[stage].length > 0 {
+        tool = pipeline.stages[stage][0];
+    }
+    return "sfn build: LLVM object provider stage " + stage_name
+        + " failed; tool="
+        + tool
+        + "; target="
+        + provider.target_triple
+        + "; source="
+        + source
+        + "; exit status="
+        + int_to_string(exit_status)
+        + "; this is a Sailfin compiler failure; retain the source and tool diagnostics when reporting this bug";
+}
+
+fn llvm_artifact_request_cache_key(base_key: string, request: LlvmArtifactRequest, provider: LlvmObjectProvider) -> string {
+    let namespaced = llvm_artifact_cache_key(base_key);
+    if namespaced.length == 0 || !provider.ok || provider.fingerprint.length == 0 {
+        return "";
+    }
+    let record = "llvm-object-request-v1\n" + provider.kind + "\n" + provider.fingerprint
+        + "\n"
+        + provider.target_triple
+        + "\n"
+        + provider.object_format
+        + "\n"
+        + request.opt_flag;
+    return namespaced + "\nllvm-request:" + sha256_hex_of_string(record);
 }
 
 // Fold the LLVM-artifact namespace into an object cache key. Propagates an
@@ -220,14 +877,33 @@ fn foreign_c_missing_compiler_diagnostic(capsule: string, source: string, target
 export {
     ForeignCRequest,
     LlvmArtifactRequest,
+    LlvmObjectPipeline,
+    LlvmObjectProvider,
     classify_object_source,
     foreign_c_argv,
     foreign_c_argv_with_target,
     foreign_c_cache_key,
     foreign_c_request_cache_key,
     foreign_c_missing_compiler_diagnostic,
-    llvm_artifact_argv,
-    llvm_artifact_argv_with_target,
     llvm_artifact_cache_key,
-    run_llvm_artifact
+    llvm_artifact_request_cache_key,
+    canonicalize_llvm_target_directives,
+    llvm_ir_matches_object_profile,
+    llvm_object_pipeline_argv,
+    llvm_object_profile_attributes,
+    llvm_object_provider_failure,
+    _darwin_major_minor,
+    _clang_oracle_fingerprint,
+    _effective_llvm_target_triple_with_deployment,
+    darwin_deployment_target,
+    effective_llvm_target_triple,
+    llvm_profile_frame_pointer,
+    llvm_profile_cpu,
+    llvm_profile_features,
+    llvm_target_data_layout,
+    prepare_llvm_object_pipeline,
+    resolve_llvm_object_provider,
+    resolve_llvm_object_provider_for_target,
+    run_llvm_artifact,
+    run_llvm_artifact_with_provider
 };

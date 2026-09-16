@@ -116,6 +116,13 @@ support claim even if the compiler can emit or cross-link some of them.
 versioned `arm64-apple-macosx<deployment>.0` LLVM object triple before IR
 validation or optimization.
 
+Outside that ownership claim, `x86_64-w64-mingw32` remains a supported
+compatibility cross target under SFEP-0068. Its first-party LLVM text uses the
+same `llvm-as`/`opt`/`llc` object boundary, while its final link remains owned
+by `x86_64-w64-mingw32-gcc -static`. This compatibility route does not add
+MinGW to the four governed native pairs and does not establish a
+clang-independent native-platform claim.
+
 Ownership before and after this migration is:
 
 | Role | Current/default route (all four targets unless narrowed) | Destination route (all four targets) |
@@ -166,8 +173,10 @@ captured diagnostic text, and produced-artifact identity. Only
 ### 3.4 Coherent LLVM tool family
 
 The default object provider is one coherent `llvm-as`/`opt`/`llc` family. On
-Linux and Windows the family also supplies `ld.lld`/`lld-link`; Apple `ld` is a
-platform tool and is identified separately.
+the governed Linux and Windows pairs the family also supplies
+`ld.lld`/`lld-link`; Apple `ld` is a platform tool and is identified
+separately. The MinGW compatibility cross target resolves only the three
+object-provider members because its link provider is the target GCC driver.
 
 Resolution order is deterministic:
 
@@ -228,16 +237,17 @@ The initial target profiles are fixed as follows. `none` means the corresponding
 | Linux aarch64 | `generic` / `+neon,+v8a` / AAPCS | PIC PIE, small code model, native TLS, `default` EH, `non-leaf` frame pointers at O0 and O2 |
 | macOS arm64 | `apple-m1` / CPU-defined baseline / DarwinPCS | PIC, small code model, native TLS, `default` EH, `non-leaf` frame pointers at O0 and O2 |
 | Windows x86-64 MSVC | `x86-64` / none / Win64 MSVC | PIC, small code model, native TLS, WinEH, `none` frame pointers at O0 and O2, incremental-linker-compatible COFF |
+| Windows x86-64 MinGW compatibility cross target | `x86-64` / none / Win64 GNU | PIC, small code model, emulated TLS, `default` EH, `none` frame pointers at O0 and O2, COFF linked by the target GCC driver |
 
-All four profiles enable function and data sections, use the target-default
+All profiles enable function and data sections, use the target-default
 COMDAT selection kind, and preserve unwind tables by applying `uwtable(sync)`
 to every defined function. Floating-point semantics are strict:
 `fp-contract=on`; unsafe
 FP, fast math, approximate functions, no-NaN, no-Inf, no-signed-zero, and
 no-trapping assumptions are false. Stack-protector insertion is not inferred by
 the LLVM CLI provider; it occurs only when Sailfin IR carries an explicit
-function attribute. Emulated TLS is false for these four profiles (the retired
-MinGW path is the separate case that required it).
+function attribute. Emulated TLS is false for the four governed profiles and
+enabled only for the retained MinGW compatibility cross target.
 
 Darwin target resolution precedes the LLVM pipeline, not merely final linking.
 The driver resolves one SDK version and one deployment target. An explicit

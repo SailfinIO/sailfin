@@ -22,7 +22,11 @@ import {
     runtime_object_entry_key_from_str
 } from "../build_cache";
 import { _env_flag, _get_env_cmd } from "../build_flags";
-import { ParallelProcessTask, _cr_resolve_jobs, _cr_run_bounded_processes } from "../capsule_emit_parallel";
+import {
+    ParallelProcessPipelineTask,
+    _cr_resolve_jobs,
+    _cr_run_bounded_process_pipelines
+} from "../capsule_emit_parallel";
 import { locate_runtime_dep_capsule_src } from "../capsule_resolver/locate";
 import { WorkspaceMember } from "../capsule_resolver/types";
 import { discover_workspace_root, load_workspace_members } from "../capsule_resolver/workspace";
@@ -39,11 +43,15 @@ import { resolve_compiler_version } from "../version";
 import {
     ForeignCRequest,
     LlvmArtifactRequest,
+    LlvmObjectPipeline,
+    LlvmObjectProvider,
     foreign_c_argv,
     foreign_c_missing_compiler_diagnostic,
     foreign_c_request_cache_key,
-    llvm_artifact_argv,
-    llvm_artifact_cache_key
+    llvm_artifact_request_cache_key,
+    llvm_object_provider_failure,
+    prepare_llvm_object_pipeline,
+    resolve_llvm_object_provider_for_target
 } from "./artifact_compile";
 import {
     _atomic_rename_into_place,
@@ -337,7 +345,7 @@ struct PendingRuntimeObjectAssembly {
     source_kind: string;
     source_path: string;
     staged_path: string;
-    task: ParallelProcessTask;
+    pipeline: LlvmObjectPipeline;
 }
 
 // Compile every `c-sources` / `ll-sources` entry from a list of
@@ -352,7 +360,7 @@ struct PendingRuntimeObjectAssembly {
 // without a runtime dep, the caller falls through to the legacy
 // `_clang_compile_runtime_objects` helper that uses the
 // hardcoded `runtime_root/native/...` layout.
-fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, shared_cache_root: string, jobs: int, target_triple: string, configured_foreign_compiler: string) -> RuntimeLinkInputs ![io] {
+fn _compile_runtime_capsule_objects_with_provider(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, shared_cache_root: string, jobs: int, target_triple: string, configured_foreign_compiler: string, provider: LlvmObjectProvider) -> RuntimeLinkInputs ![io] {
     let target_tag = target_artifact_tag(target_triple);
     let mut objects: string[] = [];
     let mut link_libs: string[] = [];
@@ -465,17 +473,17 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
                 // (#1047). Compilation is queued so c/ll misses share the
                 // bounded emit-worker window (SFN-612).
                 pending.push(PendingRuntimeObjectAssembly {
-                    cache_key: key, cache_suffix: base, object_path: obj, source_kind: "c", source_path: src, staged_path: obj_tmp, task: ParallelProcessTask {
-                        argv: foreign_c_argv(ForeignCRequest {
+                    cache_key: key, cache_suffix: base, object_path: obj, source_kind: "c", source_path: src, staged_path: obj_tmp, pipeline: LlvmObjectPipeline {
+                        ok: true, stages: [foreign_c_argv(ForeignCRequest {
                             compiler_path: foreign_compiler, include_roots: cap.include_dirs, object_path: obj_target, opt_flag: opt_flag, source_path: src
-                        })
+                        })], stage_names: ["foreign-c"], verified_path: "", optimized_path: "", profiled_path: "", diagnostic: ""
                     }
                 });
             }
             objects.push(obj);
             ci += 1;
         }
-        // ll-sources: assemble each via clang, also cached with
+        // ll-sources: lower each through the selected object provider, cached with
         // the capsule prefix + full basename. `foo.ll` ≠
         // `foo.c` because the basename includes the extension.
         let mut li: int = 0;
@@ -484,7 +492,12 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
             let src = cap.ll_sources[li];
             let base = _runtime_obj_stem(cap_prefix, src, opt_flag, target_tag);
             let obj = _path_join(out_dir, base + ".o");
-            let key = _runtime_obj_key_for_build(llvm_artifact_cache_key(runtime_object_cache_key(src, opt_flag)), target_triple);
+            let request = LlvmArtifactRequest {
+                ir_path: src,
+                object_path: obj,
+                opt_flag: opt_flag
+            };
+            let key = _runtime_obj_key_for_build(llvm_artifact_request_cache_key(runtime_object_cache_key(src, opt_flag), request, provider), target_triple);
             if key.length == 0 {
                 stats.invalid_keys = stats.invalid_keys + 1;
             }
@@ -502,11 +515,9 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
                 if obj_tmp.length > 0 { obj_target = obj_tmp; }
                 if obj_tmp.length == 0 { can_parallel = false; }
                 pending.push(PendingRuntimeObjectAssembly {
-                    cache_key: key, cache_suffix: base, object_path: obj, source_kind: "ll", source_path: src, staged_path: obj_tmp, task: ParallelProcessTask {
-                        argv: llvm_artifact_argv(LlvmArtifactRequest {
-                            ir_path: src, object_path: obj_target, opt_flag: opt_flag
-                        })
-                    }
+                    cache_key: key, cache_suffix: base, object_path: obj, source_kind: "ll", source_path: src, staged_path: obj_tmp, pipeline: prepare_llvm_object_pipeline(LlvmArtifactRequest {
+                        ir_path: src, object_path: obj_target, opt_flag: opt_flag
+                    }, provider)
                 });
             }
             objects.push(obj);
@@ -524,12 +535,15 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
     }
     let mut effective_jobs = jobs;
     if !can_parallel { effective_jobs = 1; }
-    let results = _cr_run_bounded_processes(_runtime_object_tasks(pending), effective_jobs);
+    let run = _cr_run_bounded_process_pipelines(_runtime_object_tasks(pending), effective_jobs);
     let mut pi: int = 0;
     loop {
         if pi >= pending.length { break; }
-        if results[pi] != 0 {
+        if run.exit_codes[pi] != 0 {
             let item = pending[pi];
+            if item.source_kind == "ll" {
+                print.err(llvm_object_provider_failure(provider, item.pipeline, run.failed_stages[pi], item.source_path, run.exit_codes[pi]));
+            }
             _delete_runtime_object_staging(pending);
             if item.source_kind == "c" {
                 print("sfn build: failed to compile runtime c-source " + item.source_path);
@@ -558,6 +572,7 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
         }
         pi += 1;
     }
+    _delete_runtime_object_intermediates(pending);
     return RuntimeLinkInputs {
         object_paths: objects,
         link_libs: link_libs,
@@ -565,6 +580,43 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
         success: true,
         stats: stats
     };
+}
+
+// Compatibility/test entry for the isolated foreign-C path. Resolve LLVM only
+// when the supplied capsule set actually contains an ll-source; a C-only
+// request must not acquire a first-party LLVM dependency (SFN-950).
+fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, shared_cache_root: string, jobs: int, target_triple: string, configured_foreign_compiler: string) -> RuntimeLinkInputs ![io] {
+    let mut needs_llvm: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= runtime_capsules.length { break; }
+        if runtime_capsules[i].ll_sources.length > 0 {
+            needs_llvm = true;
+            break;
+        }
+        i += 1;
+    }
+    let mut provider = LlvmObjectProvider {
+        ok: true,
+        kind: "unused",
+        target_triple: target_triple,
+        host_triple: "",
+        object_format: "",
+        fingerprint: "unused",
+        llvm_as_path: "",
+        opt_path: "",
+        llc_path: "",
+        clang_path: "",
+        diagnostic: ""
+    };
+    if needs_llvm {
+        provider = resolve_llvm_object_provider_for_target(target_triple);
+        if !provider.ok {
+            print.err(provider.diagnostic);
+            return _failed_runtime_link_inputs();
+        }
+    }
+    return _compile_runtime_capsule_objects_with_provider(runtime_capsules, out_dir, opt_flag, shared_cache_root, jobs, target_triple, configured_foreign_compiler, provider);
 }
 
 fn _delete_runtime_object_staging(pending: PendingRuntimeObjectAssembly[]) ![io] {
@@ -576,14 +628,34 @@ fn _delete_runtime_object_staging(pending: PendingRuntimeObjectAssembly[]) ![io]
         }
         i += 1;
     }
+    _delete_runtime_object_intermediates(pending);
 }
 
-fn _runtime_object_tasks(pending: PendingRuntimeObjectAssembly[]) -> ParallelProcessTask[] {
-    let mut tasks: ParallelProcessTask[] = [];
+fn _delete_runtime_object_intermediates(pending: PendingRuntimeObjectAssembly[]) ![io] {
     let mut i: int = 0;
     loop {
         if i >= pending.length { break; }
-        tasks.push(pending[i].task);
+        if pending[i].pipeline.verified_path.length > 0 && fs.exists(pending[i].pipeline.verified_path) {
+            fs.deleteFile(pending[i].pipeline.verified_path);
+        }
+        if pending[i].pipeline.optimized_path.length > 0 && fs.exists(pending[i].pipeline.optimized_path) {
+            fs.deleteFile(pending[i].pipeline.optimized_path);
+        }
+        if pending[i].pipeline.profiled_path.length > 0 && fs.exists(pending[i].pipeline.profiled_path) {
+            fs.deleteFile(pending[i].pipeline.profiled_path);
+        }
+        i += 1;
+    }
+}
+
+fn _runtime_object_tasks(pending: PendingRuntimeObjectAssembly[]) -> ParallelProcessPipelineTask[] {
+    let mut tasks: ParallelProcessPipelineTask[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= pending.length { break; }
+        tasks.push(ParallelProcessPipelineTask {
+            stages: pending[i].pipeline.stages
+        });
         i += 1;
     }
     return tasks;
@@ -673,11 +745,12 @@ fn runtime_stamp_identity(objdir: string) -> string ![io] {
 // invocation in the parent (page-cache-hot, in-process) — the point is
 // that the ~34-source derivation stops running once per CHILD.
 // An entry with an unhashable ("") key is simply omitted.
-fn write_runtime_identity_stamp(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, nonce: string, runtime_identity: string, target_triple: string) -> boolean ![io] {
+fn write_runtime_identity_stamp_with_provider(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, nonce: string, runtime_identity: string, target_triple: string, provider: LlvmObjectProvider) -> boolean ![io] {
     if nonce.length == 0 { return false; }
     let self_path = _resolve_self_path(binary_dir);
     if self_path.length == 0 { return false; }
     let compiler_identity = cache_compiler_identity(resolve_compiler_version(""), self_path);
+    if !provider.ok { return false; }
     let ctx_root = _runtime_sfn_ctx_root(out_dir);
     let target_tag = target_artifact_tag(target_triple);
     let mut text: string = "v1\ninvocation=" + nonce + "\n";
@@ -707,7 +780,7 @@ fn write_runtime_identity_stamp(runtime_capsules: RuntimeCapsuleArtifacts[], out
             // Shared with `_prepare_runtime_sfn_object` by construction:
             // the stamped fast path compares against this hash, so the two
             // derivations must not be composed independently (SFN-870).
-            let obj_key = _runtime_sfn_object_key(src, opt_flag, compiler_identity, ctx_root, slug, target_triple);
+            let obj_key = _runtime_sfn_object_key(src, opt_flag, compiler_identity, ctx_root, slug, target_triple, provider);
             if obj_key.length > 0 {
                 text = text + "obj/" + obj_base + "=" + sha256_hex_of_string(obj_key)
                     + "\n";
@@ -729,6 +802,10 @@ fn write_runtime_identity_stamp(runtime_capsules: RuntimeCapsuleArtifacts[], out
     return fs.exists(_runtime_stamp_path(out_dir));
 }
 
+fn write_runtime_identity_stamp(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, nonce: string, runtime_identity: string, target_triple: string) -> boolean ![io] {
+    return write_runtime_identity_stamp_with_provider(runtime_capsules, out_dir, opt_flag, binary_dir, nonce, runtime_identity, target_triple, resolve_llvm_object_provider_for_target(target_triple));
+}
+
 // Stamped-key fast path shared by the `.o` emit and the `.sfn-asm`
 // staging: when the stamp validates and carries this entry, a hit is
 // `sha256(sidecar) == stamped` — zero source/sibling hashing. Any
@@ -745,15 +822,16 @@ fn _runtime_stamp_cache_hit(objdir: string, entry: string, artifact_path: string
 
 // Prepared runtime `.sfn` object work. Cache hits are complete plans;
 // misses have emitted and published their `.ll`, then carry one staged
-// `clang -c` task for the shared bounded pool (SFN-612).
+// provider pipeline for the shared bounded pool (SFN-612, SFN-952).
 struct RuntimeSfnObjectPlan {
     cache_key: string;
     cache_suffix: string;
     needs_compile: boolean;
+    source_path: string;
     obj_path: string;
     staged_path: string;
     stats: CacheStats;
-    task: ParallelProcessTask;
+    pipeline: LlvmObjectPipeline;
 }
 
 // #1288: fold staged sibling-dep content into the runtime object
@@ -898,11 +976,13 @@ fn _runtime_obj_cache_kind(source_kind: string) -> string {
 // after it (SFN-677); the slug fold sits between the sibling-dep fold and
 // the target fold (SFN-617, SFN-870). An unhashable base propagates ""
 // through every fold, preserving the always-recompile fallback.
-fn _runtime_sfn_object_key(src: string, opt_flag: string, compiler_identity: string, ctx_root: string, slug: string, target_triple: string) -> string ![io] {
+fn _runtime_sfn_object_key(src: string, opt_flag: string, compiler_identity: string, ctx_root: string, slug: string, target_triple: string, provider: LlvmObjectProvider) -> string ![io] {
     let identity_key = runtime_object_cache_key_with_identity(src, opt_flag, compiler_identity);
     // SFN-950: the object is lowered from an emitted `.ll`, so it lives in
     // the LLVM-artifact namespace, disjoint from any foreign-C object.
-    let namespaced = llvm_artifact_cache_key(identity_key);
+    let namespaced = llvm_artifact_request_cache_key(identity_key, LlvmArtifactRequest {
+        ir_path: "runtime-cache.ll", object_path: "", opt_flag: opt_flag
+    }, provider);
     let with_deps = _runtime_obj_key_with_sibling_deps(namespaced, ctx_root, slug);
     return _runtime_obj_key_for_build(_runtime_obj_key_with_slug(with_deps, slug), target_triple);
 }
@@ -1016,7 +1096,7 @@ fn _runtime_emit_captured_stream(text: string, to_stderr: boolean) -> void ![io]
     if to_stderr { print.err(out); } else { print(out); }
 }
 
-fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string, shared_cache_root: string, ctx_root: string, compiler_identity: string, cap: RuntimeCapsuleArtifacts, target_triple: string) -> RuntimeSfnObjectPlan ![io] {
+fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: string, out_dir: string, opt_flag: string, shared_cache_root: string, ctx_root: string, compiler_identity: string, cap: RuntimeCapsuleArtifacts, target_triple: string, provider: LlvmObjectProvider) -> RuntimeSfnObjectPlan ![io] {
     let mut stats = empty_cache_stats();
     let slug = _runtime_module_slug(cap, src);
     let target_tag = target_artifact_tag(target_triple);
@@ -1049,7 +1129,7 @@ fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: strin
     // even when the runtime source bytes are unchanged. The full fold
     // order lives in `_runtime_sfn_object_key`, shared with the stamp
     // writer (SFN-617, SFN-870, SFN-950).
-    let key = _runtime_sfn_object_key(src, opt_flag, compiler_identity, ctx_root, slug, target_triple);
+    let key = _runtime_sfn_object_key(src, opt_flag, compiler_identity, ctx_root, slug, target_triple, provider);
     if key.length == 0 { stats.invalid_keys = stats.invalid_keys + 1; }
     let shared_suffix = stem;
     if _runtime_obj_cache_hit(obj_path, key) {
@@ -1058,7 +1138,7 @@ fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: strin
     }
     // Shared content-addressed cache hit (#1096): a sibling work-dir or
     // a CI cache restore may already hold this object even though the
-    // local sidecar above missed. Skip the re-emit + clang entirely.
+    // local sidecar above missed. Skip re-emission and object lowering.
     if _runtime_obj_shared_cache_fetch(shared_cache_root, key, obj_path, shared_suffix, "runtime-obj") {
         stats.hits = stats.hits + 1;
         return _ready_runtime_sfn_object(obj_path, stats);
@@ -1111,31 +1191,38 @@ fn _prepare_runtime_sfn_object(self_path: string, cap_prefix: string, src: strin
         cache_key: key,
         cache_suffix: shared_suffix,
         needs_compile: true,
+        source_path: src,
         obj_path: obj_path,
         staged_path: obj_tmp,
         stats: stats,
-        task: ParallelProcessTask {
-            argv: llvm_artifact_argv(LlvmArtifactRequest {
-                ir_path: ll_path, object_path: obj_target, opt_flag: opt_flag
-            })
-        }
+        pipeline: prepare_llvm_object_pipeline(LlvmArtifactRequest {
+            ir_path: ll_path, object_path: obj_target, opt_flag: opt_flag
+        }, provider)
     };
 }
 
 fn _ready_runtime_sfn_object(obj_path: string, stats: CacheStats) -> RuntimeSfnObjectPlan {
-    let no_argv: string[] = [];
     return RuntimeSfnObjectPlan {
         cache_key: "",
         cache_suffix: "",
         needs_compile: false,
+        source_path: obj_path,
         obj_path: obj_path,
         staged_path: "",
         stats: stats,
-        task: ParallelProcessTask { argv: no_argv }
+        pipeline: LlvmObjectPipeline {
+            ok: true,
+            stages: [],
+            stage_names: [],
+            verified_path: "",
+            optimized_path: "",
+            profiled_path: "",
+            diagnostic: ""
+        }
     };
 }
 
-fn _finish_runtime_sfn_objects(plans: RuntimeSfnObjectPlan[], jobs: int, shared_cache_root: string) -> RuntimeLinkInputs ![io] {
+fn _finish_runtime_sfn_objects(plans: RuntimeSfnObjectPlan[], jobs: int, shared_cache_root: string, provider: LlvmObjectProvider) -> RuntimeLinkInputs ![io] {
     let mut effective_jobs = jobs;
     let mut can_parallel: boolean = true;
     let mut probe: int = 0;
@@ -1148,7 +1235,7 @@ fn _finish_runtime_sfn_objects(plans: RuntimeSfnObjectPlan[], jobs: int, shared_
         probe += 1;
     }
     if !can_parallel { effective_jobs = 1; }
-    let results = _cr_run_bounded_processes(_runtime_sfn_object_tasks(plans), effective_jobs);
+    let run = _cr_run_bounded_process_pipelines(_runtime_sfn_object_tasks(plans), effective_jobs);
     let mut objects: string[] = [];
     let empty_libs: string[] = [];
     let mut stats = empty_cache_stats();
@@ -1158,7 +1245,8 @@ fn _finish_runtime_sfn_objects(plans: RuntimeSfnObjectPlan[], jobs: int, shared_
         if i >= plans.length { break; }
         let item = plans[i];
         if item.needs_compile {
-            if results[result_index] != 0 {
+            if run.exit_codes[result_index] != 0 {
+                print.err(llvm_object_provider_failure(provider, item.pipeline, run.failed_stages[result_index], item.source_path, run.exit_codes[result_index]));
                 _delete_runtime_sfn_object_staging(plans);
                 print("sfn build: failed to compile runtime sfn-source object "
                     + item.obj_path);
@@ -1192,6 +1280,7 @@ fn _finish_runtime_sfn_objects(plans: RuntimeSfnObjectPlan[], jobs: int, shared_
         objects.push(item.obj_path);
         i += 1;
     }
+    _delete_runtime_sfn_object_intermediates(plans);
     return RuntimeLinkInputs {
         object_paths: objects,
         link_libs: empty_libs,
@@ -1210,14 +1299,36 @@ fn _delete_runtime_sfn_object_staging(plans: RuntimeSfnObjectPlan[]) ![io] {
         }
         i += 1;
     }
+    _delete_runtime_sfn_object_intermediates(plans);
 }
 
-fn _runtime_sfn_object_tasks(plans: RuntimeSfnObjectPlan[]) -> ParallelProcessTask[] {
-    let mut tasks: ParallelProcessTask[] = [];
+fn _delete_runtime_sfn_object_intermediates(plans: RuntimeSfnObjectPlan[]) ![io] {
     let mut i: int = 0;
     loop {
         if i >= plans.length { break; }
-        if plans[i].needs_compile { tasks.push(plans[i].task); }
+        if plans[i].pipeline.verified_path.length > 0 && fs.exists(plans[i].pipeline.verified_path) {
+            fs.deleteFile(plans[i].pipeline.verified_path);
+        }
+        if plans[i].pipeline.optimized_path.length > 0 && fs.exists(plans[i].pipeline.optimized_path) {
+            fs.deleteFile(plans[i].pipeline.optimized_path);
+        }
+        if plans[i].pipeline.profiled_path.length > 0 && fs.exists(plans[i].pipeline.profiled_path) {
+            fs.deleteFile(plans[i].pipeline.profiled_path);
+        }
+        i += 1;
+    }
+}
+
+fn _runtime_sfn_object_tasks(plans: RuntimeSfnObjectPlan[]) -> ParallelProcessPipelineTask[] {
+    let mut tasks: ParallelProcessPipelineTask[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= plans.length { break; }
+        if plans[i].needs_compile {
+            tasks.push(ParallelProcessPipelineTask {
+                stages: plans[i].pipeline.stages
+            });
+        }
         i += 1;
     }
     return tasks;
@@ -1906,7 +2017,7 @@ fn _has_prefix(s: string, prefix: string) -> boolean {
     return substring(s, 0, prefix.length) == prefix;
 }
 
-fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string, jobs: int, target_triple: string) -> RuntimeLinkInputs ![io] {
+fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string, jobs: int, target_triple: string, provider: LlvmObjectProvider) -> RuntimeLinkInputs ![io] {
     let mut objects: string[] = [];
     let empty_libs: string[] = [];
     let mut stats = empty_cache_stats();
@@ -1992,7 +2103,7 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
         loop {
             if si >= cap.sfn_sources.length { break; }
             let src = cap.sfn_sources[si];
-            let plan = _prepare_runtime_sfn_object(self_path, cap_prefix, src, out_dir, opt_flag, shared_cache_root, ctx_root, compiler_identity, cap, target_triple);
+            let plan = _prepare_runtime_sfn_object(self_path, cap_prefix, src, out_dir, opt_flag, shared_cache_root, ctx_root, compiler_identity, cap, target_triple, provider);
             if plan.obj_path.length == 0 {
                 _delete_runtime_sfn_object_staging(plans);
                 return _failed_runtime_link_inputs();
@@ -2002,7 +2113,7 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
         }
         i += 1;
     }
-    return _finish_runtime_sfn_objects(plans, jobs, shared_cache_root);
+    return _finish_runtime_sfn_objects(plans, jobs, shared_cache_root, provider);
 }
 
 // Issue #940: assemble the full runtime object + link-lib set for a
@@ -2139,17 +2250,21 @@ fn condition_runtime_capsules_for_target(caps: RuntimeCapsuleArtifacts[], target
     return conditioned;
 }
 
-fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string) -> RuntimeLinkInputs ![io] {
+fn assemble_runtime_capsule_link_inputs_with_provider(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string, provider: LlvmObjectProvider) -> RuntimeLinkInputs ![io] {
     // SFN-775/SFN-777 (SFEP-0068 §3.3): apply the exact triple's manifest
     // table before any compile iterates the runtime capsule set. A missing
     // Windows table returns a sentinel length mismatch and fails immediately.
     let target_os = build_target_os();
     let target_triple = build_target_triple();
+    if !provider.ok {
+        print.err(provider.diagnostic);
+        return _failed_runtime_link_inputs();
+    }
     let capsules = condition_runtime_capsules_for_target(runtime_capsules, target_os, target_triple);
     if capsules.length != runtime_capsules.length {
         return _failed_runtime_link_inputs();
     }
-    // One resolution feeds every clang phase, preserving the emit pool's
+    // One resolution feeds every LLVM object phase, preserving the emit pool's
     // CPU/RAM ceiling and the SAILFIN_BUILD_JOBS=1 bisect path (SFN-612).
     let jobs = _cr_resolve_jobs();
     let mut configured_foreign_compiler = "";
@@ -2162,7 +2277,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
         }
         ci += 1;
     }
-    let inputs = _clang_compile_runtime_capsule_objects(capsules, out_dir, opt_flag, shared_cache_root, jobs, target_triple, configured_foreign_compiler);
+    let inputs = _compile_runtime_capsule_objects_with_provider(capsules, out_dir, opt_flag, shared_cache_root, jobs, target_triple, configured_foreign_compiler, provider);
     if !inputs.success { return _failed_runtime_link_inputs(); }
     let mut objects: string[] = inputs.object_paths;
     let mut link_libs: string[] = [];
@@ -2177,7 +2292,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
     let mut stats = inputs.stats;
     // `sfn-sources` + `prelude-entry` are materialized here (the
     // prelude rides the same emit path as of #940).
-    let sfn_inputs = _compile_runtime_sfn_sources(capsules, out_dir, opt_flag, binary_dir, shared_cache_root, jobs, target_triple);
+    let sfn_inputs = _compile_runtime_sfn_sources(capsules, out_dir, opt_flag, binary_dir, shared_cache_root, jobs, target_triple, provider);
     if !sfn_inputs.success { return _failed_runtime_link_inputs(); }
     stats = merge_cache_stats(stats, sfn_inputs.stats);
     let mut soi: int = 0;
@@ -2237,7 +2352,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
                 // over, which the `ctx_root` prune bounds but does not
                 // close. Tracked as SFN-1275. The legacy
                 // descriptor-based emit is unchanged (#940 Risk R2).
-                let prelude_plan = _prepare_runtime_sfn_object(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag, shared_cache_root, _runtime_sfn_ctx_root(out_dir), compiler_identity, cap, target_triple);
+                let prelude_plan = _prepare_runtime_sfn_object(self_path, cap_prefix, cap.prelude_entry, out_dir, opt_flag, shared_cache_root, _runtime_sfn_ctx_root(out_dir), compiler_identity, cap, target_triple, provider);
                 if prelude_plan.obj_path.length == 0 {
                     _delete_runtime_sfn_object_staging(prelude_plans);
                     return _failed_runtime_link_inputs();
@@ -2246,7 +2361,7 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
             }
             pi += 1;
         }
-        let prelude_inputs = _finish_runtime_sfn_objects(prelude_plans, jobs, shared_cache_root);
+        let prelude_inputs = _finish_runtime_sfn_objects(prelude_plans, jobs, shared_cache_root, provider);
         if !prelude_inputs.success { return _failed_runtime_link_inputs(); }
         stats = merge_cache_stats(stats, prelude_inputs.stats);
         let mut poi: int = 0;
@@ -2263,6 +2378,10 @@ fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifact
         success: true,
         stats: stats
     };
+}
+
+fn assemble_runtime_capsule_link_inputs(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, binary_dir: string, shared_cache_root: string) -> RuntimeLinkInputs ![io] {
+    return assemble_runtime_capsule_link_inputs_with_provider(runtime_capsules, out_dir, opt_flag, binary_dir, shared_cache_root, resolve_llvm_object_provider_for_target(build_target_triple()));
 }
 
 // Delete one runtime artifact without relying on a host shell utility.
@@ -2381,10 +2500,12 @@ export {
     RuntimeLinkInputs,
     RuntimeSfnObjectPlan,
     assemble_runtime_capsule_link_inputs,
+    assemble_runtime_capsule_link_inputs_with_provider,
     clean_runtime_object_cache,
     condition_runtime_capsules_for_target,
     runtime_stamp_identity,
     write_runtime_identity_stamp,
+    write_runtime_identity_stamp_with_provider,
     _runtime_bundle_exists,
     _runtime_obj_key_for_build,
     _runtime_obj_stem,
