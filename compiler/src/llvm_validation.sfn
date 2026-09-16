@@ -145,14 +145,12 @@ fn llvm_validation_family_triple(target_triple: string, host_os: string, host_tr
 
 // Resolve the complete coherent family once, then retain only the selected
 // validator identity required by every validation request in this command.
-fn resolve_llvm_validator() -> LlvmValidator ![io] {
+fn _resolve_llvm_validator_with_opt(opt_flag: string) -> LlvmValidator ![io] {
     let target_triple = build_target_triple();
     let family_triple = llvm_validation_family_triple(target_triple, build_host_os(), host_target_triple());
     let mut validator = _validator_from_family(resolve_llvm_toolchain_for_host(family_triple, native_host_os()));
     let mut effective_triple = effective_llvm_target_triple(target_triple);
     if effective_triple.length == 0 { effective_triple = target_triple; }
-    let mut opt_flag = "-O2";
-    if test_runner_active() { opt_flag = "-O0"; }
     validator.target_triple = effective_triple;
     validator.target_data_layout = llvm_target_data_layout(effective_triple);
     validator.target_cpu = llvm_profile_cpu(effective_triple);
@@ -160,6 +158,19 @@ fn resolve_llvm_validator() -> LlvmValidator ![io] {
     validator.frame_pointer = llvm_profile_frame_pointer(effective_triple, opt_flag);
     validator.opt_flag = opt_flag;
     return validator;
+}
+
+fn resolve_llvm_validator() -> LlvmValidator ![io] {
+    let mut opt_flag = "-O2";
+    if test_runner_active() { opt_flag = "-O0"; }
+    return _resolve_llvm_validator_with_opt(opt_flag);
+}
+
+// The test runner marker is process-local. A module emitted by a fresh
+// `sfn emit` child uses the normal O2 lowering profile even when its parent
+// is running `sfn test`; validate that child's actual IR profile here.
+fn resolve_llvm_validator_for_subprocess() -> LlvmValidator ![io] {
+    return _resolve_llvm_validator_with_opt("-O2");
 }
 
 fn llvm_validation_request(validator: LlvmValidator, ir_path: string, retained_ir_path: string, source_path: string) -> LlvmValidationRequest {
@@ -351,5 +362,6 @@ export {
     llvm_validator_unavailable,
     report_llvm_validation_failure,
     resolve_llvm_validator,
+    resolve_llvm_validator_for_subprocess,
     validate_llvm_ir
 };

@@ -32,7 +32,11 @@ import {
 } from "../build_cache";
 import { ParallelEmitTask, _cr_resolve_jobs, _cr_run_parallel_emit } from "../capsule_emit_parallel";
 import { emit_subprocess_with_retry } from "../emit_helpers";
-import { LlvmValidator, llvm_validator_disabled, resolve_llvm_validator } from "../llvm_validation";
+import {
+    LlvmValidator,
+    llvm_validator_disabled,
+    resolve_llvm_validator_for_subprocess
+} from "../llvm_validation";
 import { compile_to_llvm_file_with_module_imports_and_implicit } from "../main";
 import { resolve_compiler_version_for_cache } from "../version";
 import {
@@ -338,7 +342,9 @@ fn compile_capsule_modules(sources: CapsuleSource[], slug_universe_extra: Capsul
     // emitted platform legs together (SFN-682).
     let target_triple = build_target_triple();
     let mut validator = llvm_validator_disabled();
-    if sailfin_exe.length > 0 { validator = resolve_llvm_validator(); }
+    if sailfin_exe.length > 0 {
+        validator = resolve_llvm_validator_for_subprocess();
+    }
     let mut out: string[] = [];
     let mut stats = empty_cache_stats();
     let mut events: ModuleCacheEvent[] = [];
