@@ -647,9 +647,16 @@ fn _probe_temp_root() -> string ![io] {
 }
 
 fn _probe_llvm_object_capability(provider: LlvmObjectProvider) -> string ![io] {
-    let dir = fs.mkdtemp(_probe_temp_root() + "/sfn-llvm-object-probe-");
+    let temp_root = _probe_temp_root();
+    let mut dir = fs.mkdtemp(temp_root + "/sfn-llvm-object-probe-");
+    // Nested builds can inherit a TMPDIR whose test-owned directory has
+    // already been removed. The caller's working directory is the reliable
+    // last resort for this small, immediately cleaned capability probe.
+    if dir.length == 0 { dir = fs.mkdtemp("./sfn-llvm-object-probe-"); }
     if dir.length == 0 {
-        return "sfn build: could not create a temporary directory for the LLVM object-provider capability probe";
+        return "sfn build: could not create a temporary directory for the LLVM object-provider capability probe (temp root "
+            + temp_root
+            + "; working-directory fallback failed)";
     }
     let levels: string[] = ["-O0", "-O2"];
     let mut i: int = 0;
