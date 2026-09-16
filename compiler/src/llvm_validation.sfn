@@ -314,10 +314,14 @@ fn validate_llvm_ir(request: LlvmValidationRequest) -> LlvmValidationResult ![io
     if !request.validator.is_available {
         return _unavailable_result(request);
     }
+    // A cold compiler-closure build validates hundreds of modules in one
+    // parent process. Reading and scanning each full IR file must not retain
+    // its byte/character scratch until the entire batch completes.
+    let scratch_mark = sailfin_intrinsic_runtime_arena_mark();
     let ir = fs.readFile(request.ir_path);
-    if !llvm_ir_matches_object_profile(ir, request.validator.target_triple, request.validator.opt_flag) {
-        return _profile_mismatch_result(request);
-    }
+    let profile_matches = llvm_ir_matches_object_profile(ir, request.validator.target_triple, request.validator.opt_flag);
+    sailfin_intrinsic_runtime_arena_rewind(scratch_mark);
+    if !profile_matches { return _profile_mismatch_result(request); }
     let sink = _mktemp_sibling_cmd(request.ir_path + ".validate.bc");
     if sink.length == 0 { return _temporary_output_failure(request); }
     let argv = llvm_validation_argv(request, sink);
