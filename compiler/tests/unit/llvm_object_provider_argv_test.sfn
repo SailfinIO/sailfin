@@ -16,11 +16,13 @@ import {
     _clang_oracle_fingerprint,
     _darwin_major_minor,
     _effective_llvm_target_triple_with_deployment,
+    canonicalize_llvm_target_directives,
     llvm_artifact_request_cache_key,
     llvm_ir_matches_object_profile,
     llvm_object_pipeline_argv,
     llvm_object_profile_attributes,
-    llvm_object_provider_failure
+    llvm_object_provider_failure,
+    llvm_target_data_layout
 } from "../../src/build/artifact_compile";
 import { _darwin_host_arch_from_evidence } from "../../src/build/target";
 import { ParallelProcessPipelineTask, _cr_run_bounded_process_pipelines } from "../../src/capsule_emit_parallel";
@@ -85,6 +87,8 @@ test "llvm object provider: Darwin and Windows select native object profiles" ![
     let windows = llvm_object_pipeline_argv(_request("-O2"), _provider("x86_64-pc-windows-msvc", "coff", "family-a"));
     assert expect_eq_str(windows.stages[2][10], "-exception-model=wineh").ok;
     assert expect_eq_str(windows.stages[2][12], "-incremental-linker-compatible").ok;
+    let mingw = llvm_object_pipeline_argv(_request("-O2"), _provider("x86_64-w64-mingw32", "coff", "family-a"));
+    assert expect_eq_str(mingw.stages[2][12], "-emulated-tls").ok;
 }
 
 test "llvm object provider: cache identity covers family target format and optimization" ![pure] {
@@ -109,6 +113,31 @@ test "llvm object provider: canonical IR profile includes optimization-dependent
     assert expect_eq_bool(llvm_ir_matches_object_profile(o0, triple, "-O0"), true).ok;
     assert expect_eq_bool(llvm_ir_matches_object_profile(o0, triple, "-O2"), false).ok;
     assert expect_eq_bool(llvm_ir_matches_object_profile(o2, triple, "-O2"), true).ok;
+}
+
+test "llvm object provider: target directives are canonicalized ahead of entities" ![pure] {
+    let triple = "x86_64-pc-windows-msvc";
+    let ir = "source_filename = \"probe\"\n\ndefine i32 @probe() #0 {\n  ret i32 0\n}\n\ntarget triple = \""
+        + triple
+        + "\"\ntarget datalayout = \""
+        + llvm_target_data_layout(triple)
+        + "\"\n"
+        + llvm_object_profile_attributes(triple, "-O2");
+    let canonical = canonicalize_llvm_target_directives(ir, triple);
+    let expected_prefix = "source_filename = \"probe\"\ntarget datalayout = \""
+        + llvm_target_data_layout(triple)
+        + "\"\ntarget triple = \""
+        + triple
+        + "\"\n";
+    assert expect_eq_bool(index_of(canonical, expected_prefix) == 0, true).ok;
+    assert expect_eq_bool(index_of(canonical, "define i32 @probe()") > index_of(canonical, "target triple ="), true).ok;
+
+    let wrong = "target datalayout = \"wrong\"\ntarget triple = \"x86_64-unknown-linux-gnu\"\n"
+        + llvm_object_profile_attributes(triple, "-O2");
+    let rejected = canonicalize_llvm_target_directives(wrong, triple);
+    assert expect_eq_bool(index_of(rejected, "target datalayout = \"wrong\"") >= 0, true).ok;
+    assert expect_eq_bool(index_of(rejected, "target triple = \"x86_64-unknown-linux-gnu\"") >= 0, true).ok;
+    assert expect_eq_bool(llvm_ir_matches_object_profile(rejected, triple, "-O2"), false).ok;
 }
 
 test "llvm object provider: clang exists only as explicit oracle stage" ![pure] {

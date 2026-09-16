@@ -95,11 +95,21 @@ fn llvm_triple_is_governed(triple: string) -> boolean {
     return contains_string(llvm_governed_triples(), triple);
 }
 
+// SFEP-0066's clang-independent guarantee is deliberately narrower than the
+// language's supported-target set. MinGW is not a governed bootstrap/release
+// platform, but SFEP-0068 and SFN-58 retain it as a supported cross target.
+// It therefore uses the same LLVM object stages without expanding the four-
+// platform clang-independence claim.
+fn llvm_object_provider_triple_is_supported(triple: string) -> boolean {
+    return llvm_triple_is_governed(triple) || triple == "x86_64-w64-mingw32";
+}
+
 fn llvm_object_format(triple: string) -> string {
     if triple == "x86_64-unknown-linux-gnu" { return "elf"; }
     if triple == "aarch64-unknown-linux-gnu" { return "elf"; }
     if triple == "arm64-apple-darwin" { return "macho"; }
     if triple == "x86_64-pc-windows-msvc" { return "coff"; }
+    if triple == "x86_64-w64-mingw32" { return "coff"; }
     return "";
 }
 
@@ -249,6 +259,7 @@ fn llc_registered_targets(version_output: string) -> string[] {
 fn llc_target_tokens(triple: string) -> string[] {
     if triple == "x86_64-unknown-linux-gnu" { return ["x86-64"]; }
     if triple == "x86_64-pc-windows-msvc" { return ["x86-64"]; }
+    if triple == "x86_64-w64-mingw32" { return ["x86-64"]; }
     if triple == "aarch64-unknown-linux-gnu" { return ["aarch64"]; }
     if triple == "arm64-apple-darwin" { return ["arm64", "aarch64"]; }
     return [];
@@ -279,7 +290,7 @@ fn _llvm_governed_triples_hint() -> string {
         hint = hint + triples[i];
         i += 1;
     }
-    return hint + ")";
+    return hint + "; compatible cross target: x86_64-w64-mingw32)";
 }
 
 fn llvm_tool_missing_diagnostic(role: string, origin: string, root: string, searched: string, failure: string) -> Diagnostic {
@@ -636,11 +647,15 @@ fn _llvm_finish_family(tools: LlvmTool[], origin: string, root: string, suffixed
 // Passing the host in keeps the Windows path covered by an ordinary unit
 // test instead of an environment the runner cannot provide.
 fn resolve_llvm_toolchain_for_host(triple: string, host_os: string) -> LlvmFamily ![io] {
-    if !llvm_triple_is_governed(triple) {
+    if !llvm_object_provider_triple_is_supported(triple) {
         return _llvm_unresolved_family(triple, llvm_object_format(triple), llvm_target_unsupported_diagnostic(triple, ""));
     }
     let target_os = llvm_target_os(triple);
-    let roles = llvm_family_roles(target_os);
+    let mut roles = llvm_family_roles(target_os);
+    // MinGW keeps its GCC linker-driver contract. Requiring lld-link here
+    // would couple first-party object emission to a linker the target neither
+    // selects nor uses.
+    if triple == "x86_64-w64-mingw32" { roles = ["llvm-as", "opt", "llc"]; }
     let object_format = llvm_object_format(triple);
     let root = _get_env_cmd("SAILFIN_LLVM_ROOT");
     let mut origin = "path";
@@ -698,6 +713,7 @@ export {
     llvm_family_roles,
     llvm_governed_triples,
     llvm_object_format,
+    llvm_object_provider_triple_is_supported,
     llvm_supported_major,
     llvm_target_os,
     llvm_target_unsupported_diagnostic,

@@ -40,7 +40,13 @@
 // Like `./clang_argv`, this module must NOT import `../backend` — see that
 // file's header for the seed vtable-lowering hazard that constrains every
 // build-driver leaf.
-import { ends_with, int_to_string, trim } from "sfn/strings";
+import {
+    ends_with,
+    int_to_string,
+    split,
+    starts_with,
+    trim
+} from "sfn/strings";
 
 import { _get_env_cmd } from "../build_flags";
 import { index_of, substring } from "../string_utils";
@@ -270,6 +276,9 @@ fn llvm_target_data_layout(triple: string) -> string {
     if triple == "x86_64-pc-windows-msvc" {
         return "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128";
     }
+    if triple == "x86_64-w64-mingw32" {
+        return "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128";
+    }
     return "";
 }
 
@@ -458,6 +467,9 @@ fn llvm_object_pipeline_argv(request: LlvmArtifactRequest, provider: LlvmObjectP
     if provider.target_triple == "x86_64-pc-windows-msvc" {
         llc_argv.push("-incremental-linker-compatible");
     }
+    if provider.target_triple == "x86_64-w64-mingw32" {
+        llc_argv.push("-emulated-tls");
+    }
     llc_argv.push(optimized);
     llc_argv.push("-o");
     llc_argv.push(request.object_path);
@@ -494,6 +506,41 @@ fn _replace_profile_frame_pointer(ir: string, frame_pointer: string) -> string {
     return substring(ir, 0, value_start) + frame_pointer + substring(ir, value_end, ir.length);
 }
 
+// LLVM accepts module target directives only in the module header. Some
+// fixtures and runtime IR carry the right values after another top-level
+// entity; clang used to tolerate/rewrite that input, while llvm-as correctly
+// rejects it. Make the object-provider boundary authoritative by moving the
+// existing directives into a canonical header without changing the published
+// `.ll` artifact.
+fn canonicalize_llvm_target_directives(ir: string, triple: string) -> string {
+    let lines = split(ir, "\n");
+    let mut source_filename = "";
+    let mut body = "";
+    let expected_layout = "target datalayout = \"" + llvm_target_data_layout(triple)
+        + "\"";
+    let expected_triple = "target triple = \"" + triple + "\"";
+    let mut has_layout = false;
+    let mut has_triple = false;
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, "source_filename = ") {
+            source_filename = line + "\n";
+        } else if line == expected_layout { has_layout = true; } else if line == expected_triple {
+            has_triple = true;
+        } else {
+            body = body + line;
+            if i + 1 < lines.length { body = body + "\n"; }
+        }
+        i += 1;
+    }
+    let mut header = source_filename;
+    if has_layout { header = header + expected_layout + "\n"; }
+    if has_triple { header = header + expected_triple + "\n"; }
+    return header + body;
+}
+
 fn llvm_ir_matches_object_profile(ir: string, triple: string, opt_flag: string) -> boolean {
     if index_of(ir, "target triple = \"" + triple + "\"") < 0 { return false; }
     if index_of(ir, "target datalayout = \"" + llvm_target_data_layout(triple)
@@ -512,7 +559,8 @@ fn prepare_llvm_object_pipeline(request: LlvmArtifactRequest, provider: LlvmObje
     let base = llvm_object_pipeline_argv(request, provider);
     if !base.ok { return base; }
     let ir = fs.readFile(request.ir_path);
-    let profiled_ir = _replace_profile_frame_pointer(ir, llvm_profile_frame_pointer(provider.target_triple, request.opt_flag));
+    let canonical_ir = canonicalize_llvm_target_directives(ir, provider.target_triple);
+    let profiled_ir = _replace_profile_frame_pointer(canonical_ir, llvm_profile_frame_pointer(provider.target_triple, request.opt_flag));
     if profiled_ir.length == 0 || !llvm_ir_matches_object_profile(profiled_ir, provider.target_triple, request.opt_flag) {
         let mut failed = base;
         failed.ok = false;
@@ -807,6 +855,7 @@ export {
     foreign_c_missing_compiler_diagnostic,
     llvm_artifact_cache_key,
     llvm_artifact_request_cache_key,
+    canonicalize_llvm_target_directives,
     llvm_ir_matches_object_profile,
     llvm_object_pipeline_argv,
     llvm_object_profile_attributes,

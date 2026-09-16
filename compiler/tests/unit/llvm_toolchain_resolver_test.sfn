@@ -23,6 +23,7 @@ import {
     llvm_family_roles,
     llvm_governed_triples,
     llvm_object_format,
+    llvm_object_provider_triple_is_supported,
     llvm_supported_major,
     llvm_target_unsupported_diagnostic,
     llvm_tool_file_name,
@@ -157,6 +158,7 @@ test "llvm-toolchain-resolver: target probes cover all four governed triples" {
         assert expect_eq_bool(llc_supports_triple(fixture, triples[i]), true).ok;
         i += 1;
     }
+    assert expect_eq_bool(llc_supports_triple(fixture, "x86_64-w64-mingw32"), true).ok;
 }
 
 test "llvm-toolchain-resolver: governed triples exclude the two apple/mingw legacy triples" {
@@ -171,7 +173,7 @@ test "llvm-toolchain-resolver: object format by triple" {
     assert llvm_object_format("aarch64-unknown-linux-gnu") == "elf";
     assert llvm_object_format("arm64-apple-darwin") == "macho";
     assert llvm_object_format("x86_64-pc-windows-msvc") == "coff";
-    assert llvm_object_format("x86_64-w64-mingw32") == "";
+    assert llvm_object_format("x86_64-w64-mingw32") == "coff";
 }
 
 test "llvm-toolchain-resolver: fingerprint is stable and sensitive to every ingredient" {
@@ -215,8 +217,8 @@ test "llvm-toolchain-resolver: diagnostics carry the right codes and detail" {
     assert expect_contains_str(unsupported.message, "x86_64-w64-mingw32").ok;
 }
 
-test "llvm-toolchain-resolver: an ungoverned triple fails closed with E0623" ![io] {
-    let family = resolve_llvm_toolchain("x86_64-w64-mingw32");
+test "llvm-toolchain-resolver: an unsupported triple fails closed with E0623" ![io] {
+    let family = resolve_llvm_toolchain("x86_64-apple-darwin");
     assert expect_eq_bool(family.ok, false).ok;
     if family.diagnostic != null {
         let diag = family.diagnostic;
@@ -225,6 +227,18 @@ test "llvm-toolchain-resolver: an ungoverned triple fails closed with E0623" ![i
         // Never reached: !ok must always carry a diagnostic.
         assert false;
     }
+}
+
+test "llvm-toolchain-resolver: MinGW remains an object-provider target outside the governed four" ![io] {
+    assert expect_eq_bool(llvm_triple_is_governed("x86_64-w64-mingw32"), false).ok;
+    assert expect_eq_bool(llvm_object_provider_triple_is_supported("x86_64-w64-mingw32"), true).ok;
+    let family = resolve_llvm_toolchain("x86_64-w64-mingw32");
+    if family.ok {
+        assert family.tools.length == 3;
+        assert family.object_format == "coff";
+    } else if family.diagnostic != null {
+        assert family.diagnostic.code != "E0623";
+    } else { assert false; }
 }
 
 // Also the assertion that holds on the `SAILFIN_HOST_OS=Windows` leg: `.exe`
