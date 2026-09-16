@@ -29,7 +29,7 @@ import {
 } from "../string_utils";
 import { sha256_hex_of_string } from "./hash";
 import { _path_join } from "./paths";
-import { build_host_os } from "./target";
+import { native_host_os } from "./target";
 
 let LLVM_SUPPORTED_MAJOR: int = 18;
 // Bumping this invalidates every cache keyed on the family fingerprint. It
@@ -700,7 +700,7 @@ fn resolve_llvm_toolchain_for_host(triple: string, host_os: string) -> LlvmFamil
 // `triple` against the real host, or a failed `LlvmFamily` carrying the
 // diagnostic that explains why.
 fn resolve_llvm_toolchain(triple: string) -> LlvmFamily ![io] {
-    return resolve_llvm_toolchain_for_host(triple, build_host_os());
+    return resolve_llvm_toolchain_for_host(triple, native_host_os());
 }
 
 export {

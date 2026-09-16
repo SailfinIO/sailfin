@@ -241,10 +241,9 @@ test "llvm-toolchain-resolver: MinGW remains an object-provider target outside t
     } else { assert false; }
 }
 
-// Also the assertion that holds on the `SAILFIN_HOST_OS=Windows` leg: `.exe`
-// names resolve nothing on a Linux runner, so resolution must fail closed
-// with a named member rather than return "" the way `_which`/
-// `_linker_on_path` do today.
+// The default resolver uses the physical host for executable names even when
+// `SAILFIN_HOST_OS=Windows` simulates target behavior on a Linux runner.
+// Explicit Windows executable-name coverage uses `for_host` below.
 test "llvm-toolchain-resolver: a governed triple resolves structurally, never silently" ![io] {
     let family = resolve_llvm_toolchain("x86_64-unknown-linux-gnu");
     if family.ok {
