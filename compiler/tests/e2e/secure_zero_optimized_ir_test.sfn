@@ -37,8 +37,11 @@ import {
     nested_runner_scratch,
     run_external_c_oracle,
     sfn_bin_path,
+    skip,
     with_tmp_dir
 } from "sfn/test";
+
+import { build_target_triple } from "../../src/build/target";
 
 // SFN-782 review: the lowering terminates its incoming block and opens
 // `secure_zero_pre_`/`_body_`/`_done_` blocks of its own, so the risky part
@@ -115,6 +118,11 @@ fn _optimize_for_triple(ll_path: string, out_path: string, triple: string) -> in
 }
 
 test "secure zero optimized ir: volatile store survives -O2 on linux, darwin, and windows targets" ![io] {
+    // This cross-target Clang IR oracle starts from x86-64 Linux raw IR.
+    if build_target_triple() != "x86_64-unknown-linux-gnu" {
+        skip("cross-target Clang IR oracle requires an x86-64 Linux host profile");
+        return;
+    }
     let outcome = with_tmp_dir(fn (dir: string) -> int {
         let src = dir + "/wipe.sfn";
         let raw_ll = dir + "/raw.ll";

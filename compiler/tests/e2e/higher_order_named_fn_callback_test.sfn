@@ -18,8 +18,11 @@ import {
     clean_runner_env,
     run_external_c_oracle,
     sfn_bin_path,
+    skip,
     with_tmp_dir
 } from "sfn/test";
+
+import { build_target_triple } from "../../src/build/target";
 
 fn _run(path: string) -> string ![io] {
     let mut output: string = "";
@@ -108,6 +111,11 @@ test "hof: direct-only named call emits no function-value adapter or pair" ![io]
 }
 
 test "hof: named function value adapter is frame-free at O2" ![io] {
+    // The assembly assertions below describe x86-64 Linux, not native Mach-O/COFF.
+    if build_target_triple() != "x86_64-unknown-linux-gnu" {
+        skip("x86-64 Linux assembly shape gate");
+        return;
+    }
     let clang_probe = run_external_c_oracle(["--version"]);
     let _probe_out = process.capture_take_stdout();
     let _probe_err = process.capture_take_stderr();

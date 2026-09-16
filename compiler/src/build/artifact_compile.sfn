@@ -61,6 +61,7 @@ import {
     build_host_os,
     build_target_triple,
     host_target_triple,
+    native_host_os,
     target_clang_flags
 } from "./target";
 
@@ -244,7 +245,8 @@ fn _darwin_major_minor(version: string) -> string {
 fn darwin_deployment_target() -> string ![io] {
     let explicit = _get_env_cmd("MACOSX_DEPLOYMENT_TARGET");
     if explicit.length > 0 { return _darwin_major_minor(explicit); }
-    if build_host_os() != "Darwin" { return ""; }
+    // A simulated Windows host still runs on Darwin and needs its native SDK version.
+    if native_host_os() != "Darwin" { return ""; }
     let rc = process.run_capture(["sw_vers", "-productVersion"], process.environ());
     let version = process.capture_take_stdout();
     let _err = process.capture_take_stderr();

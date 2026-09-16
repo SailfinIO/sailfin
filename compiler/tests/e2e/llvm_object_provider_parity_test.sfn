@@ -1,7 +1,9 @@
 // Differential migration-oracle acceptance for SFN-952. The fixture combines
-// numerical code, native TLS, a sequentially-consistent atomic, and COMDAT.
+// numerical code, native TLS, a sequentially-consistent atomic, and COMDAT
+// on object formats that support it (Mach-O does not).
 // Exception and concurrency behavior remain covered by their ordinary e2e
 // suites, which now build through the same default object provider.
+import { find } from "sfn/strings";
 import {
     clean_runner_env_without,
     sfn_bin_path,
@@ -29,9 +31,16 @@ fn _run_pipeline(stages: string[][]) -> int ![io] {
 }
 
 fn _parity_ir(triple: string) -> string {
-    return "target triple = \"" + triple + "\"\n\n" + "$probe = comdat any\n"
+    let mut comdat = "$probe = comdat any\n";
+    let mut probe = "define linkonce_odr i64 @probe() comdat {\nentry:\n";
+    // Mach-O has no COMDAT section model; ELF and COFF still exercise it.
+    if find(triple, "-apple-", 0) >= 0 {
+        comdat = "";
+        probe = "define i64 @probe() {\nentry:\n";
+    }
+    return "target triple = \"" + triple + "\"\n\n" + comdat
         + "@tls_value = thread_local global i64 1\n\n"
-        + "define linkonce_odr i64 @probe() comdat {\nentry:\n"
+        + probe
         + "  %old = atomicrmw add ptr @tls_value, i64 2 seq_cst\n"
         + "  %sum = add i64 %old, 40\n  ret i64 %sum\n}\n\n"
         + "define i32 @main() {\nentry:\n  %value = call i64 @probe()\n"
