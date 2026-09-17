@@ -112,25 +112,33 @@ test "selfhost_basename: trailing slash yields empty basename" {
 // _selfhost_env_entry_has_key — `"KEY=VALUE"` key match
 // --------------------------------------------------------------
 test "selfhost_env_entry_has_key: matches a bound key" {
-    assert expect_eq_bool(_selfhost_env_entry_has_key("SAILFIN_BOOTSTRAP=off", "SAILFIN_BOOTSTRAP"), true).ok;
+    assert expect_eq_bool(_selfhost_env_entry_has_key("SAILFIN_BOOTSTRAP=off", "SAILFIN_BOOTSTRAP", false), true).ok;
 }
 
 test "selfhost_env_entry_has_key: matches an empty value" {
-    assert expect_eq_bool(_selfhost_env_entry_has_key("SAILFIN_BOOTSTRAP=", "SAILFIN_BOOTSTRAP"), true).ok;
+    assert expect_eq_bool(_selfhost_env_entry_has_key("SAILFIN_BOOTSTRAP=", "SAILFIN_BOOTSTRAP", false), true).ok;
 }
 
 test "selfhost_env_entry_has_key: matches a valueless binding" {
-    assert expect_eq_bool(_selfhost_env_entry_has_key("SAILFIN_BOOTSTRAP", "SAILFIN_BOOTSTRAP"), true).ok;
+    assert expect_eq_bool(_selfhost_env_entry_has_key("SAILFIN_BOOTSTRAP", "SAILFIN_BOOTSTRAP", false), true).ok;
 }
 
 // The prefix guard that keeps the override filter from dropping unrelated
 // variables which merely start with the same characters.
 test "selfhost_env_entry_has_key: rejects a longer key sharing a prefix" {
-    assert expect_eq_bool(_selfhost_env_entry_has_key("SAILFIN_BOOTSTRAP_MODE=x", "SAILFIN_BOOTSTRAP"), false).ok;
+    assert expect_eq_bool(_selfhost_env_entry_has_key("SAILFIN_BOOTSTRAP_MODE=x", "SAILFIN_BOOTSTRAP", false), false).ok;
 }
 
 test "selfhost_env_entry_has_key: rejects an unrelated key" {
-    assert expect_eq_bool(_selfhost_env_entry_has_key("PATH=/usr/bin", "SAILFIN_BOOTSTRAP"), false).ok;
+    assert expect_eq_bool(_selfhost_env_entry_has_key("PATH=/usr/bin", "SAILFIN_BOOTSTRAP", false), false).ok;
+}
+
+test "selfhost_env_entry_has_key: Windows matches a mixed-case key" {
+    assert expect_eq_bool(_selfhost_env_entry_has_key("Sailfin_Bootstrap=on", "SAILFIN_BOOTSTRAP", true), true).ok;
+}
+
+test "selfhost_env_entry_has_key: POSIX preserves case distinction" {
+    assert expect_eq_bool(_selfhost_env_entry_has_key("sailfin_bootstrap=on", "SAILFIN_BOOTSTRAP", false), false).ok;
 }
 
 // --------------------------------------------------------------
@@ -148,25 +156,33 @@ test "selfhost_env_entry_has_key: rejects an unrelated key" {
 // either key survives, which membership checks would miss.
 // --------------------------------------------------------------
 test "selfhost_stage_env: appends both overrides to the inherited env" {
-    assert expect_eq_str_array(_selfhost_stage_env(["PATH=/usr/bin", "HOME=/root"], "build/selfhost/s2/scratch"), ["PATH=/usr/bin", "HOME=/root", "SAILFIN_BOOTSTRAP=off", "SAILFIN_TEST_SCRATCH=build/selfhost/s2/scratch"]).ok;
+    assert expect_eq_str_array(_selfhost_stage_env(["PATH=/usr/bin", "HOME=/root"], "build/selfhost/s2/scratch", false), ["PATH=/usr/bin", "HOME=/root", "SAILFIN_BOOTSTRAP=off", "SAILFIN_TEST_SCRATCH=build/selfhost/s2/scratch"]).ok;
 }
 
 // A duplicate key in `envp` resolves unspecified, so an inherited `=on`
 // must be dropped, not merely followed by `=off`.
 test "selfhost_stage_env: replaces an inherited SAILFIN_BOOTSTRAP" {
-    assert expect_eq_str_array(_selfhost_stage_env(["SAILFIN_BOOTSTRAP=on", "PATH=/usr/bin"], "s"), ["PATH=/usr/bin", "SAILFIN_BOOTSTRAP=off", "SAILFIN_TEST_SCRATCH=s"]).ok;
+    assert expect_eq_str_array(_selfhost_stage_env(["SAILFIN_BOOTSTRAP=on", "PATH=/usr/bin"], "s", false), ["PATH=/usr/bin", "SAILFIN_BOOTSTRAP=off", "SAILFIN_TEST_SCRATCH=s"]).ok;
 }
 
 test "selfhost_stage_env: replaces an inherited SAILFIN_TEST_SCRATCH" {
-    assert expect_eq_str_array(_selfhost_stage_env(["SAILFIN_TEST_SCRATCH=/stale", "PATH=/usr/bin"], "fresh"), ["PATH=/usr/bin", "SAILFIN_BOOTSTRAP=off", "SAILFIN_TEST_SCRATCH=fresh"]).ok;
+    assert expect_eq_str_array(_selfhost_stage_env(["SAILFIN_TEST_SCRATCH=/stale", "PATH=/usr/bin"], "fresh", false), ["PATH=/usr/bin", "SAILFIN_BOOTSTRAP=off", "SAILFIN_TEST_SCRATCH=fresh"]).ok;
 }
 
 test "selfhost_stage_env: an empty parent env still carries both overrides" {
-    assert expect_eq_str_array(_selfhost_stage_env([], "s"), ["SAILFIN_BOOTSTRAP=off", "SAILFIN_TEST_SCRATCH=s"]).ok;
+    assert expect_eq_str_array(_selfhost_stage_env([], "s", false), ["SAILFIN_BOOTSTRAP=off", "SAILFIN_TEST_SCRATCH=s"]).ok;
 }
 
 test "selfhost_stage_env: keeps a variable that merely shares a prefix" {
-    assert expect_eq_str_array(_selfhost_stage_env(["SAILFIN_BOOTSTRAP_MODE=x"], "s"), ["SAILFIN_BOOTSTRAP_MODE=x", "SAILFIN_BOOTSTRAP=off", "SAILFIN_TEST_SCRATCH=s"]).ok;
+    assert expect_eq_str_array(_selfhost_stage_env(["SAILFIN_BOOTSTRAP_MODE=x"], "s", false), ["SAILFIN_BOOTSTRAP_MODE=x", "SAILFIN_BOOTSTRAP=off", "SAILFIN_TEST_SCRATCH=s"]).ok;
+}
+
+test "selfhost_stage_env: Windows replaces mixed-case inherited overrides" {
+    assert expect_eq_str_array(_selfhost_stage_env(["sailfin_bootstrap=on", "Sailfin_Test_Scratch=/stale", "PATH=C:/bin"], "fresh", true), ["PATH=C:/bin", "SAILFIN_BOOTSTRAP=off", "SAILFIN_TEST_SCRATCH=fresh"]).ok;
+}
+
+test "selfhost_stage_env: POSIX keeps mixed-case inherited bindings" {
+    assert expect_eq_str_array(_selfhost_stage_env(["sailfin_bootstrap=on", "sailfin_test_scratch=/stale"], "fresh", false), ["sailfin_bootstrap=on", "sailfin_test_scratch=/stale", "SAILFIN_BOOTSTRAP=off", "SAILFIN_TEST_SCRATCH=fresh"]).ok;
 }
 
 // --------------------------------------------------------------

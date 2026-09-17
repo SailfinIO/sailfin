@@ -1,4 +1,4 @@
-import { int_to_string } from "sfn/strings";
+import { ascii_lowercase, int_to_string } from "sfn/strings";
 
 // compiler/src/cli_selfhost.sfn
 //
@@ -52,7 +52,7 @@ import {
     _mktemp_sibling_cmd,
     _sha256_of_file
 } from "./build/fs";
-import { host_exe_name } from "./build/target";
+import { host_exe_name, host_is_windows } from "./build/target";
 import {
     DeterminismModule,
     DeterminismSnapshot,
@@ -285,12 +285,15 @@ fn _selfhost_basename(path: string) -> string {
 
 // Whether a flat `"KEY=VALUE"` environment entry binds `key`. A bare
 // `"KEY"` with no `=` counts, since that is how a valueless binding is
-// reported.
-fn _selfhost_env_entry_has_key(entry: string, key: string) -> boolean {
-    if entry == key { return true; }
-    if entry.length <= key.length { return false; }
-    if substring(entry, 0, key.length) != key { return false; }
-    return substring(entry, key.length, key.length + 1) == "=";
+// reported. Windows folds environment names; POSIX keeps case distinct.
+fn _selfhost_env_entry_has_key(entry: string, key: string, windows_host: boolean) -> boolean {
+    if entry.length < key.length { return false; }
+    let entry_key = substring(entry, 0, key.length);
+    if windows_host {
+        if ascii_lowercase(entry_key) != ascii_lowercase(key) { return false; }
+    } else if entry_key != key { return false; }
+    return entry.length == key.length || substring(entry, key.length, key.length
+        + 1) == "=";
 }
 
 // The environment for one stage child: the parent's, with the two
@@ -311,13 +314,14 @@ fn _selfhost_env_entry_has_key(entry: string, key: string) -> boolean {
 // bootstrap gate (SFEP-0047) would otherwise fetch + re-exec the seed here
 // and subvert the self-host check while still reporting green. Mirrors the
 // `SAILFIN_TOOLCHAIN=off` seed-transition note in `compiler/capsule.toml`.
-fn _selfhost_stage_env(parent_env: string[], scratch_dir: string) -> string[] {
+fn _selfhost_stage_env(parent_env: string[], scratch_dir: string, windows_host: boolean) -> string[] {
     let mut child_env: string[] = [];
     let mut i: int = 0;
     loop {
         if i >= parent_env.length { break; }
         let entry = parent_env[i];
-        if !_selfhost_env_entry_has_key(entry, "SAILFIN_BOOTSTRAP") && !_selfhost_env_entry_has_key(entry, "SAILFIN_TEST_SCRATCH") {
+        if !_selfhost_env_entry_has_key(entry, "SAILFIN_BOOTSTRAP", windows_host)
+            && !_selfhost_env_entry_has_key(entry, "SAILFIN_TEST_SCRATCH", windows_host) {
             child_env.push(entry);
         }
         i += 1;
@@ -621,7 +625,7 @@ fn _selfhost_build_stage(driver_bin: string, scratch_dir: string, work_subdir: s
         print.err("[selfhost] WARNING: could not fully clear " + compiler_ir
             + " — a stale module may skew the fixed-point diff");
     }
-    let rc = process.run_capture(_selfhost_stage_argv(driver_bin, work_subdir, out_bin), _selfhost_stage_env(process.environ(), scratch_dir));
+    let rc = process.run_capture(_selfhost_stage_argv(driver_bin, work_subdir, out_bin), _selfhost_stage_env(process.environ(), scratch_dir, host_is_windows()));
     // `run_capture` buffers rather than passing the child's stdio through,
     // so both streams are handed back to the console here.
     _selfhost_emit_captured_stream(process.capture_take_stdout(), false);
