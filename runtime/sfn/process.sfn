@@ -503,15 +503,13 @@ struct PollSlot {
 // the struct `process_spawn_with_env` mallocs and returns as an
 // `int64`). The byte layout MUST stay identical to the C struct
 // because `spawn_with_env` (the producer) is still C (M4): the four
-// `i32` fds occupy offsets 0/4/8/12, then six `i64` slots at
-// 16/24/32/40/48/56 (total 64 bytes, no trailing pad). LLVM lays
-// `{ i32, i32, i32, i32, i64, i64, i64, i64, i64, i64 }` out at
-// exactly those offsets. The two `{ buf, len, cap }` triples at
+// `i32` fds occupy offsets 0/4/8/12, then six `i64` stash slots at
+// 16/24/32/40/48/56 and two cached-exit slots at 64/72 (80 bytes).
+// The two `{ buf, len, cap }` triples at
 // offset 16 (stdout) and 40 (stderr) are each a `GrowBuf`, so the
 // drain helpers operate on them through a `* GrowBuf` view computed
-// by address arithmetic. When `spawn_with_env` ports to Sailfin
-// (M4), this struct becomes the canonical owner and the C struct is
-// deleted — keep the two in lockstep until then.
+// by address arithmetic. The cached-exit slots follow the stash slots,
+// preserving their fixed offsets for all existing handle operations.
 struct SailfinProcessHandle {
     pid: i32;
     stdin_fd: i32;
@@ -523,6 +521,9 @@ struct SailfinProcessHandle {
     stderr_buf: i64;
     stderr_len: i64;
     stderr_cap: i64;
+    // A nonblocking exit probe may reap the child before handle_wait.
+    reaped: i64;
+    exit_status: i64;
 }
 
 // Build a NULL-terminated C `char**` argv/envp buffer from a Sailfin
@@ -1389,7 +1390,7 @@ fn _spawn_with_env_impl(argv: string[], env_flat: string[], cwd: *u8) -> i64 ![i
     free(child_argv);
     free(child_envp);
 
-    let h: *SailfinProcessHandle = malloc(64 as usize) as *SailfinProcessHandle;
+    let h: *SailfinProcessHandle = malloc(80 as usize) as *SailfinProcessHandle;
     if h as i64 == 0 {
         close(in_wr);
         close(out_rd);
@@ -1407,6 +1408,8 @@ fn _spawn_with_env_impl(argv: string[], env_flat: string[], cwd: *u8) -> i64 ![i
     h.stderr_buf = 0;
     h.stderr_len = 0;
     h.stderr_cap = 0;
+    h.reaped = 0;
+    h.exit_status = 0;
     return h as i64;
 }
 
@@ -1848,6 +1851,21 @@ fn sfn_process_handle_write_bytes(handle_id: i64, data: *u8, len: i64) -> i64 ![
 }
 
 // ── process.handle_wait ────────────────────────────────────────
+// Probe child completion without blocking or freeing the handle. POSIX
+// waitpid(WNOHANG) reaps an exited child, so save its status for handle_wait.
+fn sfn_process_handle_exit_state(handle_id: i64) -> i64 ![io] {
+    if handle_id == 0 { return -1; }
+    let h: *SailfinProcessHandle = handle_id as *SailfinProcessHandle;
+    if h.reaped != 0 { return 1; }
+    let mut status: i32 = 0;
+    let waited = waitpid(h.pid, & status, 1);
+    if waited == 0 { return 0; }
+    if waited < 0 { return -1; }
+    h.exit_status = status as i64;
+    h.reaped = 1;
+    return 1;
+}
+
 // Close any still-open fds, reap the child, free the stash buffers
 // and the handle itself, and return the exit code (0..255),
 // `128 + signal`, `127` for stop/continue, or `-1` if the handle is
@@ -1874,7 +1892,10 @@ fn sfn_process_handle_wait(handle_id: i64) -> i64 ![io] {
     let pid: i32 = h.pid;
     let mut status: i32 = 0;
     let status_ptr: *i32 = & status;
-    let wait_err: i32 = waitpid(pid, status_ptr, 0);
+    let mut wait_err: i32 = pid;
+    if h.reaped != 0 { status = h.exit_status as i32; } else {
+        wait_err = waitpid(pid, status_ptr, 0);
+    }
     let mut result: i64 = -1;
     if wait_err >= 0 {
         let sig: i32 = status & 127;

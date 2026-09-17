@@ -61,7 +61,10 @@ import {
     determinism_diff_to_text,
     make_determinism_module
 } from "./build_report";
-import { starts_with, substring } from "./string_utils";
+import { char_code_at_text, starts_with, substring } from "./string_utils";
+
+// Native nonblocking exit probe; handle_wait remains the sole cleanup path.
+extern fn sfn_process_handle_exit_state(handle_id: i64) -> i64;
 
 // Resolved configuration for one `sfn selfhost` invocation. Defaults
 // reproduce the former Makefile paths byte-for-byte.
@@ -71,13 +74,8 @@ struct SelfhostConfig {
     seedcheck_out: string;
     stage3_out: string;
     promote_to: string;
-    // Accepted and recorded, but not enforced (SFN-619 restores it). Its
-    // only ever vehicle was interpolation into a shell `timeout N …`
-    // prefix, and the runtime offers no shell-free equivalent — a deadline
-    // today means the spawn/poll/kill handle API
-    // (`cli/commands/test/pool.sfn::_reap_test_child`). Kept in the flag
-    // surface so no existing caller breaks.
-    smoke_timeout: string;
+    // Seconds; zero disables the smoke deadline.
+    smoke_timeout: int;
     json: boolean;
     no_promote: boolean;
     strict: boolean;
@@ -90,7 +88,7 @@ fn _selfhost_default_config() -> SelfhostConfig ![io] {
         seedcheck_out: host_exe_name("build/bin/sfn-seedcheck"),
         stage3_out: host_exe_name("build/bin/sfn-stage3"),
         promote_to: host_exe_name("build/bin/sfn"),
-        smoke_timeout: "10",
+        smoke_timeout: 10,
         json: false,
         no_promote: false,
         strict: false
@@ -231,11 +229,28 @@ fn _selfhost_usage() -> string {
     return "usage: sfn selfhost [--work-dir DIR] [--first-pass BIN]\n"
         + "                    [--seedcheck-out BIN] [--stage3-out BIN]\n"
         + "                    [--promote-to BIN]\n"
-        + "                    [--smoke-timeout SECS] (accepted, not enforced)\n"
+        + "                    [--smoke-timeout SECS] (0 disables deadline)\n"
         + "                    [--no-promote] [--strict] [--json]\n"
         + "\n"
         + "Internal: validate the compiler self-hosts to a fixed point\n"
         + "(stage2 == stage3 LLVM IR) and promote the validated binary.\n";
+}
+
+// Reject malformed and overflow-prone deadlines before starting stage2.
+fn _selfhost_parse_smoke_timeout(value: string) -> int {
+    if value.length == 0 { return -1; }
+    let mut secs: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        let digit = char_code_at_text(value, i) - 48;
+        if digit < 0 || digit > 9 { return -1; }
+        if secs > 214748 { return -1; }
+        secs = secs * 10 + digit;
+        if secs > 2147483 { return -1; }
+        i += 1;
+    }
+    return secs;
 }
 
 // Whether `needle` occurs in `haystack`. `_string_contains_cmd` in
@@ -627,24 +642,73 @@ fn _selfhost_build_stage(driver_bin: string, scratch_dir: string, work_subdir: s
 // is intentionally ignored, exactly as the Makefile's `|| true` did — the
 // greeting substring is the contract.
 //
-// stdout and stderr are captured separately and joined in-process; the
-// former combined capture came from a `2>&1` redirection, which needed a
-// shell. The greeting may arrive on either stream, so both are searched.
-//
-// There is no deadline here: `--smoke-timeout` came from the shell
-// `timeout` prefix, and `run_capture` drains to EOF with an infinite poll,
-// so a wedged seedcheck binary hangs this gate. SFN-619 restores a bound
-// via the spawn/poll/kill handle API.
-fn _selfhost_smoke(seedcheck_bin: string) -> boolean ![io] {
+// Return 0 for greeting, 1 for missing greeting, 124 for deadline, and
+// 127 for spawn failure. Drain both pipes before waiting, since a child
+// can fill either pipe. The handle API keeps the smoke gate shell-free.
+fn _selfhost_smoke_argv(argv: string[], timeout_secs: int) -> int ![clock, io] {
+    let handle = process.spawn_with_env(argv, process.environ());
+    if handle == 0 { return 127; }
+    let start_ms = monotonic_millis();
+    let deadline_ms = timeout_secs * 1000;
+    let mut output: string = "";
+    let mut killed = false;
+    loop {
+        let mut poll_to: int = -1;
+        if timeout_secs > 0 {
+            let remaining = deadline_ms - ((monotonic_millis() - start_ms) as int);
+            if remaining <= 0 {
+                process.handle_kill(handle);
+                killed = true;
+                break;
+            }
+            poll_to = remaining;
+        }
+        if process.handle_stdout_at_eof(handle) && process.handle_stderr_at_eof(handle) {
+            let exit_state = sfn_process_handle_exit_state(handle as i64);
+            if exit_state == 1 { break; }
+            sleep(10);
+            continue;
+        }
+        let out_fd = process.handle_stdout_fd(handle);
+        let err_fd = process.handle_stderr_fd(handle);
+        let mut fds: int[] = [];
+        if out_fd >= 0 { fds.push(out_fd); }
+        if err_fd >= 0 { fds.push(err_fd); }
+        let mut read_out = false;
+        let mut read_err = false;
+        if fds.length == 0 {
+            // Windows framed reads pump both pipes with a finite poll budget.
+            read_out = !process.handle_stdout_at_eof(handle);
+            read_err = !process.handle_stderr_at_eof(handle);
+        } else {
+            let ready = io.poll_any(fds, poll_to);
+            if ready < 0 { continue; }
+            read_out = ready == out_fd;
+            read_err = ready == err_fd;
+        }
+        if read_out {
+            let chunk = process.handle_read_bytes_stdout(handle, 65536);
+            if chunk.length > 0 { output = output + chunk; }
+        }
+        if read_err {
+            let chunk = process.handle_read_bytes_stderr(handle, 65536);
+            if chunk.length > 0 { output = output + chunk; }
+        }
+    }
+    let _ = process.handle_wait(handle);
+    if killed { return 124; }
+    if _selfhost_contains(output, "Hello, Sailfin!") { return 0; }
+    return 1;
+}
+
+fn _selfhost_smoke(seedcheck_bin: string, timeout_secs: int) -> int ![clock, io] {
     // --skip-toolchain-check: the seedcheck binary is the exact artifact
     // under test and must not re-select a different toolchain to run this.
     let argv: string[] = [seedcheck_bin, "run", "examples/basics/hello-world.sfn", "--skip-toolchain-check"];
-    let _ = process.run_capture(argv, process.environ());
-    let combined = process.capture_take_stdout() + process.capture_take_stderr();
-    return _selfhost_contains(combined, "Hello, Sailfin!");
+    return _selfhost_smoke_argv(argv, timeout_secs);
 }
 
-fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
+fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![clock, io] {
     let mut cfg = _selfhost_default_config();
     let mut led = _selfhost_new_ledger();
 
@@ -703,7 +767,11 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
                 print.err("[selfhost] --smoke-timeout requires a value");
                 return 2;
             }
-            cfg.smoke_timeout = args[argi];
+            cfg.smoke_timeout = _selfhost_parse_smoke_timeout(args[argi]);
+            if cfg.smoke_timeout < 0 {
+                print.err("[selfhost] --smoke-timeout requires nonnegative integer seconds");
+                return 2;
+            }
         } else {
             print.err("[selfhost] unknown argument: " + arg);
             print(_selfhost_usage());
@@ -818,9 +886,16 @@ fn handle_selfhost_command(args: string[], binary_dir: string) -> int ![io] {
     if !cfg.json {
         print("[selfhost] validating seedcheck binary runs hello-world...");
     }
-    if !_selfhost_smoke(cfg.seedcheck_out) {
-        print.err("[selfhost] seedcheck binary cannot run hello-world.sfn"
-            + " (expected 'Hello, Sailfin!')");
+    let smoke_rc = _selfhost_smoke(cfg.seedcheck_out, cfg.smoke_timeout);
+    if smoke_rc != 0 {
+        if smoke_rc == 124 {
+            print.err("[selfhost] seedcheck smoke timed out after "
+                + int_to_string(cfg.smoke_timeout)
+                + " seconds");
+        } else {
+            print.err("[selfhost] seedcheck binary cannot run hello-world.sfn"
+                + " (expected 'Hello, Sailfin!')");
+        }
         print.err("[selfhost] the seedcheck compiler is NOT viable — fix the compiler");
         led.phases.push(SelfhostPhase {
             name: "seedcheck-smoke", status: "fail", exit_code: 1

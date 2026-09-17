@@ -4,17 +4,56 @@
 // selfhost-specific string helpers that feed the smoke gate and the
 // `.ll`-dir snapshot loader, plus the argv/env builders that spawn each
 // stage child without a shell (SFN-489).
-import { expect_eq_bool, expect_eq_str_array } from "sfn/test";
+import { expect_eq_bool, expect_eq_str_array, process_fixture_bin } from "sfn/test";
 
 import {
     _selfhost_basename,
     _selfhost_compiler_ir_dir,
     _selfhost_contains,
     _selfhost_env_entry_has_key,
+    _selfhost_parse_smoke_timeout,
     _selfhost_relative_ll_slug,
+    _selfhost_smoke_argv,
     _selfhost_stage_argv,
     _selfhost_stage_env
 } from "../../src/cli_selfhost";
+
+extern fn sfn_process_handle_exit_state(handle_id: i64) -> i64;
+
+test "selfhost smoke timeout: parses nonnegative seconds" {
+    assert _selfhost_parse_smoke_timeout("0") == 0;
+    assert _selfhost_parse_smoke_timeout("10") == 10;
+    assert _selfhost_parse_smoke_timeout("") == -1;
+    assert _selfhost_parse_smoke_timeout("1x") == -1;
+    assert _selfhost_parse_smoke_timeout("2147484") == -1;
+}
+
+test "selfhost smoke timeout: kills a slow child" ![clock, io] {
+    // The child exits after three seconds even if the deadline regresses,
+    // so a failing test cannot hang the suite indefinitely.
+    let argv = [process_fixture_bin(), "emit", "Hello, Sailfin!", "", "0", "3000"];
+    assert _selfhost_smoke_argv(argv, 1) == 124;
+}
+
+test "selfhost smoke timeout: zero allows a delayed greeting" ![clock, io] {
+    let argv = [process_fixture_bin(), "emit", "", "Hello, Sailfin!", "0", "200"];
+    assert _selfhost_smoke_argv(argv, 0) == 0;
+}
+
+test "selfhost smoke timeout: missing greeting is distinct" ![clock, io] {
+    let argv = [process_fixture_bin(), "emit", "goodbye", "", "0", "0"];
+    assert _selfhost_smoke_argv(argv, 1) == 1;
+}
+
+test "selfhost smoke timeout: exit probe preserves final wait status" ![clock, io] {
+    let argv = [process_fixture_bin(), "emit", "", "", "7", "200"];
+    let handle = process.spawn_with_env(argv, process.environ());
+    assert handle != 0;
+    assert sfn_process_handle_exit_state(handle as i64) == 0;
+    sleep(300);
+    assert sfn_process_handle_exit_state(handle as i64) == 1;
+    assert process.handle_wait(handle) == 7;
+}
 
 test "selfhost paths: compiler IR uses the scoped capsule prefix" {
     assert _selfhost_compiler_ir_dir() == "build/capsules/sfn/compiler/ir";
