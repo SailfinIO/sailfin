@@ -1920,6 +1920,19 @@ fn sfn_process_handle_read_stderr(handle_id: i64) -> *u8 ![io] {
     return _pw_gb_take(_pw_h_err_gb(h));
 }
 
+// Probe completion without freeing the handle. WaitForSingleObject with a
+// zero timeout does not consume the exit status, so handle_wait still owns
+// the sole cleanup path.
+fn sfn_process_handle_exit_state(handle_id: i64) -> i64 ![io] {
+    if handle_id == 0 { return -1; }
+    let h: *PwProcHandle = handle_id as *PwProcHandle;
+    if h.h_process == 0 { return -1; }
+    let state = WaitForSingleObject(h.h_process, 0);
+    if state == 0 { return 1; }
+    if state == 258 { return 0; }
+    return -1;
+}
+
 // Reap the child and destroy the handle. Mirrors the POSIX peer: this is
 // the SOLE free path, so a handle never waited leaks its record, both
 // stash buffers, and the kernel process/thread handles. Any still-open
