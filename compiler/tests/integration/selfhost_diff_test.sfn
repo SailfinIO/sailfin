@@ -224,19 +224,19 @@ test "selfhost_snapshot: runtime module does not collide with a same-basename ca
 // --------------------------------------------------------------
 // handle_selfhost_command — early-return arg handling (no build)
 // --------------------------------------------------------------
-test "selfhost cmd: -h returns 0 without building" ![io] {
+test "selfhost cmd: -h returns 0 without building" ![clock, io] {
     assert handle_selfhost_command(["selfhost", "-h"], "") == 0;
 }
 
-test "selfhost cmd: unknown flag returns usage exit 2" ![io] {
+test "selfhost cmd: unknown flag returns usage exit 2" ![clock, io] {
     assert handle_selfhost_command(["selfhost", "--bogus"], "") == 2;
 }
 
-test "selfhost cmd: flag missing its value returns exit 2" ![io] {
+test "selfhost cmd: flag missing its value returns exit 2" ![clock, io] {
     assert handle_selfhost_command(["selfhost", "--work-dir"], "") == 2;
 }
 
-test "selfhost cmd: missing first-pass binary returns exit 1" ![io] {
+test "selfhost cmd: missing first-pass binary returns exit 1" ![clock, io] {
     assert handle_selfhost_command(["selfhost", "--first-pass", "/no/such/sailfin/binary"], "") == 1;
 }
 
