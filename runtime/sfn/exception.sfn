@@ -147,12 +147,12 @@ extern fn longjmp(env: *u8, val: i32) -> void;
 // while M2.7a coexists with TLS polling).
 extern fn abort() -> void;
 
-// libc `write(fd, buf, count)` and `strlen` back the value-error
+// `sfn_fd_write(fd, buf, count)` and libc `strlen` back the value-error
 // diagnostic path at the bottom of this module. Same inline-extern
 // rationale as the setjmp/malloc trio above and
 // `runtime/sfn/memory/mem.sfn`'s bounds-check abort path, which
 // writes its diagnostic to fd 2 the same way.
-extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
+extern fn sfn_fd_write(fd: i32, buf: *u8, count: usize) -> i64;
 
 extern fn strlen(s: *u8) -> usize;
 
@@ -445,11 +445,11 @@ fn sfn_has_exception() -> bool { return sfn_exception_message_addr != 0; }
 // propagates (same note as `sfn_throw`).
 fn sfn_raise_value_error(message: *u8) -> void {
     sfn_set_exception(message);
-    if message as i64 != 0 { write(2, message, strlen(message)); }
+    if message as i64 != 0 { sfn_fd_write(2, message, strlen(message)); }
     let nl = malloc(1 as usize);
     if nl as i64 != 0 {
         memset(nl, 10, 1 as usize);
-        write(2, nl, 1 as usize);
+        sfn_fd_write(2, nl, 1 as usize);
         free(nl);
     }
     abort();

@@ -245,6 +245,7 @@ test "two pthreads bumping a thread_local i64 head do not interfere" ![io] {
 // Build the C source for the exception.sfn-driven TLS isolation harness.
 fn _exception_tls_harness_c() -> string {
     return "#include <stdio.h>\n" + "#include <stdint.h>\n"
+        + "long long sfn_fd_write(int fd, const unsigned char *buf, size_t n) { (void)fd; return (long long)fwrite(buf, 1, n, stderr); }\n"
         + "#include <stdlib.h>\n"
         + "#include <pthread.h>\n"
         + "#include <sched.h>\n"

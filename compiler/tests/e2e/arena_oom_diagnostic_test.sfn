@@ -194,6 +194,7 @@ fn _reentrancy_harness_c() -> string {
     return "#include <stddef.h>\n" + "#include <stdlib.h>\n"
         + "#include <string.h>\n"
         + "#include <stdio.h>\n"
+        + "long long sfn_fd_write(int fd, const unsigned char *buf, size_t n) { (void)fd; return (long long)fwrite(buf, 1, n, stderr); }\n"
         + "/* i1 return -> declare _Bool so the upper bits of the return register are\n"
         + " * not read as garbage (an `int` decl makes every value read as true). */\n"
         + "extern _Bool sfn_arena_enabled(void);\n"

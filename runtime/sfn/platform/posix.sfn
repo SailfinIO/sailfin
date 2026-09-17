@@ -49,10 +49,8 @@ extern fn waitpid(pid: i32, status: *i32, options: i32) -> i32;
 // cross-module-extern limitation noted in this file's header.
 extern fn pipe(fds: *i32) -> i32;
 
-extern fn read(fd: i32, buf: *u8, count: usize) -> i64;
-
-extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
-
+// `read` and `write` live behind the target-selected `fd_io` pair.
+// POSIX-width declarations here leak into Windows-linked importers (SFN-942).
 extern fn close(fd: i32) -> i32;
 
 extern fn poll(fds: *PollFd, nfds: usize, timeout: i32) -> i32;

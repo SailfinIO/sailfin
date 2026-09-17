@@ -123,6 +123,7 @@ test "mark → alloc → rewind reclaims post-mark bump (C harness via clang)" !
     // Write the C harness
     let harness = dir + "/harness.c";
     fs.writeFile(harness, "#include <stddef.h>\n" + "#include <stdio.h>\n"
+        + "long long sfn_fd_write(int fd, const unsigned char *buf, size_t n) { (void)fd; return (long long)fwrite(buf, 1, n, stderr); }\n"
         + "#include <stdint.h>\n"
         + "#include <stdlib.h>\n"
         + "#include <sys/wait.h>\n"

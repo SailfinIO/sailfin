@@ -148,6 +148,7 @@ test "grow-at-tip unique-owner + relocate-on-alias is byte-correct and determini
     // bounded while preserving the multi-sweep byte-identity proxy.
     fs.writeFile(harness, "#include <stddef.h>\n" + "#include <stdint.h>\n"
         + "#include <stdio.h>\n"
+        + "long long sfn_fd_write(int fd, const unsigned char *buf, size_t n) { (void)fd; return (long long)fwrite(buf, 1, n, stderr); }\n"
         + "#include <stdlib.h>\n"
         + "#include <string.h>\n"
         + "\n"

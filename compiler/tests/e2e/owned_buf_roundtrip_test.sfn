@@ -139,6 +139,7 @@ test "new → append → byte_at → grow → slice roundtrip (C harness via cla
     let harness = dir + "/harness.c";
     fs.writeFile(harness, "#include <stddef.h>\n" + "#include <stdint.h>\n"
         + "#include <stdio.h>\n"
+        + "long long sfn_fd_write(int fd, const unsigned char *buf, size_t n) { (void)fd; return (long long)fwrite(buf, 1, n, stderr); }\n"
         + "#include <stdlib.h>\n"
         + "\n"
         + "extern void *sfn_arena_sfn_create(size_t default_page_size);\n"

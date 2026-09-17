@@ -67,10 +67,9 @@ extern fn memcmp(a: *u8, b: *u8, n: usize) -> i32;
 
 extern fn strtoll(s: *u8, end: *u8, base: i32) -> i64;
 
-// `write(2, ...)` for the trace line. The UCRT exports this POSIX shim, which
-// is why the trace path can use it directly rather than routing through
-// `WriteFile` on a `GetStdHandle(STD_ERROR_HANDLE)`.
-extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
+// The fd helper handles UCRT count narrowing and result sign-extension for
+// the trace line, even though this caller discards the result (SFN-942).
+extern fn sfn_fd_write(fd: i32, buf: *u8, count: usize) -> i64;
 
 extern fn sfn_str_eq(a: *u8, b: *u8) -> bool;
 
@@ -101,7 +100,7 @@ fn _win_mem_limit_trace_enabled() -> bool {
 fn _win_mem_limit_trace(msg: string) ![io] {
     if !_win_mem_limit_trace_enabled() { return; }
     let p: *u8 = msg as *u8;
-    write(2, p, strlen(p));
+    sfn_fd_write(2, p, strlen(p));
 }
 
 // Install `target` bytes as a per-process committed-memory cap on a job
