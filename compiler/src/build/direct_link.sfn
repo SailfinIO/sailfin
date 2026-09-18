@@ -479,6 +479,24 @@ fn resolve_direct_ld_lld(target_os: string, static_link: boolean) -> DirectLinkC
     if target_os != "Linux" {
         return _direct_fail("target is not Linux (" + target_os + ")");
     }
+    // The HOST must be Linux too, not just the target. Every prerequisite
+    // below is a host path — `/lib64/ld-linux-*.so.*`, the multiarch
+    // libdirs, the gcc install dir, and `_which` against the host PATH —
+    // so a Windows or macOS host cross-building to Linux resolves none of
+    // them. Before SFN-953 that produced a clang fallback; keying ownership
+    // on the target alone would now fail it closed instead, which is what
+    // broke `windows_exe_suffix_test.sfn` on the native Windows leg.
+    //
+    // SFEP-0066 §3.2 settles it: the contract governs four NATIVE
+    // host/target pairs, and "cross-compilation may exercise the same
+    // artifact contracts, but it cannot establish native support." A
+    // cross-build is therefore an unowned configuration, not an unmet
+    // prerequisite, and keeps the clang route.
+    let host_os = native_host_os();
+    if host_os != "Linux" {
+        return _direct_fail("cross-building to Linux from a " + host_os
+            + " host is not a governed native pair");
+    }
     // Mirror SFN-471's non-shelling host-arch seam: the override is the
     // cross-emit/e2e hook, then the resolved TARGET triple (SFN-923 — this
     // previously probed only the HOST here, disagreeing with
