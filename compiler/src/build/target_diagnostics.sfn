@@ -11,7 +11,9 @@
 //
 // Also holds the `sfn build --static` (SFN-1268) diagnostics: E0625 for the
 // closed triple set static linking supports, E0626 for a resolvable target
-// whose static prerequisites are missing on the host.
+// whose static prerequisites are missing on the host; and E0628, the
+// ordinary dynamic link's equivalent of E0626 on a target that owns Link
+// (SFN-953).
 import { Diagnostic } from "sfn/analyzer/typecheck_types";
 
 import { index_of } from "../string_utils";
@@ -86,7 +88,45 @@ fn static_prerequisites_diagnostic(triple: string, reason: string) -> Diagnostic
     };
 }
 
+// `resolve_direct_ld_lld`'s reasons fall into three remediation classes, and
+// sending the wrong hint is worse than sending none: telling a developer to
+// install glibc packages they already have is the exact failure
+// `_static_prerequisite_hint` was split to avoid (SFN-1268).
+fn _direct_link_prerequisite_hint(reason: string) -> string {
+    if index_of(reason, "SAILFIN_LINK_PROVIDER") >= 0 {
+        return " (hint: unset SAILFIN_LINK_PROVIDER, or set it to `direct` or `clang-oracle`)";
+    }
+    if index_of(reason, "ld.lld") >= 0 {
+        return " (hint: install your distribution's lld package, e.g. lld / llvm, so ld.lld is on PATH)";
+    }
+    return " (hint: install your distribution's C development packages, e.g. libc6-dev + gcc / glibc-devel + libgcc, which supply the startup objects and ELF loader)";
+}
+
+// Fail-closed refusal for the Link role on a target Sailfin OWNS (SFEP-0066
+// §3.2: glibc Linux x86-64 and aarch64). Falling back to the clang driver
+// here would mean the provider that executed is not the provider claimed,
+// which is the precise thing §3.1 forbids — "fallback is not ownership".
+//
+// Only reached when `requires_direct_link` is true, so an unowned target
+// (Darwin/SFN-954, Windows/SFN-955) and an explicit provider selection
+// still take the legacy route without seeing this diagnostic.
+fn direct_link_prerequisites_diagnostic(triple: string, reason: string) -> Diagnostic {
+    return Diagnostic {
+        code: "E0628",
+        severity: "error",
+        message: "could not resolve the direct ld.lld link prerequisites for "
+            + triple
+            + ": "
+            + reason
+            + _direct_link_prerequisite_hint(reason),
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
 export {
+    direct_link_prerequisites_diagnostic,
     static_prerequisites_diagnostic,
     static_unsupported_target_diagnostic,
     supported_targets_hint,
