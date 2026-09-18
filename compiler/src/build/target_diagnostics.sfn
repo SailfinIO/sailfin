@@ -97,7 +97,13 @@ fn _direct_link_prerequisite_hint(reason: string) -> string {
         return " (hint: unset SAILFIN_LINK_PROVIDER, or set it to `direct` or `clang-oracle`)";
     }
     if index_of(reason, "ld.lld") >= 0 {
-        return " (hint: install your distribution's lld package, e.g. lld / llvm, so ld.lld is on PATH)";
+        // Name the escape hatch too. A mold-only host is the common way to
+        // hit this, and `SAILFIN_LINKER=mold` is a supported selection that
+        // keeps it building (SFEP-0066 §3.1 exempts an explicitly chosen
+        // provider from the ownership claim) — telling such a developer
+        // only to install lld would send them to change a machine that is
+        // configured the way the docs told them to configure it.
+        return " (hint: install your distribution's lld package, e.g. lld / llvm, so ld.lld is on PATH; or select another linker explicitly with SAILFIN_LINKER=<name>)";
     }
     return " (hint: install your distribution's C development packages, e.g. libc6-dev + gcc / glibc-devel + libgcc, which supply the startup objects and ELF loader)";
 }

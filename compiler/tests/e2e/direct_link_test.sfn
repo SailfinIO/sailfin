@@ -171,6 +171,13 @@ test "direct-link: SAILFIN_LINKER=ld falls back to clang with a traced reason" !
     // building.
     assert contains(err, "direct linker unavailable");
     assert contains(err, "clang");
+    // Pin the arm this test NAMES. Without it the assertions above also
+    // hold on macOS via "target os (Darwin) has no owned direct linker
+    // yet", so the test would pass without ever exercising the linker
+    // override it exists to cover.
+    if _direct_eligible() {
+        assert contains(err, "SAILFIN_LINKER=ld defers to clang");
+    }
     // The binary still links and runs.
     let run_rc = process.run_capture([bin], []);
     let run_out = process.capture_take_stdout();

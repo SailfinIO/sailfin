@@ -23,7 +23,10 @@
 // Windows (SFN-955), musl, and other arches resolve `ok=false` with
 // `requires_direct_link=false` and keep the clang link path, as does an
 // explicit `SAILFIN_LINKER` or `SAILFIN_LINK_PROVIDER=clang-oracle`
-// selection.
+// selection. Note that musl and non-governed arches are separated by the
+// LOADER probe, not by `arch`: the host-arch resolver defaults to
+// "x86_64" rather than reporting "unknown", so they reach this module
+// labelled as a governed target (see `_non_glibc_linux_userland`).
 // Self-host note: every argv builder is a free function calling the array
 // builtin `.push`, matching `backend.sfn`'s shape (the struct-method `.push`
 // lowering the self-hosting compiler does not resolve, #1389).
@@ -243,13 +246,13 @@ fn _version_order_greater(a: string, b: string) -> boolean ![pure] {
         let da = _is_ascii_digit(ca);
         let db = _is_ascii_digit(cb);
         if da != db {
-            // A digit run vs. a non-digit run at the same position: this is
-            // a corner case the on-disk gcc layout never hits, so just be
-            // deterministic by ASCII code.
-            if ca != cb { return ca > cb; }
-            ia += 1;
-            ib += 1;
-            continue;
+            // A digit run vs. a non-digit run at the same position. One
+            // code is in 48..57 and the other is not, so they can never be
+            // equal and this always returns — deterministic by ASCII code.
+            // (GNU filevercmp orders punctuation above digits here; the
+            // inputs are absolute paths whose run boundaries stay aligned,
+            // so the two agree on every real gcc layout.)
+            return ca > cb;
         }
         if da {
             let ea = _digit_run_end(a, ia);
@@ -404,6 +407,18 @@ fn _link_provider_override() -> string ![io] {
 // they keep deferring to the clang driver rather than failing the build the
 // way an owned Linux target now does (SFN-953).
 fn resolve_link_contract(target_os: string, static_link: boolean) -> DirectLinkContract ![io] {
+    // Provider selection outranks the OS dispatch, not just the host
+    // probing below it. Nested inside the Linux arm it would leave an
+    // unrecognized value silently meaning "direct" on Darwin and Windows —
+    // the exact silent fall-through SFEP-0066 §3.7 forbids, and
+    // inconsistent with the same typo failing closed on Linux.
+    let provider_reason = _link_provider_override();
+    if provider_reason.length > 0 {
+        if starts_with(provider_reason, "SAILFIN_LINK_PROVIDER=clang-oracle") {
+            return _direct_fail(provider_reason);
+        }
+        return _direct_unmet(provider_reason);
+    }
     if target_os == "Linux" {
         return resolve_direct_ld_lld(target_os, static_link);
     }
@@ -425,6 +440,26 @@ fn resolve_link_contract(target_os: string, static_link: boolean) -> DirectLinkC
         + ") has no direct-link target profile");
 }
 
+// Positive evidence that this Linux userland is NOT the governed glibc
+// contract. Needed because `arch` above cannot carry it:
+// `_linux_host_arch_from_evidence` (`./target.sfn` 245-250) returns
+// "x86_64" as its DEFAULT, not as a finding, so a musl host, a ppc64le
+// host, and a riscv64 host all arrive here labelled x86_64 and sail
+// through the `arch != "x86_64" && arch != "aarch64"` gate.
+//
+// That gate is therefore dead on every native host (only an explicit
+// `SAILFIN_TARGET_ARCH` reaches it), which is why the loader probe below
+// has to make the ownership call instead. SFEP-0066 §3.2 puts musl,
+// static/`-nostdlib`, and every non-x86-64/aarch64 arch outside the
+// clang-independent claim, so these hosts must keep the clang route —
+// failing them closed would break builds that work today on a target
+// Sailfin never claimed (SFN-953).
+fn _non_glibc_linux_userland() -> boolean ![io] {
+    if fs.exists("/lib/ld-musl-x86_64.so.1") { return true; }
+    if fs.exists("/lib/ld-musl-aarch64.so.1") { return true; }
+    return false;
+}
+
 // Resolve the direct glibc Linux `ld.lld` link contract, or a
 // fallback (`ok=false`) with a reason. Gates, in order: target OS is
 // Linux; host arch is x86_64 or aarch64; `SAILFIN_LINKER` is unset or
@@ -443,18 +478,6 @@ fn resolve_link_contract(target_os: string, static_link: boolean) -> DirectLinkC
 fn resolve_direct_ld_lld(target_os: string, static_link: boolean) -> DirectLinkContract ![io] {
     if target_os != "Linux" {
         return _direct_fail("target is not Linux (" + target_os + ")");
-    }
-    // Explicit provider selection outranks host probing: an operator who
-    // asked for the oracle gets it without first having to satisfy the
-    // prerequisites of the path they opted out of. An unrecognized value
-    // fails closed naming the knob (SFEP-0066 §3.7) instead of silently
-    // meaning "direct".
-    let provider_reason = _link_provider_override();
-    if provider_reason.length > 0 {
-        if starts_with(provider_reason, "SAILFIN_LINK_PROVIDER=clang-oracle") {
-            return _direct_fail(provider_reason);
-        }
-        return _direct_unmet(provider_reason);
     }
     // Mirror SFN-471's non-shelling host-arch seam: the override is the
     // cross-emit/e2e hook, then the resolved TARGET triple (SFN-923 — this
@@ -499,6 +522,19 @@ fn resolve_direct_ld_lld(target_os: string, static_link: boolean) -> DirectLinkC
     let mut dyn = "/lib64/ld-linux-x86-64.so.2";
     if arch == "aarch64" { dyn = "/lib/ld-linux-aarch64.so.1"; }
     if !fs.exists(dyn) {
+        // A missing loader means one of two unrelated things, and getting
+        // it wrong in either direction is costly. Sort them before
+        // classifying.
+        if _non_glibc_linux_userland() {
+            return _direct_fail("non-glibc Linux userland (musl loader present); outside the governed glibc contract");
+        }
+        if !fs.exists("/lib64/ld-linux-x86-64.so.2") && !fs.exists("/lib/ld-linux-aarch64.so.1") {
+            return _direct_fail("no governed glibc ELF loader present; host is outside the x86-64/aarch64 glibc contract");
+        }
+        // A governed glibc host whose own loader is absent really is an
+        // unmet prerequisite, so it keeps E0628 and stays named in the
+        // diagnostic. Rare by construction — `sfn` itself links against
+        // that loader — but it is the case the acceptance criterion names.
         return _direct_unmet("dynamic linker missing (" + dyn + ")");
     }
     let libdir = _first_libdir_with(_multiarch_libdirs(arch), "Scrt1.o");
