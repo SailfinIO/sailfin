@@ -28,6 +28,16 @@ extern fn strlen(s: *u8) -> usize;
 The declaration is a signature only; it has no body. Parameters use the
 ordinary `name: Type` form and the return type follows `->`.
 
+A foreign **variable** is declared with `extern var`, which is the one extern
+form that may also define storage:
+
+```sfn
+extern var environ: **u8;
+```
+
+Its type is validated against the same accept-list, in parameter position — so
+a bare `void` is rejected there too.
+
 `unsafe extern fn` is also accepted. The `unsafe` keyword on an extern is a
 parsed marker: it is consumed by the parser and no analysis pass reads it back,
 so `extern fn` and `unsafe extern fn` typecheck and lower identically. `unsafe`
@@ -54,9 +64,11 @@ A type is admissible in extern parameter or return position when it is one of:
 | `float` | `double` | Sailfin's default float |
 | `void` | `void` | **return position only** — bare `void` as a parameter is `E0805` |
 
-**Pointers.** `*T` where `T` is itself admissible, `void`, or an
-UpperCamelCase identifier treated as an opaque foreign handle (`*File`,
-`*PthreadMutex`). `**T` follows by recursion. `*void` is the untyped byte
+**Pointers.** `*T` where `T` is itself admissible, `void`, or an identifier
+with an uppercase initial, treated as an opaque foreign handle (`*File`,
+`*FILE`, `*PthreadMutex`). The rule checks only the first character and that
+the rest are identifier characters; it does not verify that the name denotes a
+declared type. `**T` follows by recursion. `*void` is the untyped byte
 pointer (C's `void*`); `*u8` is the conventional spelling for byte buffers and
 C strings.
 
@@ -79,19 +91,18 @@ address instead — §13.4.
 
 | Code | Raised when |
 |---|---|
-| `E0801` | The type is, or contains, the Sailfin `string` aggregate. Use `*u8` plus a NUL-terminated copy. |
-| `E0802` | The type contains `[]`. Sailfin arrays carry runtime metadata; use `*T` plus a length parameter. |
+| `E0801` | The type is `string` or `string?`, or a pointer whose pointee is (`*string`, `*const string`). Use `*u8` plus a NUL-terminated copy. |
+| `E0802` | The type has a `[]` at the top level. Sailfin arrays carry runtime metadata; use `*T` plus a length parameter. |
 | `E0803` | The extern declares type parameters (`<...>`). Only concrete C-ABI types cross the boundary. |
 | `E0804` | The extern declares effects (`![...]`). Move the clause onto the calling wrapper. |
-| `E0805` | Any other inadmissible or missing type, including a missing parameter annotation and bare `void` in parameter position. |
+| `E0805` | Any other inadmissible or missing type: a missing parameter or `extern var` annotation, bare `void` in parameter position, an unrecognized name such as `number` or `boolean`, and any `string`/array shape the two rules above do not reach (a nested `Foo<int[]>` lands here, not on `E0802`). |
 
 ## 13.3 Raw pointer operations
 
 The following operate on any raw pointer and are specified here as shipped
 behavior. None of them requires an `unsafe` block.
 
-- **Load.** `*p` reads a `T`. Dereferencing a non-pointer is reported as
-  `E1006`.
+- **Load.** `*p` reads a `T`.
 - **Store.** `*p = v` writes a `T`.
 - **Member access.** `p.f`, where `p: *S` and `S` is a struct, loads or stores
   field `f` at its offset, auto-dereferencing.
@@ -106,6 +117,16 @@ behavior. None of them requires an `unsafe` block.
   NUL-terminated **only for string literals**; any other string handed to a C
   `const char*` must first be copied with an explicit NUL, because slices are
   not NUL-terminated.
+
+> Dereferencing a non-pointer is **not** rejected by `sfn check`. It produces
+> `E1006`, a `warning`-severity diagnostic raised during *lowering*, and the
+> expression lowers to no operand. `sfn check` models no codegen, so it reports
+> nothing at all.
+
+> **Bind a literal before casting it.** Write the string to a `string` local
+> and cast the local. The inline form — `getenv("PATH" as *u8)` — miscompiles:
+> the call is elided and its result lowered to a null store, so the value reads
+> as unset. The runtime records this at `runtime/sfn/memory/arena.sfn:441`.
 
 **Mutability is not enforced.** `*T`, `*const T`, and `*mut T` produce the same
 pointer type and permit the same reads and writes. A read-only `*const T`, with
@@ -158,10 +179,26 @@ The capability surface of foreign code is therefore **not** derived — declare
 the effects on the Sailfin wrapper that calls the extern, so that the wrapper's
 callers propagate them normally.
 
-`unsafe { }` has exactly one shipped meaning: it is the author-asserted region
-the ownership checker recognizes. Passing a bare owned value to an extern
-declared in the same compilation unit, outside such a block, raises `E0906`.
-No pointer operation requires an `unsafe` block.
+`unsafe` is meaningful to the ownership checker and to nothing else. No pointer
+operation requires it. What it does is **suppress ownership analysis**, and the
+two forms suppress different amounts:
+
+- **`unsafe { }`** — the checker does not walk the block's interior, so
+  statement-level findings inside it are not raised: a double consume that
+  would be `E0901` outside the block is not reported inside it. The
+  *routine-level* obligation survives, but the checker cannot see a consumption
+  that happened inside the block, so a `Linear<T>` consumed only there is
+  reported as `E0907` — the diagnostic moves rather than disappearing.
+- **`unsafe fn`** — the entire body is skipped. A `Linear<T>` parameter of an
+  `unsafe fn` carries **no** enforced obligation; the same function written
+  `fn` raises `E0907`.
+
+Passing a bare owned value to an extern declared in the same compilation unit,
+outside an `unsafe` block, raises `E0906`; inside one it does not. That is the
+boundary the block exists for.
+
+Because `unsafe fn` disables the checks rather than narrowing them, prefer a
+plain `fn` with a narrow `unsafe { }` block around the foreign call.
 
 `![unsafe]` is **not** an effect and never was. The canonical effects are
 `clock`, `gpu`, `io`, `model`, `net`, and `rand`; a function declaring
@@ -175,6 +212,16 @@ purpose they were meant to serve. That record is **designed, not shipped**
 ## 13.6 Linking
 
 The foreign library providing an extern symbol must be linked into the final
-binary. Link inputs are build inputs, not provenance: naming a library tells
-the linker what to resolve against, and records nothing about what that
-library does.
+binary. Name it in the capsule's manifest:
+
+```toml
+[build]
+link-libs = ["m", "pthread"]
+```
+
+`link-libs` is honored **only for the capsule being built**. A dependency
+capsule that declares it has the key ignored, reported as `E0627` at `warning`
+severity, so an application linking a foreign library must declare it itself.
+
+Link inputs are build inputs, not provenance: naming a library tells the linker
+what to resolve against, and records nothing about what that library does.

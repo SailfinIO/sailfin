@@ -7,8 +7,15 @@ sidebar:
 
 `unsafe { }`, `unsafe fn`, and `extern fn` syntax ship. The ownership checker
 treats the boundary as load-bearing: passing a bare owned value to an `extern
-fn` declared in the same compilation unit outside `unsafe` raises `E0906`, and
-the checker skips author-asserted raw-pointer operations inside unsafe code.
+fn` declared in the same compilation unit outside `unsafe` raises `E0906`.
+
+Note what "author-asserted" costs. The checker does not walk an `unsafe { }`
+interior, so statement-level findings there (a double consume that would be
+`E0901`) are not raised; a routine-level `Linear<T>` obligation survives, but a
+consumption inside the block is invisible to it and surfaces as `E0907`
+instead. An `unsafe fn` body is skipped outright, so a `Linear<T>` parameter of
+one carries no enforced obligation at all. Prefer a plain `fn` with a narrow
+`unsafe { }` block.
 
 The current enforcement is deliberately partial. Implicitly linked prelude and
 runtime externs are not yet matched by the same-module boundary check, so code

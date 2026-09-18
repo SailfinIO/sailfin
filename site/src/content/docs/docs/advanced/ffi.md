@@ -36,8 +36,9 @@ spelling of the boolean is **`bool`**, not `boolean`.
 **Current status.** `extern fn` declarations, their C-ABI validation
 (`E0801`–`E0805`), native lowering, raw-pointer load/store/member/arithmetic,
 and function addresses via `name as *u8` (guarded by `E0808`/`E0809`) all ship.
-`unsafe { }` is meaningful to the ownership checker (`E0906`) and to nothing
-else. Layout guarantees, pointer mutability enforcement, variadic externs,
+`unsafe { }` is meaningful to the ownership checker — it carries the `E0906`
+extern boundary and suppresses ownership analysis of its interior — and to
+nothing else. Layout guarantees, pointer mutability enforcement, variadic externs,
 typed callback parameters, and effect-attested externs are designed in
 SFEP-0079 and are not shipped.
 
@@ -65,6 +66,13 @@ extern fn free(ptr: *u8) -> void;
 extern fn memcpy(dest: *u8, src: *u8, n: usize) -> *u8;
 extern fn memset(dest: *u8, val: i32, n: usize) -> *u8;
 extern fn strlen(s: *u8) -> usize;
+```
+
+A foreign *variable* is declared with `extern var`, validated against the same
+accept-list:
+
+```sfn
+extern var environ: **u8;
 ```
 
 `unsafe extern fn` is also accepted, and means the same thing. The `unsafe`
@@ -115,15 +123,16 @@ These are the types an extern signature admits today.
 | `void` | `void` | `void` | **return position only**; a `void` parameter is `E0805` |
 | `*T` | `T*` | `T*` | pointee must itself be admissible |
 | `*void` | `void*` | `i8*` | the untyped pointer — **`*opaque` is rejected** |
-| `*Handle` | `struct Handle*` | `i8*` | an UpperCamelCase pointee is taken as an opaque handle |
+| `*Handle` | `struct Handle*` | `i8*` | any pointee with an uppercase initial is taken as an opaque handle — `*FILE` too |
 
 `*const T` and `*mut T` are also accepted — the checker strips the prefix and
 checks the pointee — but neither prefix means anything yet. See
 [Raw pointers](#raw-pointer-types).
 
-`usize` and `isize` are pointer-sized: 64 bits on a 64-bit target, 32 on a
-32-bit one. The LLVM column assumes a 64-bit target. Use `usize` for any
-size or count crossing to a C `size_t`.
+`usize` and `isize` are pointer-sized and lower to `i64` on every target
+Sailfin supports — the governed set is four 64-bit triples (SFEP-0066 §3.2,
+enforced by `E0614`/`E0623`), so there is no 32-bit case today. Use `usize`
+for any size or count crossing to a C `size_t`.
 
 **Typed function-pointer parameters do not work in practice.** The checker
 accepts the tight spelling `fn(A) -> B`, but `sfn fmt` rewrites it to
@@ -136,11 +145,11 @@ are designed in SFEP-0079 §3.4 and not shipped.
 
 | Code | Raised when |
 |---|---|
-| `E0801` | The type is, or contains, the Sailfin `string` aggregate |
-| `E0802` | The type contains `[]` — arrays carry runtime metadata that does not cross the boundary |
+| `E0801` | The type is `string` / `string?`, or a pointer to one |
+| `E0802` | The type has a top-level `[]` — arrays carry runtime metadata that does not cross the boundary |
 | `E0803` | The extern declares type parameters (`<...>`) |
 | `E0804` | The extern declares effects (`![...]`) |
-| `E0805` | Any other inadmissible or missing type |
+| `E0805` | Any other inadmissible or missing type — including `boolean`, `number`, `*opaque`, a missing annotation, and a `void` parameter |
 
 Sailfin `string` needs an explicit conversion. A string *literal* is
 NUL-terminated, so `literal as *u8` may be passed to a C `const char*`
@@ -168,9 +177,36 @@ itself does raw-pointer work outside `unsafe` throughout. A rule requiring
 `unsafe` for them would be a restriction without a matching power, and
 SFEP-0079 §3.2 explicitly declines to add one.
 
-What the block *does* buy you: passing a bare owned value to an extern declared
-in the same compilation unit outside a block raises `E0906`, and inside one it
-does not.
+What the block *does* do is the boundary it exists for: passing a bare owned
+value to an extern declared in the same compilation unit outside a block raises
+`E0906`, and inside one it does not.
+
+:::caution[`unsafe` suppresses ownership checking — `unsafe fn` suppresses all of it]
+The ownership checker does not walk the interior of an `unsafe { }` block, and
+skips the body of an `unsafe fn` entirely. That is broader than the `E0906`
+boundary, and it cuts against you:
+
+```sfn
+struct B { ptr: *u8; }
+
+// Rejected: error[E0907] linear value `v` is never consumed
+fn leak(v: Linear<B>) -> i32 { return 0; }
+
+// Accepted. The body is never analyzed, so the obligation is not enforced.
+unsafe fn leak_unsafe(v: Linear<B>) -> i32 { return 0; }
+```
+
+Inside an `unsafe { }` block the effect is subtler. Statement-level findings
+are not raised there — a double consume that would be `E0901` outside the block
+goes unreported — while the routine-level obligation survives. Because the
+checker cannot see a consumption that happened inside the block, consuming a
+`Linear<T>` only there is reported as `E0907`: the diagnostic moves rather than
+disappearing.
+
+Prefer a plain `fn` with the narrowest possible `unsafe { }` around the foreign
+call. Reach for `unsafe fn` only deliberately, knowing it turns the checks off
+for that function.
+:::
 
 :::danger[`![unsafe]` is not an effect]
 `![unsafe]` was never implemented, and is now withdrawn. The canonical effects
@@ -252,15 +288,32 @@ fn pointer_example() ![io] {
 
 | Operation | Description |
 |---|---|
-| `*p` | Load a `T`. Dereferencing a non-pointer reports `E1006`. |
+| `*p` | Load a `T`. |
 | `*p = v` | Store a `T`. |
 | `p.f` | Load or store field `f` of a struct through the pointer, auto-dereferencing. |
 | `p + n`, `p - n` | Advance or retreat by `n` elements, scaled by the pointee's size. On `*u8` the step is one byte. |
 | `p as *U` | Reinterpret as a different pointer type. |
 | `p as i64`, `n as *T` | Convert between an address and an integer. |
 | `s as *S` | Address of a struct binding's storage. |
-| `s as *u8` | A string's data pointer — NUL-terminated only for literals. |
+| `s as *u8` | A string's data pointer — NUL-terminated only for literals. Bind the literal to a `string` local first (see below). |
 | `p == null`, `p != null` | Null tests. `0 as *T` is also the null pointer. |
+
+:::caution[Bind a string literal before casting it]
+Cast a `string` local, not a literal in place. The inline form miscompiles
+under the seed — the call is elided and its result lowered to a null store, so
+the value reads as unset:
+
+```sfn
+extern fn getenv(name: *u8) -> *u8;
+
+fn read_path() -> *u8 {
+    let key: string = "PATH";
+    return getenv(key as *u8);   // correct — bind, then cast
+}
+```
+
+The runtime records this at `runtime/sfn/memory/arena.sfn:441`.
+:::
 
 :::note[`&raw` does not exist]
 `&raw value` is documented in older material and in
@@ -344,6 +397,7 @@ Keep the foreign surface in a small module and export only safe wrappers.
 ```sfn
 // Foreign internals — not exported
 extern fn malloc(size: usize) -> *u8;
+extern fn free(ptr: *u8) -> void;
 extern fn memset(dest: *u8, val: i32, n: usize) -> *u8;
 
 struct ManagedBuffer {
@@ -472,7 +526,8 @@ neither exists.
 |---|---|
 | Declare a C function | `extern fn name(param: Type) -> ReturnType;` |
 | `unsafe` keyword on an extern | Accepted, inert — same meaning as plain `extern fn` |
-| `unsafe` block | Author-asserted region for the ownership checker (`E0906`). Not required for any pointer operation |
+| `unsafe` block | Suppresses ownership analysis of its interior; carries the `E0906` extern boundary. Not required for any pointer operation |
+| `unsafe fn` | Skips ownership analysis of the **whole body** — a `Linear<T>` obligation is not enforced |
 | Effects | On the calling wrapper, never on the extern (`E0804`) |
 | Pointer | `*T` — reads **and writes** |
 | `*const T` / `*mut T` | Accepted spellings, no enforcement |
