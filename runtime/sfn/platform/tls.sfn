@@ -154,7 +154,7 @@ extern fn strlen(s: *u8) -> usize;
 // the trace gate's empty-string probe needs it.
 extern fn memcmp(a: *u8, b: *u8, n: usize) -> i32;
 
-extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
+extern fn sfn_fd_write(fd: i32, buf: *u8, count: usize) -> i64;
 
 // `sfn_str_eq` is genuinely `(i8*, i8*)`, unlike the prelude
 // `strings_equal`, whose `{i8*, i64}` aggregate-string ABI would read
@@ -231,7 +231,7 @@ fn _tls_trace(msg: string) -> void ![io] {
     if !_tls_trace_enabled() { return; }
     let line: string = "[tls] " + msg + "\n";
     let p: *u8 = line as *u8;
-    write(2, p, strlen(p));
+    sfn_fd_write(2, p, strlen(p));
 }
 
 // Record a reason and trace it in one step, for the `![io]` paths.

@@ -123,19 +123,19 @@ extern fn strcmp(a: *u8, b: *u8) -> i32;
 extern fn abort() -> void;
 
 // Telemetry path (#1309 `sfn_arena_print_stats` port). `strlen`
-// measures each NUL-terminated literal/rendered piece and `write`
-// emits straight to fd 2 (stderr). The raw libc write avoids the
+// measures each NUL-terminated literal/rendered piece and `sfn_fd_write`
+// emits straight to fd 2 (stderr). The fd helper avoids the
 // `{i8*, i64}` aggregate-string ABI hazard a `* u8 as string` round-trip
 // would carry (cf. the #1372 note in `runtime/sfn/platform/rlimit.sfn`)
 // and keeps the snapshot bytes exact. Integers are rendered inline (see
 // `_arena_write_i64`) rather than via `string.sfn`'s `sfn_int_to_str`:
 // arena.sfn is emitted and linked **standalone** by
-// `test_runtime_memory_arena.sh`, so it must depend on nothing beyond
-// libc + the symbols that harness stubs — a cross-module
+// `runtime_memory_arena_test.sfn`, so its harness supplies the fd helper;
+// a cross-module
 // `sfn_int_to_str` reference would fail that link.
 extern fn strlen(s: *u8) -> usize;
 
-extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
+extern fn sfn_fd_write(fd: i32, buf: *u8, count: usize) -> i64;
 
 // `ArenaPage` is the per-page bookkeeping header (32 bytes, four
 // i64 slots). `data_addr` points at the page's backing byte buffer
@@ -550,7 +550,7 @@ fn _arena_oom_msg_prime() -> void {
 fn _arena_oom_report() -> void {
     if _arena_oom_msg_addr <= 0 { return; }
     let p: *u8 = _arena_oom_msg_addr as *u8;
-    let _ = write(2, p, strlen(p));
+    let _ = sfn_fd_write(2, p, strlen(p));
 }
 
 // `sfn_arena_global()` — the calling thread's lazily-created arena
@@ -882,7 +882,7 @@ fn _arena_put_byte(addr: i64, value: i64) -> void {
 // using its `strlen`. Used for the fixed label tokens.
 fn _arena_write_lit(s: *u8) -> void ![io] {
     if s as i64 == 0 { return; }
-    let _ = write(2, s, strlen(s));
+    let _ = sfn_fd_write(2, s, strlen(s));
 }
 
 // `_arena_write_i64(value)` renders a non-negative i64 as decimal into a
@@ -896,7 +896,7 @@ fn _arena_write_i64(value: i64) -> void ![io] {
 
     if value == 0 {
         _arena_put_byte(base, 48);
-        let _ = write(2, buf, 1 as usize);
+        let _ = sfn_fd_write(2, buf, 1 as usize);
         free(buf);
         return;
     }
@@ -921,7 +921,7 @@ fn _arena_write_i64(value: i64) -> void ![io] {
         x = x / 10;
     }
 
-    let _ = write(2, buf, nd as usize);
+    let _ = sfn_fd_write(2, buf, nd as usize);
     free(buf);
 }
 

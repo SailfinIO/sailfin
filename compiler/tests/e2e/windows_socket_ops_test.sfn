@@ -285,3 +285,26 @@ test "fd-io: the Windows sibling declares 32-bit _read/_write and sign-extends; 
     });
     assert outcome == 0;
 }
+
+// SFN-942: each Windows-linked diagnostic site must call the target-selected
+// fd helper, rather than declaring POSIX-width `write` locally. The helper's
+// UCRT width and sign-extension are pinned by the sibling test above.
+test "fd-io: Windows-linked diagnostics route every write through the fd helper" ![io] {
+    let outcome = with_tmp_dir(fn (dir: string) -> int {
+        let paths: string[] = ["runtime/sfn/memory/arena.sfn", "runtime/sfn/memory/mem.sfn", "runtime/sfn/exception.sfn", "runtime/sfn/platform/rlimit_windows.sfn", "runtime/sfn/platform/tls.sfn"];
+        let counts: int[] = [4, 3, 2, 1, 1];
+        let mut i: int = 0;
+        loop {
+            if i >= paths.length { break; }
+            let ir = _emit("fdsite" + i as string, paths[i], dir);
+            assert ir != "EMIT_FAILED";
+            assert _has_declare(ir, "sfn_fd_write");
+            assert ! _has_declare(ir, "write");
+            assert ! _has_declare(ir, "_write");
+            assert _count_lines_with_both(ir, "call i64 @sfn_fd_write(", "") == counts[i];
+            i += 1;
+        }
+        return 0;
+    });
+    assert outcome == 0;
+}

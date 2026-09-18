@@ -42,8 +42,8 @@ test "lowering: runtime/sfn/platform/libc.sfn emits a declare for every extern" 
     assert _contains(ir, "@realloc(");
     assert _contains(ir, "@memcpy(");
     assert _contains(ir, "@memcmp(");
-    assert _contains(ir, "@write(");
-    assert _contains(ir, "@read(");
+    assert ! _contains(ir, "@write(");
+    assert ! _contains(ir, "@read(");
     assert _contains(ir, "@fopen(");
     assert _contains(ir, "@fclose(");
     assert _contains(ir, "@fread(");

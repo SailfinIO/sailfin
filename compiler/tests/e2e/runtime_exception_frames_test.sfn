@@ -277,6 +277,7 @@ fn _harness_c() -> string {
         + "#include <stdlib.h>\n"
         + "#include <string.h>\n"
         + "#include <stdint.h>\n"
+        + "long long sfn_fd_write(int fd, const unsigned char *buf, size_t n) { (void)fd; return (long long)fwrite(buf, 1, n, stderr); }\n"
         + "struct SfnExceptionFrame { struct SfnExceptionFrame *prev; void *jmp_buf; void *message; };\n"
         + "extern struct SfnExceptionFrame *sfn_exception_alloc_frame(void);\n"
         + "extern void sfn_exception_free_frame(struct SfnExceptionFrame *frame);\n"

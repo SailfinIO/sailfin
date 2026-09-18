@@ -105,14 +105,9 @@ extern fn strrchr(s: *u8, c: i32) -> *u8;
 extern fn strtod(nptr: *u8, endptr: **u8) -> f64;
 
 // ── Raw I/O (file-descriptor based) ───────────────────────────
-// `write`/`read` are POSIX, returning ssize_t (i64 on every
-// platform Sailfin currently targets). Negative returns signal
-// errno; adapters translate to `Result<T, IoError>` when that
-// type ships.
-extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
-
-extern fn read(fd: i32, buf: *u8, count: usize) -> i64;
-
+// `sfn_fd_read` and `sfn_fd_write` live in the target-selected `fd_io`
+// pair. Keeping POSIX-width declarations here would leak them into
+// Windows-linked modules that import this typecheck skeleton (SFN-942).
 // ── Stdio filesystem ──────────────────────────────────────────
 // `* File` is an opaque platform handle. The opaque-pointee rule
 // in the typechecker (`is_extern_opaque_pointee`) accepts any

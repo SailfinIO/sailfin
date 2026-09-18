@@ -146,7 +146,8 @@ test "mem emit: declares the libc / runtime trampolines" ![io] {
     assert _has_declare(ir, "malloc");
     assert _has_declare(ir, "memcpy");
     assert _has_declare(ir, "free");
-    assert _has_declare(ir, "write");
+    assert _has_declare(ir, "sfn_fd_write");
+    assert ! _has_declare(ir, "write");
     assert _has_declare(ir, "abort");
     assert _has_declare(ir, "sfn_arena_enabled");
 }
@@ -173,6 +174,7 @@ test "mem emit: does not collide with legacy C runtime names" ![io] {
 // rather than attempted — see that test.
 fn _mem_harness_c() -> string {
     return "#include <stddef.h>\n" + "#include <stdio.h>\n"
+        + "long long sfn_fd_write(int fd, const unsigned char *buf, size_t n) { (void)fd; return (long long)fwrite(buf, 1, n, stderr); }\n"
         + "#include <stdint.h>\n"
         + "#include <stdlib.h>\n"
         + "#include <string.h>\n"
