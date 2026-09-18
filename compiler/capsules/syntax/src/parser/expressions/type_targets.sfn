@@ -17,8 +17,9 @@ fn _cast_target_append(acc: string, lexeme: string) -> string {
     return acc + " " + lexeme;
 }
 
-// Read a cast target type after `as`, consuming pointer prefixes, named
-// types with generic argument lists (`Foo<X, Y>`), and fn-pointer targets
+// Read a cast target type after `as`, consuming pointer prefixes and an
+// optional `const`/`mut` pointer qualifier, named types with generic
+// argument lists (`Foo<X, Y>`), and fn-pointer targets
 // (`fn (A) -> B`, `fn (A) -> * B`). Joins all consumed lexemes with
 // single spaces into `text` — the Cast formatter serializes the text
 // verbatim, and the shadow lowering re-parser is whitespace-insensitive,
@@ -29,13 +30,41 @@ fn read_cast_target(state: ExpressionTokens) -> CastTargetParseResult {
     let mut text: string = "";
 
     // Step 1: Accumulate optional leading `*` pointer-prefix symbols.
+    let mut saw_pointer_prefix: boolean = false;
     loop {
         if expression_tokens_is_at_end(cursor) { break; }
         let tok = expression_tokens_peek(cursor);
         if tok.kind.variant != "Symbol" { break; }
         if !strings_equal(tok.lexeme, "*") { break; }
         text = _cast_target_append(text, "*");
+        saw_pointer_prefix = true;
         cursor = expression_tokens_advance(cursor);
+    }
+
+    // Step 1b: Consume a raw-pointer qualifier (`*const T` / `*mut T`,
+    // SFEP-0079 §3.2). `const` and `mut` are soft keywords, so they lex as
+    // plain identifiers. Without this step Step 2b consumed the qualifier as
+    // if it were the pointee name, left the real pointee dangling, broke the
+    // enclosing statement's parse, and degraded it to `Expression.Raw` —
+    // which then failed closed at E0818 (SFN-1290). Gated on an actual `*`
+    // prefix so a cast to a type named `mut`/`const` is unaffected.
+    if saw_pointer_prefix {
+        if !expression_tokens_is_at_end(cursor) {
+            let qualifier_tok = expression_tokens_peek(cursor);
+            if qualifier_tok.kind.variant == "Identifier" {
+                let mut is_qualifier: boolean = false;
+                if identifier_matches(qualifier_tok, "const") {
+                    is_qualifier = true;
+                }
+                if identifier_matches(qualifier_tok, "mut") {
+                    is_qualifier = true;
+                }
+                if is_qualifier {
+                    text = _cast_target_append(text, identifier_text(qualifier_tok));
+                    cursor = expression_tokens_advance(cursor);
+                }
+            }
+        }
     }
 
     if expression_tokens_is_at_end(cursor) {
