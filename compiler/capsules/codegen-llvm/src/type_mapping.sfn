@@ -85,11 +85,17 @@ fn strip_pointer_suffix(value: string) -> string {
 // spellings lower to the same `T*`. Read-only enforcement for `*const T` is
 // E0852, a typecheck concern, not a lowering one.
 //
-// The trailing space is load-bearing: matching a bare `mut` would truncate a
-// pointee named `mutex_t` to `ex_t` (SFN-1290). This mirrors the extern C-ABI
-// accept-list in
+// Match the trailing space, not a bare `const`/`mut`: the qualifier is a
+// whole lexeme, so annotation text always separates it from its pointee.
+// This is the rule the shipped spec already states
+// (`reference/spec/13-foreign-interface.md`: the checker strips the
+// `const ` or `mut `), and it mirrors the extern C-ABI accept-list in
 // `analyzer/src/typecheck_types/extern_abi.sfn::_is_c_abi_type_inner`, which
 // has always handled both qualifiers symmetrically.
+//
+// A caller that has already collapsed whitespace out of the annotation must
+// strip the qualifier before doing so — see `normalize_layout_field_type` in
+// `codegen/src/emit_native_layout.sfn` (SFN-1290).
 fn strip_pointer_qualifier(remainder: string) -> string {
     if starts_with(remainder, "const ") {
         return trim_text(substring(remainder, 6, remainder.length));
