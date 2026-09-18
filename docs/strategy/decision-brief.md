@@ -295,7 +295,12 @@ Ordered. Each item is a consequence of §2–§5, not a preference.
    `E0804` forbids effect annotations on externs, so enforcement depends on
    voluntary wrapping; that hole defeats Reach's completeness claim, defeats the
    seal's adversarial claim, and defeats Result/Cost the moment the fast path
-   is typed vendor FFI. SFEP-0016 §4.4 Q3 is unresolved. Owner-level design gate.
+   is typed vendor FFI. **Gate decided 2026-09-18 by SFEP-0079 §3.5 (Accepted,
+   not shipped):** externs attest effects, and the derived manifest enumerates
+   every foreign edge. That restores Reach completeness over an explicitly
+   listed foreign trust base. It does not confine foreign code or verify
+   attestations, so the seal's adversarial claim stays bounded by that trust
+   base until attested externs route through the gate hook (designed, unphased).
 7. **Track B's taint/`PII<T>` story demotes.** It is the restriction the market
    declined, relocated to an accelerator, and the `extern` hole defeats it anyway.
 8. **Submit one number to something you do not control.** Cheapest credibility
@@ -351,8 +356,9 @@ Recorded so they are not re-derived. Each was believed, tested, and failed.
   argument favours the latter; the scope cost is unassessed.
 - What is the determinism tax of Result, measured? The claim is only a power if
   it beats the 34–61% incumbents pay for their opt-in modes.
-- Is `extern` capability-typed, forbidden in untrusted units, or something else?
-  (SFEP-0016 §4.4 Q3.) Blocks all three pillars.
+- ~~Is `extern` capability-typed, forbidden in untrusted units, or something
+  else?~~ Decided: effect-attested, plus an enumerated foreign-reach record
+  (SFEP-0079 §3.5, Accepted 2026-09-18; not shipped).
 - Does the seal need a written threat model naming memory corruption as a
   capability-forgery vector? SFEP-0016 §4.1 concedes runtime-as-TCB and §4.4 Q5
   now names forgery as open, but neither connects it to SFEP-0018's incomplete
