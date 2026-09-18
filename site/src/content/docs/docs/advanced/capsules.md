@@ -105,7 +105,7 @@ Declares which effects this capsule uses. See the [Capability Declarations](#cap
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `required` | array of strings | `[]` | Canonical effects or recognized dotted refinements this capsule requires. Roots: `"io"`, `"net"`, `"model"`, `"gpu"`, `"rand"`, `"clock"`; `"unsafe"` is a separate parsed annotation. |
+| `required` | array of strings | `[]` | Canonical effects or recognized dotted refinements this capsule requires. Roots: `"io"`, `"net"`, `"model"`, `"gpu"`, `"rand"`, `"clock"`. `"unsafe"` is **not** a capability and is withdrawn ([SFEP-0079](/sfep/0079-systems-c-interop/) §3.5). |
 
 #### `[build]`
 
