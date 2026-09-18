@@ -6,7 +6,7 @@ type: language
 created: 2026-09-18
 updated: 2026-09-18
 author: "agent:compiler-architect (drafted); project owner (commissioned 2026-09-18)"
-tracking: https://linear.app/sailfin/project/systems-c-interop-828be16b7d55
+tracking: "SFN-1288, SFN-1289, SFN-1290, SFN-1291, SFN-1292, SFN-1293, SFN-1294, SFN-1295, SFN-1296, SFN-1297, SFN-1298, SFN-1299; related SFN-1300 (project: https://linear.app/sailfin/project/systems-c-interop-828be16b7d55)"
 supersedes:
 superseded-by:
 graduates-to: reference/spec/13-foreign-interface.md
