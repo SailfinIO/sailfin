@@ -1,0 +1,155 @@
+// End-to-end test for SFN-1290 / SFEP-0079 §3.2 — `*const T` lowers as `T*`
+// (not `i8*`), and `*const T`/`*mut T` cast targets parse instead of dying
+// closed at E0818.
+//
+// Before the fix, the emitter erased `*const T`'s pointee and lowered every
+// `*const`-qualified parameter/local as `i8*`, so a deref of `*const i32`
+// read one byte instead of four (300 = 0x12C read back as 44 = 0x2C).
+// Separately, `read_cast_target` had no step for the `const`/`mut` qualifier
+// after a pointer prefix, so `x as *const T` / `x as *mut T` fell through to
+// treating the qualifier as the pointee name, broke the statement's parse,
+// and degraded to `Expression.Raw`, which then failed closed at E0818.
+//
+// Native (no-bash) per `.claude/rules/no-bash-e2e.md`. Pins three contracts
+// on the shared fixture:
+//   1. IR types: `rd_const`/`rd_mut` take `i32*` parameters, not `i8*`.
+//   2. IR store: the `*const W` field assignment in `wr_const_field` emits a
+//      real `store`, not a silently dropped one.
+//   3. Runtime round-trip (`run`): every read path — plain, `*const`,
+//      `*mut`, cast-to-`*const`, cast-to-`*mut`, and a `*const` struct-field
+//      write — observes the same 300/7 values.
+//
+// NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
+// cannot be called from an `![io]` test like this. Assert on the captured
+// `.ll` text / stdout with `sfn/strings` predicates instead, mirroring
+// `struct_field_pointer_roundtrip_test.sfn` (#842).
+import { contains, split, trim } from "sfn/strings";
+import { clean_runner_env, nested_runner_scratch, sfn_bin_path } from "sfn/test";
+
+fn _fixture() -> string {
+    return "compiler/tests/e2e/fixtures/const_pointer_lowering.sfn";
+}
+
+// `clean_runner_env(nested_runner_scratch(...))` per `.claude/rules/no-bash-e2e.md`:
+// `process.run_capture`'s env is the literal argument, not an inherit, so the
+// nested `sfn run` build (which shells out to clang + a linker) needs PATH
+// threaded explicitly, and the nested scratch keeps this file's builds off
+// the fixed default build-cache path under a parallel `--jobs` run.
+fn _child_env(label: string) -> string[] ![io] {
+    return clean_runner_env(nested_runner_scratch(label));
+}
+
+fn _emit_llvm(label: string) -> string ![io] {
+    let dir = nested_runner_scratch(label);
+    fs.createDirectory(dir, true);
+    let ll = dir + "/const_pointer_lowering.ll";
+    if fs.exists(ll) { fs.deleteFile(ll); }
+    let exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", _fixture()], _child_env(label));
+    let _o = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    let ir = fs.readFile(ll);
+    fs.deleteFile(ll);
+    return ir;
+}
+
+fn _first_token(line: string) -> string {
+    let toks = split(trim(line), " ");
+    if toks.length == 0 { return ""; }
+    return toks[0];
+}
+
+// 1 — `rd_const`/`rd_mut` take a typed `i32*` parameter, not the pre-fix
+// `i8*`. Top-level free functions are not name-mangled (confirmed against
+// sibling e2e IR assertions, e.g. `define i32 @apply_default_mem_limit(` in
+// `windows_runtime_siblings_test.sfn`), so `@rd_const(i32* ` is the exact
+// emitted prefix — uncertain only in the parameter register name after the
+// type, which this does not depend on.
+test "const-ptr-lowering: qualified pointer params lower to i32*, not i8*" ![io] {
+    let ir = _emit_llvm("const-ptr-ir-params");
+    assert ir.length > 0;
+    assert contains(ir, "@rd_const(i32* ");
+    assert ! contains(ir, "@rd_const(i8* ");
+    assert contains(ir, "@rd_mut(i32* ");
+    assert ! contains(ir, "@rd_mut(i8* ");
+    // Golden guard: the unqualified `*i32` spelling was already correct and
+    // must stay byte-identical (SFN-1290 acceptance criterion 4).
+    assert contains(ir, "@rd_plain(i32* ");
+}
+
+// Struct field annotations reach LLVM through
+// `codegen/src/emit_native_layout.sfn::normalize_layout_field_type`, which
+// collapses whitespace out of pointer types so the `.layout field type=<T>`
+// token survives the native-IR round-trip (#713). The qualifier must be
+// stripped before that collapse — otherwise `*mut W` becomes `*mutW` and
+// `*const i32` becomes `*consti32`, neither of which any type mapper
+// recognizes, and both fields silently lower as `i8*` (SFN-1290).
+test "const-ptr-lowering: qualified pointer struct fields keep their pointee type" ![io] {
+    let ir = _emit_llvm("const-ptr-ir-fields");
+    assert ir.length > 0;
+    assert ! contains(ir, "%W = type { i32, i8*, i8* }");
+}
+
+// 2 — `wr_const_field` (`w.v = 7` through a `*const W` parameter) emits a
+// real store into the field-0 GEP of `%W`, not a silently dropped body.
+// Mirrors the slot-GEP-then-store pattern in
+// `struct_field_pointer_roundtrip_test.sfn`, which is the only existing
+// model for pinning "a store survives" rather than guessing the exact
+// instruction text.
+test "const-ptr-lowering: *const W field assignment emits a store, not a dropped body" ![io] {
+    let ir = _emit_llvm("const-ptr-ir-wr-const-field");
+    assert ir.length > 0;
+    let lines = split(ir, "\n");
+
+    let mut slot0: string[] = [];
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        let t = trim(lines[i]);
+        if contains(t, "getelementptr %W,") && contains(t, "i32 0, i32 0") {
+            slot0.push(_first_token(t));
+        }
+        i += 1;
+    }
+    assert slot0.length > 0;
+
+    let mut found = false;
+    let mut j = 0;
+    loop {
+        if j >= lines.length { break; }
+        let t = trim(lines[j]);
+        if contains(t, "store i32 7, ") {
+            // The store destination is the last whitespace-delimited token
+            // stripped of a trailing comma-free register form; reuse the
+            // slot-register membership check rather than parsing further.
+            let mut k = 0;
+            loop {
+                if k >= slot0.length { break; }
+                if contains(t, slot0[k]) { found = true; }
+                k += 1;
+            }
+        }
+        j += 1;
+    }
+    assert found;
+}
+
+// 3 — Runtime round-trip: every read path observes the write. `plain`,
+// `const`, `mut` are the typed-parameter paths; `cast_const`/`cast_mut` are
+// the `as *const T`/`as *mut T` cast targets (pre-fix: E0818); `field` is
+// the `*const W` struct-field write.
+test "const-ptr-lowering: every read path observes the write at runtime" ![io] {
+    let exit = process.run_capture([sfn_bin_path(), "run", _fixture()], _child_env("const-ptr-run"));
+    let out = process.capture_take_stdout();
+    let _e = process.capture_take_stderr();
+    assert exit == 0;
+    // Typed-parameter paths. Pre-fix `const` read 44 (0x2C), the low byte of
+    // 300 (0x12C), because `*const i32` lowered as `i8*`.
+    assert contains(out, "plain=300 const=300 mut=300");
+    // Cast targets `as *const T` / `as *mut T`. Pre-fix: E0818.
+    assert contains(out, "cast_const=300 cast_mut=300");
+    // Field store through `*const W`. Pre-fix the store was silently dropped
+    // and the original 300 was observed here instead of 7.
+    assert contains(out, "field=7");
+}

@@ -447,7 +447,18 @@ fn _strip_outer_parens(text: string) -> string {
 fn classify_fn_cast(head: string, target_text: string, entry: SymbolEntry, span: SourceSpan?) -> Diagnostic[] {
     let target = trim_text(target_text);
     if starts_with(target, "*") {
-        let pointee = trim_text(strip_prefix(target, "*"));
+        let mut pointee = trim_text(strip_prefix(target, "*"));
+        // `*const T` and `*mut T` are synonyms of `*T` (SFEP-0079 §3.2), so
+        // strip the qualifier before classifying. Without this, `f as *const u8`
+        // — newly parseable as of SFN-1290 — missed the `u8` match below and
+        // fell through to E0808 "fn used as value", a wrong diagnostic for a
+        // spelling the spec accepts.
+        if starts_with(pointee, "const ") {
+            pointee = trim_text(strip_prefix(pointee, "const "));
+        }
+        if starts_with(pointee, "mut ") {
+            pointee = trim_text(strip_prefix(pointee, "mut "));
+        }
         let is_typed_fn_ptr = starts_with(pointee, "fn ") || starts_with(pointee, "fn(");
         if strings_equal(pointee, "u8") || is_typed_fn_ptr {
             if entry.is_generic {

@@ -4,7 +4,12 @@
 // native emitter.  Extracted from emit_native.sfn to reduce per-file
 // memory footprint during self-hosting compilation.
 import { NativeArtifact } from "sfn/ir";
-import { char_at_index as char_at, contains_string, starts_with } from "sfn/strings";
+import {
+    char_at_index as char_at,
+    contains_string,
+    starts_with,
+    substring
+} from "sfn/strings";
 import {
     EnumVariant,
     FieldDeclaration,
@@ -477,10 +482,31 @@ fn analyze_type_layout(context: LayoutContext, visiting: string[], type_annotati
 // (issue #713). Collapse the spaces out of pointer annotations so the
 // type survives the round-trip as one token; `map_type_annotation`
 // already treats `*u8` / `*Node` identically to their spaced forms.
+// Drop a `const`/`mut` raw-pointer qualifier from the text following a
+// leading `*`. SFEP-0079 §3.2 makes `*T`, `*const T` and `*mut T` lower to
+// the same `T*`, so the qualifier carries no layout information and removing
+// it is lossless.
+//
+// This must happen BEFORE the whitespace collapse below, not after: the
+// collapse would turn `* const i32` into `*consti32` and `* mut Node` into
+// `*mutNode`, neither of which any type mapper recognizes, and the field
+// would lower as `i8*` (SFN-1290).
+fn _strip_layout_pointer_qualifier(pointee: string) -> string {
+    if starts_with(pointee, "const ") {
+        return trim_text(substring(pointee, 6, pointee.length));
+    }
+    if starts_with(pointee, "mut ") {
+        return trim_text(substring(pointee, 4, pointee.length));
+    }
+    return pointee;
+}
+
 fn normalize_layout_field_type(annotation: string) -> string {
-    let trimmed = trim_text(annotation);
-    if trimmed.length == 0 { return trimmed; }
-    if !starts_with(trimmed, "*") { return trimmed; }
+    let trimmed_raw = trim_text(annotation);
+    if trimmed_raw.length == 0 { return trimmed_raw; }
+    if !starts_with(trimmed_raw, "*") { return trimmed_raw; }
+    let pointee = trim_text(substring(trimmed_raw, 1, trimmed_raw.length));
+    let trimmed = "*" + _strip_layout_pointer_qualifier(pointee);
     let mut result: string = "";
     let mut index: int = 0;
     loop {
