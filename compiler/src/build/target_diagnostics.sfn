@@ -63,6 +63,14 @@ fn static_unsupported_target_diagnostic(triple: string) -> Diagnostic {
 // fully-provisioned host to install packages they already have, so the hint
 // branches on the reason class instead (SFN-1268).
 fn _static_prerequisite_hint(reason: string) -> string {
+    // Since SFN-953 the provider override is resolved ahead of the OS
+    // dispatch, so `--static` can now surface a SAILFIN_LINK_PROVIDER
+    // reason here. Without this branch it would reach the glibc-static
+    // hint below and tell the user to install packages that have nothing
+    // to do with the knob they actually set.
+    if index_of(reason, "SAILFIN_LINK_PROVIDER") >= 0 {
+        return " (hint: --static requires the direct ld.lld path; unset SAILFIN_LINK_PROVIDER or set it to `direct`)";
+    }
     if index_of(reason, "defers to clang") >= 0 {
         return " (hint: --static requires the direct ld.lld path; unset SAILFIN_LINKER or remove the [linker] pin from your user config)";
     }

@@ -346,6 +346,26 @@ succeeds and threading fails at run time, with no diagnostic from either
 the weak-symbol ambiguity, so a host at or past that version is required;
 older hosts are not a supported target for `--static`.
 
+**The ordinary (non-`--static`) final link on Linux `x86_64-unknown-linux-gnu`
+/ `aarch64-unknown-linux-gnu`** — the targets Sailfin owns the Link role for
+(SFEP-0066 §3.2) — also runs through a direct `ld.lld` invocation rather than
+the clang driver, and fails closed instead of silently falling back to clang:
+if `ld.lld` is not on PATH, or the host is missing the glibc dynamic linker or
+the CRT/gcc startup objects the link needs, the build fails with `E0628`
+naming the missing prerequisite. Remediate per cause: install the
+distribution's `lld` package (e.g. `lld`/`llvm`) so `ld.lld` is on PATH, or
+install its C development packages (e.g. `libc6-dev` + `gcc`, or
+`glibc-devel` + `libgcc`) so the CRT objects are present. To opt out of the
+direct path instead of fixing the host, either select a different linker with
+`SAILFIN_LINKER=<name>` (e.g. `SAILFIN_LINKER=mold`) or select the legacy
+clang-driven link with `SAILFIN_LINK_PROVIDER=clang-oracle`. Every other
+target — macOS, Windows, musl Linux, and non-x86-64/aarch64 Linux hosts —
+still links via the clang driver by default and does not hit `E0628` for a
+missing `ld.lld`/CRT; an unrecognized `SAILFIN_LINK_PROVIDER` value, however,
+fails with `E0628` on any target, since it is a configuration error rather
+than a missing host prerequisite. See
+[`SAILFIN_LINK_PROVIDER`](#environment-variables) below.
+
 **Examples:**
 
 ```bash
@@ -980,7 +1000,8 @@ directory and, just as importantly, which directories a given variable does
 | `SAILFIN_EFFECT_ENFORCE` | `sfn` binary | Control runtime effect-enforcement (the seal, SFEP-0016); partial on macOS arm64 (#613). |
 | `GLOBAL_BIN_DIR` | Installer script | Override the installation bin directory directly (takes precedence over `PREFIX`). |
 | `GITHUB_TOKEN` | installer / `sfn dev bootstrap fetch` | GitHub token used to raise API rate limits and access release assets. |
-| `SAILFIN_LINKER` | `sfn` binary (native final links) | Override the linker for the final link step. `ld`/`system`/`default` force the platform linker; any other value selects that linker by name (e.g. `mold`, `lld`). Auto-detect (mold, then lld) is Linux-only. Falls through to `~/.sfn/config.toml`'s `[target.<triple>] linker` when unset, ahead of the compiled-in default — see below. |
+| `SAILFIN_LINKER` | `sfn` binary (native final links) | Override the linker for the final link step. `ld`/`system`/`default` force the platform linker; any other value selects that linker by name (e.g. `mold`, `lld`). Auto-detect (mold, then lld) is Linux-only. Falls through to `~/.sfn/config.toml`'s `[target.<triple>] linker` when unset, ahead of the compiled-in default — see below. On the governed Linux x86-64/aarch64 direct-link path, any value other than `lld`/`ld.lld` defers the final link to the clang driver instead of `E0628`-failing. |
+| `SAILFIN_LINK_PROVIDER` | `sfn` binary (native final links) | Select the Link-role provider (SFEP-0066 §3.1/§3.5). `direct` (default) is Sailfin's own `ld.lld` invocation on the governed targets (Linux x86-64/aarch64 glibc); `clang-oracle` is the migration escape hatch that routes the final link back through the clang driver. Not read from `~/.sfn/config.toml` — env-only. An unrecognized value fails with `E0628` on every target, not only the governed ones. Mirrors the Assemble-role `SAILFIN_OBJECT_PROVIDER=clang-oracle` switch — one spelling per role. |
 | `SAILFIN_CC` | `sfn` binary (native macOS final links) | Explicit Darwin clang-driver override. Defaults to `/usr/bin/clang`; object assembly still follows `PATH`. Falls through to `~/.sfn/config.toml`'s `[target.<triple>] cc` when unset, ahead of the compiled-in default — see below. |
 
 `SAILFIN_LINKER` and `SAILFIN_CC` are two of four settings admitted to a

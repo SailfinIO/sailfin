@@ -37,6 +37,7 @@ import {
     _llvm_text_link_program_argv_with_driver,
     _llvm_text_link_test_argv
 } from "../../src/backend";
+import { resolve_link_contract } from "../../src/build/direct_link";
 import { emit_child_argv } from "../../src/build/emit_child_argv";
 import { empty_llvm_import_context, resolve_llvm_provider_context } from "../../src/build/llvm_provider_context";
 import { condition_runtime_capsules_for_target } from "../../src/build/runtime_objs";
@@ -64,7 +65,11 @@ import {
     triple_target_arch,
     triple_target_os
 } from "../../src/build/target";
-import { static_prerequisites_diagnostic, static_unsupported_target_diagnostic } from "../../src/build/target_diagnostics";
+import {
+    direct_link_prerequisites_diagnostic,
+    static_prerequisites_diagnostic,
+    static_unsupported_target_diagnostic
+} from "../../src/build/target_diagnostics";
 import {
     active_build_target,
     active_static_link,
@@ -807,6 +812,100 @@ test "target: E0626 gives the linker-override hint, not the glibc hint, for a de
     assert expect_eq_bool(contains(diag.message, "SAILFIN_LINKER=mold defers to clang"), true).ok;
     assert expect_eq_bool(contains(diag.message, "unset SAILFIN_LINKER"), true).ok;
     assert expect_eq_bool(contains(diag.message, "glibc-static"), false).ok;
+}
+
+// ---- SFN-628/E0628: `direct_link_prerequisites_diagnostic` (SFN-953 review) ----
+//
+// The E0626 twin above, for the Link-role-ownership fail-closed path
+// (`../../src/build/direct_link.sfn:_direct_unmet`).
+test "target: E0628 names the triple, the reason, code, and severity" ![pure] {
+    let diag = direct_link_prerequisites_diagnostic("x86_64-unknown-linux-gnu", "crti.o/crtn.o not found in /usr/lib/x86_64-linux-gnu");
+    assert expect_eq_str(diag.code, "E0628").ok;
+    assert expect_eq_str(diag.severity, "error").ok;
+    assert expect_eq_bool(contains(diag.message, "x86_64-unknown-linux-gnu"), true).ok;
+    assert expect_eq_bool(contains(diag.message, "crti.o/crtn.o not found in /usr/lib/x86_64-linux-gnu"), true).ok;
+}
+
+// The three `_direct_link_prerequisite_hint` remediation classes, exercised
+// through the diagnostic (mirrors the E0626 pair above, which tests
+// `_static_prerequisite_hint` the same way rather than exporting it).
+test "target: E0628 gives the SAILFIN_LINK_PROVIDER hint for a provider-selection reason" ![pure] {
+    let diag = direct_link_prerequisites_diagnostic("x86_64-unknown-linux-gnu", "SAILFIN_LINK_PROVIDER=bogus is not a supported link provider (supported: direct, clang-oracle)");
+    assert expect_eq_str(diag.code, "E0628").ok;
+    assert expect_eq_bool(contains(diag.message, "unset SAILFIN_LINK_PROVIDER"), true).ok;
+    assert expect_eq_bool(contains(diag.message, "install your distribution's lld package"), false).ok;
+}
+
+test "target: E0628 gives the lld-install hint for an ld.lld-missing reason" ![pure] {
+    let diag = direct_link_prerequisites_diagnostic("aarch64-unknown-linux-gnu", "ld.lld not on PATH");
+    assert expect_eq_str(diag.code, "E0628").ok;
+    assert expect_eq_bool(contains(diag.message, "install your distribution's lld package"), true).ok;
+    assert expect_eq_bool(contains(diag.message, "SAILFIN_LINKER=<name>"), true).ok;
+}
+
+test "target: E0628 gives the C-toolchain hint as the fallback" ![pure] {
+    let diag = direct_link_prerequisites_diagnostic("x86_64-unknown-linux-gnu", "crti.o/crtn.o not found in /usr/lib/x86_64-linux-gnu");
+    assert expect_eq_str(diag.code, "E0628").ok;
+    assert expect_eq_bool(contains(diag.message, "libc6-dev + gcc"), true).ok;
+    assert expect_eq_bool(contains(diag.message, "unset SAILFIN_LINK_PROVIDER"), false).ok;
+}
+
+// ---- SFN-953: `requires_direct_link` classification (code review gap) ----
+//
+// `resolve_link_contract` reads `SAILFIN_LINK_PROVIDER` unconditionally,
+// BEFORE any OS dispatch (`../../src/build/direct_link.sfn:_link_provider_override`
+// runs first in `resolve_link_contract`) — so unlike the `--target`/`--static`
+// process cells above, there is no arm of this function that runs ahead of
+// an env read, and Sailfin has no in-process `setenv` to neutralize the var
+// the way `set_build_target`/`set_static_link` neutralize their axis. Only
+// `contract.ok == false` holds for every value of `SAILFIN_LINK_PROVIDER` on
+// these unowned-target inputs, so it is asserted unconditionally; the
+// stronger `requires_direct_link == false` claim is asserted only when the
+// ambient value is known not to force `_direct_unmet` (unset, `direct`, or
+// the supported `clang-oracle` override) — the same degrade-to-a-weaker-
+// assertion shape `windows_build_deshell_test.sfn` uses for its
+// un-neutralizable `SAILFIN_BUILD_JOBS` read.
+fn _link_provider_is_neutral(provider: string) -> boolean ![pure] {
+    return provider.length == 0 || provider == "direct" || provider == "clang-oracle";
+}
+
+test "direct-link: resolve_link_contract(Darwin) keeps the clang route (unowned target)" ![io] {
+    let contract = resolve_link_contract("Darwin", false);
+    assert expect_eq_bool(contract.ok, false).ok;
+    if _link_provider_is_neutral(env.get("SAILFIN_LINK_PROVIDER")) {
+        assert expect_eq_bool(contract.requires_direct_link, false).ok;
+    }
+}
+
+test "direct-link: resolve_link_contract(Windows) keeps the clang route (unowned target)" ![io] {
+    let contract = resolve_link_contract("Windows", false);
+    assert expect_eq_bool(contract.ok, false).ok;
+    if _link_provider_is_neutral(env.get("SAILFIN_LINK_PROVIDER")) {
+        assert expect_eq_bool(contract.requires_direct_link, false).ok;
+    }
+}
+
+test "direct-link: resolve_link_contract keeps the clang route for an unrecognized OS" ![io] {
+    let contract = resolve_link_contract("Plan9", false);
+    assert expect_eq_bool(contract.ok, false).ok;
+    if _link_provider_is_neutral(env.get("SAILFIN_LINK_PROVIDER")) {
+        assert expect_eq_bool(contract.requires_direct_link, false).ok;
+    }
+}
+
+// The narrower claim the classification tests above lean on: an unset
+// provider var reaches the OS dispatch at all (i.e. does not itself
+// contribute the failure reason). Restricted to the unset case because that
+// is the only value this test can affirmatively observe without a way to
+// set the var from inside the process.
+test "direct-link: an unset SAILFIN_LINK_PROVIDER does not by itself force the failure reason" ![io] {
+    let provider = env.get("SAILFIN_LINK_PROVIDER");
+    if provider.length == 0 {
+        let contract = resolve_link_contract("Darwin", false);
+        assert expect_eq_bool(contract.ok, false).ok;
+        assert expect_eq_bool(contract.requires_direct_link, false).ok;
+        assert expect_eq_bool(contains(contract.reason, "SAILFIN_LINK_PROVIDER"), false).ok;
+    }
 }
 
 // ---- SFN-923: the arch axis (`triple_target_arch`, `_resolve_llvm_target_arch`) ----
