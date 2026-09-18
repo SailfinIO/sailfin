@@ -77,6 +77,21 @@ test "dev clean: _clean_target_ok rejects a drive-absolute target" {
     assert _clean_target_ok("build/native");
 }
 
+test "dev clean: _clean_target_ok rejects parent segments with either separator" {
+    assert ! _clean_target_ok("..");
+    assert ! _clean_target_ok("../build/native");
+    assert ! _clean_target_ok("build/../native");
+    assert ! _clean_target_ok("build/native/..");
+    assert ! _clean_target_ok("build/..\\native");
+    assert ! _clean_target_ok("build\\../native");
+    assert ! _clean_target_ok("build/native\\..");
+    assert ! _clean_target_ok("build/foo/..\\etc");
+    assert _clean_target_ok("build/native");
+    assert _clean_target_ok("build/.hidden");
+    assert _clean_target_ok("dist");
+    assert _clean_target_ok("dist/release");
+}
+
 test "dev clean: _clean_abs_with treats a drive-absolute path as already absolute" {
     // A POSIX-only check would have prefixed the cwd onto this, producing
     // a nonsense joined path instead of leaving the drive-absolute path

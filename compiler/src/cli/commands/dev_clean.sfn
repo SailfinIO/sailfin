@@ -30,9 +30,8 @@ import { _shell_read_cmd } from "../../build/fs";
 import { cache_root } from "../../build_cache";
 import { _selfhost_remove_tree } from "../../cli_selfhost";
 import {
-    ends_with,
-    index_of,
     is_absolute_path,
+    is_path_separator,
     starts_with,
     strings_equal,
     substring
@@ -112,10 +111,21 @@ fn _preserved_build_children() -> string[] ![io] {
 fn _clean_target_ok(rel: string) -> boolean {
     if rel.length == 0 { return false; }
     if is_absolute_path(rel) { return false; }
-    if strings_equal(rel, "..") { return false; }
-    if starts_with(rel, "../") { return false; }
-    if index_of(rel, "/../") >= 0 { return false; }
-    if ends_with(rel, "/..") { return false; }
+    let mut segment_start = 0;
+    let mut i = 0;
+    loop {
+        if i >= rel.length { break; }
+        if is_path_separator(substring(rel, i, i + 1)) {
+            if strings_equal(substring(rel, segment_start, i), "..") {
+                return false;
+            }
+            segment_start = i + 1;
+        }
+        i += 1;
+    }
+    if strings_equal(substring(rel, segment_start, rel.length), "..") {
+        return false;
+    }
     if starts_with(rel, "build/") { return true; }
     if strings_equal(rel, "dist") { return true; }
     if starts_with(rel, "dist/") { return true; }
