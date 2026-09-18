@@ -444,12 +444,14 @@ struct LlvmTextBackend {
         }
         let driver_flags = _concat_driver_flags(target_linker_driver_flags(triple, host_target_triple()), _macos_sdk_link_flags());
         let eff_plan = _target_conditioned_plan(plan, triple);
-        // Sailfin owns Link on Linux x86-64 (SFEP-0066 §3.1 role table):
-        // take the direct `ld.lld` path when the link contract resolves,
-        // for both the program and test layouts (test mode carries empty
-        // `link_flags`, so the same builder serves both). Any non-Linux
-        // target or missing prerequisite falls back to the clang driver
-        // below with a trace-visible reason — never a silent ABI change.
+        // Sailfin owns Link on Linux x86-64/aarch64 (SFEP-0066 §3.1 role
+        // table): take the direct `ld.lld` path when the link contract
+        // resolves, for both the program and test layouts (test mode
+        // carries empty `link_flags`, so the same builder serves both).
+        // A missing prerequisite on an owned target no longer falls back —
+        // it fails closed (SFN-953, `requires_direct_link` below). Only an
+        // unowned target or an explicit provider selection reaches the
+        // clang driver, still with a trace-visible reason.
         let static_link = active_static_link();
         let direct = resolve_link_contract(target_os, static_link);
         if direct.ok {
@@ -470,6 +472,14 @@ struct LlvmTextBackend {
         // clang driver below. It stays silent because the reachable
         // refusals own the user-facing diagnostic.
         if static_link { return 2; }
+        // Same structural role for the dynamic leg (SFN-953):
+        // `build/link_dispatch.sfn` refuses first with a rendered E0628, so
+        // this is unreachable in practice and stays silent — the reachable
+        // refusal owns the user-facing diagnostic. It exists so that no
+        // future edit can let a target that OWNS Link fall through to the
+        // clang driver below, which would leave the ownership claim
+        // describing a provider that did not execute.
+        if direct.requires_direct_link { return 2; }
         trace_direct_link_fallback(direct.reason);
         if eff_plan.test_mode {
             let test_argv = _llvm_text_link_test_argv_with_driver(eff_plan, driver_flags, link_driver);

@@ -12,6 +12,18 @@
 //      driver): the trace emits an explicit "direct linker unavailable"
 //      reason and the clang path — never a silent ABI change — and the
 //      binary still runs.
+//   3. Fail-closed refusal (SFN-953): an unrecognized
+//      `SAILFIN_LINK_PROVIDER` is E0628 with no binary written.
+//   4. Migration oracle (SFN-953): `SAILFIN_LINK_PROVIDER=clang-oracle`
+//      routes the final link back through the clang driver on purpose.
+//
+// Legs 2 and 4 are what "fail closed" does NOT mean. Sailfin owning Link on
+// this target makes a MISSING prerequisite an error (leg 3); it does not
+// overrule an operator who explicitly named another provider. SFEP-0066
+// §3.1 draws that line — an explicitly selected route is reported as the
+// provider that executed and simply never counts toward the ownership
+// claim, whereas a silent fallback would make the claim describe a
+// provider that did not run.
 //
 // The direct-path leg is skipped on any host that is not Linux x86-64/aarch64 with
 // `ld.lld` installed (macOS/Windows keep the clang path). See
@@ -48,7 +60,7 @@ fn _scratch_dir() -> string ![io] {
 // has nothing to do with their change. CI has no config file, so the failure
 // would reproduce only on contributor machines.
 fn _child_env(linker: string) -> string[] ![io] {
-    let mut e = clean_runner_env_without(nested_runner_scratch("direct-link"), ["HOME", "SAILFIN_TRACE_LINK", "SAILFIN_LINKER"]);
+    let mut e = clean_runner_env_without(nested_runner_scratch("direct-link"), ["HOME", "SAILFIN_TRACE_LINK", "SAILFIN_LINKER", "SAILFIN_LINK_PROVIDER"]);
     let home = _scratch_dir() + "/home";
     fs.createDirectory(home, true);
     e.push("HOME=" + home);
@@ -152,14 +164,87 @@ test "direct-link: SAILFIN_LINKER=ld falls back to clang with a traced reason" !
     assert rc == 0;
     let err = fs.readFile(bin + ".err");
     // The fallback is explicit — a trace-visible reason, then the clang
-    // driver path (never a silent ABI change).
+    // driver path (never a silent ABI change). Still legal after SFN-953
+    // made missing prerequisites fail closed: naming a linker is an
+    // explicit provider selection, not an unmet prerequisite, so it keeps
+    // `requires_direct_link` false and keeps mold/system-ld workflows
+    // building.
     assert contains(err, "direct linker unavailable");
     assert contains(err, "clang");
+    // Pin the arm this test NAMES. Without it the assertions above also
+    // hold on macOS via "target os (Darwin) has no owned direct linker
+    // yet", so the test would pass without ever exercising the linker
+    // override it exists to cover.
+    if _direct_eligible() {
+        assert contains(err, "SAILFIN_LINKER=ld defers to clang");
+    }
     // The binary still links and runs.
     let run_rc = process.run_capture([bin], []);
     let run_out = process.capture_take_stdout();
     let run_err = process.capture_take_stderr();
     report_child_failure("direct-link fallback run", run_rc, run_out, run_err);
+    assert run_rc == 0;
+    assert find(run_out, "DIRECT_OK", 0) >= 0;
+}
+
+// Host-independent like E0625 above: an unrecognized provider is rejected in
+// `resolve_link_contract` ahead of the OS dispatch, so it fails closed on
+// every target rather than silently meaning "direct" off Linux. That is
+// why this needs no eligibility gate. It is also the cheapest reachable proof
+// that the fail-closed path renders rather than falling through, since
+// hiding a real prerequisite (ld.lld, the loader, a CRT object) from a
+// child process cannot be done hermetically.
+test "direct-link: an unrecognized SAILFIN_LINK_PROVIDER fails closed with E0628" ![io] {
+    let dir = _scratch_dir();
+    let main_path = _write_fixture(dir);
+    let bin = dir + "/e0628-bin";
+    if fs.exists(bin) { fs.deleteFile(bin); }
+    let mut env = _child_env("");
+    env.push("SAILFIN_LINK_PROVIDER=definitely-not-a-provider");
+    let rc = process.run_capture([sfn_bin_path(), "build", "-o", bin, main_path], env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    // rc == 2 is the expected refusal, so this skips `report_child_failure`
+    // (which would misreport an expected refusal as a broken child).
+    let _ = out;
+    assert rc == 2;
+    assert contains(err, "E0628");
+    // SFEP-0066 §3.7: the diagnostic names the authoritative knob that was
+    // supplied, not just that something went wrong.
+    assert contains(err, "SAILFIN_LINK_PROVIDER");
+    // ...and the target triple, so a reader knows which contract failed.
+    assert contains(err, "linux-gnu") || contains(err, "-apple-") || contains(err, "-windows-");
+    // Fail closed means no artifact: a half-linked binary on disk is the
+    // outcome the refusal exists to prevent.
+    assert ! fs.exists(bin);
+}
+
+test "direct-link: SAILFIN_LINK_PROVIDER=clang-oracle routes the link through clang" ![io] {
+    if !_direct_eligible() || !tool_present("clang") {
+        // The oracle is only meaningful where the direct path would
+        // otherwise have been selected, and only runnable where clang
+        // exists. Elsewhere there is nothing to contrast.
+        assert true;
+        return;
+    }
+    let dir = _scratch_dir();
+    let main_path = _write_fixture(dir);
+    let bin = dir + "/oracle-bin";
+    let mut env = _child_env("");
+    env.push("SAILFIN_LINK_PROVIDER=clang-oracle");
+    let rc = process.run_capture([sfn_bin_path(), "build", "-o", bin, main_path], env);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("direct-link oracle build", rc, out, err);
+    assert rc == 0;
+    // Explicitly selected, so it reports the provider that executed rather
+    // than pretending the direct path ran.
+    assert contains(err, "clang");
+    assert contains(err, "SAILFIN_LINK_PROVIDER=clang-oracle");
+    let run_rc = process.run_capture([bin], []);
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    report_child_failure("direct-link oracle run", run_rc, run_out, run_err);
     assert run_rc == 0;
     assert find(run_out, "DIRECT_OK", 0) >= 0;
 }

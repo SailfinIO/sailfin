@@ -112,7 +112,8 @@ test "backend: static argv reproduces every plan.libs entry" ![pure] {
         crtn: "/usr/lib/x86_64-linux-gnu/crtn.o",
         crtbegin: "/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginT.o",
         crtend: "/usr/lib/gcc/x86_64-linux-gnu/13/crtend.o",
-        search_dirs: ["/usr/lib/gcc/x86_64-linux-gnu/13", "/usr/lib/x86_64-linux-gnu"]
+        search_dirs: ["/usr/lib/gcc/x86_64-linux-gnu/13", "/usr/lib/x86_64-linux-gnu"],
+        requires_direct_link: false
     };
     let argv = direct_ld_lld_argv(contract, plan.objects, plan.out_path, plan.libs, plan.link_flags);
     let mut i: int = 0;

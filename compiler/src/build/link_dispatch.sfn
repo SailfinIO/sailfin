@@ -40,7 +40,7 @@ import {
     target_uses_gnu_link_gc,
     triple_target_os
 } from "./target";
-import { static_prerequisites_diagnostic } from "./target_diagnostics";
+import { direct_link_prerequisites_diagnostic, static_prerequisites_diagnostic } from "./target_diagnostics";
 import { active_static_link } from "./target_state";
 
 // Layout policy. Program and test links differ through DATA on this
@@ -514,6 +514,32 @@ fn dispatch_link(request: LinkRequest) -> LinkOutcome ![io] {
                 failure: LinkFailure {
                     stage: "static-prerequisites",
                     reason: static_contract.reason
+                },
+                runtime_stats: inputs.stats
+            };
+        }
+    }
+
+    // Fail-closed half of "Sailfin owns Link on Linux" (SFN-953), the
+    // dynamic-leg twin of the `--static` preflight above. Gated on
+    // `!active_static_link()` so the static leg keeps E0626 end to end:
+    // the test layout does not preflight static, and without this gate a
+    // static prerequisite miss there would surface under the dynamic code.
+    // Unlike the static preflight this runs for BOTH layouts, because a
+    // test binary that silently linked through clang would prove the
+    // ownership claim on a provider that never executed.
+    if !active_static_link() {
+        let direct_triple = build_target_triple();
+        let direct_contract = resolve_link_contract(build_target_os(), false);
+        if !direct_contract.ok && direct_contract.requires_direct_link {
+            let direct_lines: string[] = [];
+            print.err(render_terminal_diagnostic(diagnostic_to_diag(direct_link_prerequisites_diagnostic(direct_triple, direct_contract.reason), "build"), direct_lines, "build"));
+            return LinkOutcome {
+                rc: 2,
+                ran_backend: false,
+                failure: LinkFailure {
+                    stage: "direct-link-prerequisites",
+                    reason: direct_contract.reason
                 },
                 runtime_stats: inputs.stats
             };
