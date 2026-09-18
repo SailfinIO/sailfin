@@ -259,11 +259,18 @@ Arguments          = Argument { "," Argument } ;
 |------|---------|--------|
 | `&x` | Create shared borrow | Safe |
 | `&mut x` | Create exclusive mutable borrow | Safe |
-| `&raw x` | Create raw pointer from value | `unsafe` block only |
-| `*ptr` | Dereference raw pointer | `unsafe` block only |
+| `*ptr` | Dereference raw pointer (load) | No block required |
+| `*ptr = v` | Store through a raw pointer | No block required |
+| `ptr + n` | Element-scaled pointer arithmetic | No block required |
 | `borrow(x)` | Explicit shared borrow | Safe |
 
-The `as` operator performs type casts. Inside `unsafe` blocks it can cast between pointer types (`ptr as *i32`).
+`&raw x` is **not implemented**: it does not typecheck (`E0818`). Use
+`s as *S` for a struct's address. No raw-pointer operation requires an
+`unsafe { }` block — see
+[§13 Foreign Interface](/docs/reference/spec/13-foreign-interface/).
+
+The `as` operator performs type casts, including between pointer types
+(`ptr as *i32`).
 
 ### Primary Expressions
 
@@ -313,12 +320,13 @@ QualifiedName      = Identifier { "." Identifier } ;
 | `T[]` | Array / growable collection |
 | `&T` | Shared borrow (read-only) — parsed, not enforced ([roadmap](/roadmap)) |
 | `&mut T` | Exclusive mutable borrow — parsed, not enforced ([roadmap](/roadmap)) |
-| `*T` | Raw read-only pointer (unsafe only) |
-| `*mut T` | Raw mutable pointer (unsafe only) |
-| `*opaque` | Opaque foreign pointer (`void*`) |
+| `*T` | Raw pointer — reads **and** writes are permitted |
+| `*const T` | Accepted spelling; read-only is not enforced ([SFEP-0079](/sfep/0079-systems-c-interop/) §3.2) |
+| `*mut T` | Accepted spelling, identical to `*T` |
+| `*void` | Untyped foreign pointer (`void*`). `*opaque` is rejected (`E0805`) |
 
-Sized numeric types for FFI / low-level code: `i8`–`i64`, `u8`–`u64`, `f32`,
-`f64`, `usize`. The split of `number` into `int` (i64) / `float` (f64) is on
+Sized numeric types for FFI / low-level code: `i8`–`i64`, `u8`–`u64`, `f16`,
+`bf16`, `f32`, `f64`, `usize`, `isize`. The split of `number` into `int` (i64) / `float` (f64) is on
 the [roadmap](/roadmap).
 
 **Context-sensitivity of `&`**: In type position `A & B` is type intersection;

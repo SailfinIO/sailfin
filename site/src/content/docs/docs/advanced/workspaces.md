@@ -18,7 +18,7 @@ Use a workspace when:
 
 - You have multiple capsules in a single repository that depend on each other.
 - You want to share a dependency version across all capsules (pin once, use everywhere).
-- You need to enforce security policies — for example, ensuring only one designated capsule can make network requests or use `unsafe`.
+- You need to enforce security policies — for example, ensuring only one designated capsule can make network requests.
 - You want to run tests across the entire codebase with a single command.
 
 Do **not** use a workspace for single-capsule projects. A workspace adds coordination overhead that has no benefit if there is only one capsule. A standalone `capsule.toml` is sufficient.
@@ -59,12 +59,9 @@ resolver = "v1"
 sfn = "0.10.4"
 version = "0.10.4"
 
-[policies.unsafe]
-allowed_capsules = ["core"]
-require_annotation = "@security-reviewed"
-
 [policies.net]
 allowed_capsules = ["api", "cli"]
+require_annotation = "@security-reviewed"
 
 [policies.model]
 allowed_capsules = ["api"]
@@ -95,7 +92,12 @@ Pins the `sfn` toolchain for every member capsule by default. Same fields and se
 
 #### `[policies.<capability>]`
 
-Each `[policies.*]` section restricts use of one capability across the workspace. The key after `policies.` is any valid capability name: `unsafe`, `net`, `io`, `model`, `gpu`, `rand`, `clock`.
+Each `[policies.*]` section restricts use of one capability across the workspace. The key after `policies.` is a canonical effect name: `clock`, `gpu`, `io`, `model`, `net`, `rand`.
+
+> `[policies.unsafe]` is **withdrawn**. `unsafe` is not a capability and not a
+> canonical effect, so no policy can key on it; see
+> [SFEP-0079](/sfep/0079-systems-c-interop/) §3.5 and
+> [§13 Foreign Interface](/docs/reference/spec/13-foreign-interface/).
 
 | Field | Type | Description |
 |---|---|---|
@@ -114,21 +116,28 @@ If a capsule needs to override the shared version, it can declare a stricter con
 
 Policies are the primary reason to use a workspace in a security-conscious project. They enforce security boundaries at the package level, before code review and before runtime.
 
-### Restricting `unsafe`
+### Restricting a capability
 
-In most applications, only a small portion of the codebase should ever touch raw pointers or call C functions. A workspace policy can encode this:
+In most applications, only a small portion of the codebase should reach a
+given capability. A workspace policy can encode this:
 
 ```toml
-[policies.unsafe]
+[policies.io]
 allowed_capsules = ["core"]
 require_annotation = "@security-reviewed"
 ```
 
 With this policy in place:
 
-- Only the `core` capsule may list `"unsafe"` in its `[capabilities] required`.
-- The `api` and `cli` capsules will fail the workspace policy check if they declare `"unsafe"`, even if the compiler would otherwise accept it.
-- Every `unsafe` block inside `core` must be on a function decorated with `@security-reviewed`.
+- Only the `core` capsule may list `"io"` in its `[capabilities] required`.
+- The `api` and `cli` capsules will fail the workspace policy check if they declare `"io"`, even if the compiler would otherwise accept it.
+- Every function using the capability inside `core` must be decorated with `@security-reviewed`.
+
+> **There is no `unsafe` policy.** Confining the foreign surface of a program
+> is not something a capability policy can express today: `unsafe` is not an
+> effect, and an `extern` call contributes no effect to its caller. A derived
+> record of every foreign edge is designed in
+> [SFEP-0079](/sfep/0079-systems-c-interop/) §3.5 and is not shipped.
 
 ### Restricting network access
 
@@ -287,12 +296,9 @@ Here is a complete workspace showing how all the pieces fit together.
 members = ["core", "api", "cli"]
 resolver = "v1"
 
-[policies.unsafe]
-allowed_capsules = ["core"]
-require_annotation = "@security-reviewed"
-
 [policies.net]
 allowed_capsules = ["api"]
+require_annotation = "@security-reviewed"
 
 [shared-dependencies]
 "sfn/log" = "^0.1"
@@ -307,7 +313,7 @@ version = "0.1.0"
 description = "Business logic and data types"
 
 [capabilities]
-required = ["io", "unsafe"]
+required = ["io"]
 ```
 
 ### `api/capsule.toml`
@@ -342,8 +348,7 @@ required = ["io"]
 
 This configuration enforces:
 
-- Only `core` can use `unsafe` (and only on functions annotated with `@security-reviewed`).
-- Only `api` can make network calls.
+- Only `api` can make network calls (and only on functions annotated with `@security-reviewed`).
 - `cli` can only do local I/O.
 
 ## Summary
@@ -353,7 +358,7 @@ This configuration enforces:
 | Workspace root | Directory containing `workspace.toml` |
 | Members | `[workspace] members = ["core", "api", "cli"]` |
 | Toolchain pin | `[toolchain] sfn = "<floor>"` / `version = "<exact>"`; a member `capsule.toml` overrides per field |
-| Capability restriction | `[policies.unsafe] allowed_capsules = ["core"]` |
+| Capability restriction | `[policies.net] allowed_capsules = ["api"]` |
 | Shared dependency | `[shared-dependencies] "sfn/log" = "^0.1"` |
 | Intra-workspace dep | `"core" = { path = "../core" }` in capsule's `[dependencies]` |
 | Intra-workspace import | `import { X } from "core"` |
