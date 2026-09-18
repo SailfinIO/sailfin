@@ -24,6 +24,7 @@ The specification is split across chapters for readability:
 - [§10 Runtime](/docs/reference/spec/10-runtime)
 - [§11 Testing](/docs/reference/spec/11-testing)
 - [§12 Result and ?](/docs/reference/spec/12-result-and-errors)
+- [§13 Foreign Interface](/docs/reference/spec/13-foreign-interface)
 
 For planned-but-not-yet-shipped features, see the [Design Preview](/docs/reference/preview/).
 

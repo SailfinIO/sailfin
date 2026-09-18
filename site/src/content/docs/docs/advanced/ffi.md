@@ -1,20 +1,45 @@
 ---
 title: Unsafe & FFI
-description: Foreign function interface, unsafe blocks, raw pointers, and C interoperability.
+description: Foreign function interface, extern declarations, raw pointers, and C interoperability.
 section: advanced
 sidebar:
   order: 4
 ---
 
-Sailfin's safety system — effect tracking and ownership checking — operates entirely within the language. When you need to call a C library, interact with OS APIs, or drop down to raw memory operations, you step outside those guarantees through the **FFI** (Foreign Function Interface). Sailfin makes this boundary explicit: you declare what you are doing and mark it unsafe, so the unsafe surface stays a small, auditable subset of the codebase rather than spreading silently.
+When you need to call a C library, reach an OS API, or work with raw memory,
+you leave the region Sailfin's analysis covers. That boundary is an `extern fn`
+declaration and a raw pointer.
 
-This page documents Sailfin's FFI system as specified in §6.1.5 of the language specification.
+This page is the practical guide. The normative rules are
+[§13 Foreign Interface](/docs/reference/spec/13-foreign-interface/), and the
+interop contract still being built is
+[SFEP-0079](/sfep/0079-systems-c-interop/).
 
-**Current status:** `extern fn` declarations, native lowering, and declaration
-validation (`E0801`–`E0805`) are shipped. `unsafe` blocks mark author-asserted
-raw-pointer regions. The ownership checker also rejects a bare owned value
-passed to a locally declared extern outside `unsafe` (`E0906`). This is a
-bounded boundary check, not full enforcement of every rule described below.
+:::caution[Read this before porting C]
+The interop surface that ships today is narrower than this page once claimed.
+Four constructs documented here previously do **not** work, and are marked
+inline below wherever they appear:
+
+- **`@repr(C)`** parses and is silently ignored. So does any other unrecognized
+  decorator. Struct layout is not a contract.
+- **`![unsafe]`** is not an effect. A function declaring it is rejected with
+  `E0404`. `[capabilities] required = ["unsafe"]` and `[policies.unsafe]` are
+  **withdrawn** (SFEP-0079 §3.5).
+- **`&raw value`** does not typecheck (`E0818`).
+- **`*T` is not read-only.** Writes through `*T`, `*const T`, and `*mut T` are
+  all accepted and all lower to a store.
+
+Also: **`*opaque` is rejected** with `E0805` — write `*void`. And the extern
+spelling of the boolean is **`bool`**, not `boolean`.
+:::
+
+**Current status.** `extern fn` declarations, their C-ABI validation
+(`E0801`–`E0805`), native lowering, raw-pointer load/store/member/arithmetic,
+and function addresses via `name as *u8` (guarded by `E0808`/`E0809`) all ship.
+`unsafe { }` is meaningful to the ownership checker (`E0906`) and to nothing
+else. Layout guarantees, pointer mutability enforcement, variadic externs,
+typed callback parameters, and effect-attested externs are designed in
+SFEP-0079 and are not shipped.
 
 ## Overview
 
@@ -25,409 +50,439 @@ FFI enables:
 - **Performance-critical code** — SIMD intrinsics, hardware interfaces, custom allocators
 - **Embedding in C/C++ programs** — exposing Sailfin functions to a C host
 
-The trade-off is clear: inside an `unsafe` block, the compiler cannot verify memory safety, null safety, or correct ownership. You are responsible for upholding those invariants. The design goal is to make the unsafe surface area as small and explicit as possible, so that auditors and security reviews can focus on a well-defined subset of the codebase.
+The trade-off is real: across an extern boundary the compiler verifies neither
+memory safety, nor null safety, nor that your declaration matches the C header.
+Keep the foreign surface small and wrap it.
+
+## `extern fn` Declarations
+
+External functions are declared with `extern fn`. The declaration is a
+signature with no body, resolved at link time.
+
+```sfn
+extern fn malloc(size: usize) -> *u8;
+extern fn free(ptr: *u8) -> void;
+extern fn memcpy(dest: *u8, src: *u8, n: usize) -> *u8;
+extern fn memset(dest: *u8, val: i32, n: usize) -> *u8;
+extern fn strlen(s: *u8) -> usize;
+```
+
+`unsafe extern fn` is also accepted, and means the same thing. The `unsafe`
+keyword on an extern is consumed by the parser and read back by nothing, so the
+two spellings typecheck and lower identically. Prefer plain `extern fn`; use
+`unsafe extern fn` only if you want the visual marker.
+
+Key properties:
+
+- **C ABI by default.** Parameters use the platform C calling convention.
+  Narrow integers are passed without explicit `signext`/`zeroext` attributes,
+  which is a known gap in calling-convention fidelity (SFEP-0079 §3.3).
+- **No effects on the declaration.** `extern fn f() -> i32 ![io]` is rejected
+  with `E0804`. Declare the effect on the Sailfin wrapper that calls it.
+  Extern calls are invisible to the effect checker, so a wrapper's effect
+  clause is an author's claim about the foreign function, not a derived fact.
+- **Ownership boundary.** Passing a bare owned value to an extern declared in
+  the same compilation unit, outside an `unsafe` block, raises `E0906`.
+- **Must be linked.** The library providing the symbol has to reach the final
+  link. A link input is a build input, not provenance: it says what the linker
+  resolves against, and records nothing about what that library does.
+- **No safety guarantees.** The compiler trusts the declaration. A wrong
+  parameter or return type is undefined behavior.
+
+### Extern type table
+
+These are the types an extern signature admits today.
+
+| Sailfin | C | LLVM | Notes |
+|---|---|---|---|
+| `i8` | `int8_t` / `char` | `i8` | |
+| `i16` | `int16_t` | `i16` | |
+| `i32` | `int32_t` | `i32` | |
+| `i64` | `int64_t` | `i64` | |
+| `u8` | `uint8_t` | `i8` | |
+| `u16` | `uint16_t` | `i16` | |
+| `u32` | `uint32_t` | `i32` | |
+| `u64` | `uint64_t` | `i64` | |
+| `usize` | `size_t` | `i64` on a 64-bit target | pointer-sized |
+| `isize` | `ssize_t` | `i64` on a 64-bit target | pointer-sized |
+| `f32` | `float` | `float` | |
+| `f64` | `double` | `double` | |
+| `f16` | `_Float16` | `half` | accepted; no dedicated ABI handling |
+| `bf16` | `__bf16` | `bfloat` | accepted; no dedicated ABI handling |
+| `bool` | `_Bool` | `i1` | **`boolean` is rejected** (`E0805`) — externs spell it `bool` |
+| `int` | `int64_t` | `i64` | Sailfin's default integer |
+| `float` | `double` | `double` | Sailfin's default float |
+| `void` | `void` | `void` | **return position only**; a `void` parameter is `E0805` |
+| `*T` | `T*` | `T*` | pointee must itself be admissible |
+| `*void` | `void*` | `i8*` | the untyped pointer — **`*opaque` is rejected** |
+| `*Handle` | `struct Handle*` | `i8*` | an UpperCamelCase pointee is taken as an opaque handle |
+
+`*const T` and `*mut T` are also accepted — the checker strips the prefix and
+checks the pointee — but neither prefix means anything yet. See
+[Raw pointers](#raw-pointer-types).
+
+`usize` and `isize` are pointer-sized: 64 bits on a 64-bit target, 32 on a
+32-bit one. The LLVM column assumes a 64-bit target. Use `usize` for any
+size or count crossing to a C `size_t`.
+
+**Typed function-pointer parameters do not work in practice.** The checker
+accepts the tight spelling `fn(A) -> B`, but `sfn fmt` rewrites it to
+`fn (A) -> B`, which the same checker then rejects with `E0805`. A formatted
+file cannot carry one. Pass callbacks as raw addresses instead — see
+[Callbacks into Sailfin](#callbacks-into-sailfin). Typed callback parameters
+are designed in SFEP-0079 §3.4 and not shipped.
+
+### Declaration diagnostics
+
+| Code | Raised when |
+|---|---|
+| `E0801` | The type is, or contains, the Sailfin `string` aggregate |
+| `E0802` | The type contains `[]` — arrays carry runtime metadata that does not cross the boundary |
+| `E0803` | The extern declares type parameters (`<...>`) |
+| `E0804` | The extern declares effects (`![...]`) |
+| `E0805` | Any other inadmissible or missing type |
+
+Sailfin `string` needs an explicit conversion. A string *literal* is
+NUL-terminated, so `literal as *u8` may be passed to a C `const char*`
+directly; anything else must be copied into a NUL-terminated buffer first,
+because slices are not NUL-terminated.
 
 ## `unsafe` Blocks
 
-An `unsafe { ... }` block is a lexical scope marking raw pointer operations and
-foreign calls as author-asserted. Today the compiler uses that boundary for
-ownership checking of locally declared externs; the broader restrictions in
-this section describe the intended complete FFI model.
+An `unsafe { ... }` block is a lexical region whose contents are
+author-asserted for the ownership checker. That is its entire shipped meaning.
 
 ```sfn
-fn allocate_buffer(bytes: usize) -> *u8 ![unsafe] {
+extern fn malloc(size: usize) -> *u8;
+
+fn allocate_buffer(bytes: usize) -> *u8 {
     unsafe {
-        let ptr = malloc(bytes);
-        // Dereferencing raw pointers is only legal inside this block.
-        return ptr;
+        return malloc(bytes);
     }
 }
 ```
 
-The `![unsafe]` effect on the function signature is the designed annotation for functions that contain unsafe blocks. Once fully enforced, the effect will propagate upward — callers of `allocate_buffer` must also declare `![unsafe]` unless they wrap the call in a safe abstraction that handles all unsafe invariants internally and returns a safe type.
+**No pointer operation requires an `unsafe` block.** Dereference, stores,
+member access, arithmetic, and casts all compile outside one — the runtime
+itself does raw-pointer work outside `unsafe` throughout. A rule requiring
+`unsafe` for them would be a restriction without a matching power, and
+SFEP-0079 §3.2 explicitly declines to add one.
 
-> **Current enforcement status:** `unsafe` blocks are meaningful to the
-> ownership checker: their interiors are author-asserted, while a raw-pointer
-> escape into a locally declared extern outside one is rejected with `E0906`.
-> General `![unsafe]` effect propagation is not shipped.
+What the block *does* buy you: passing a bare owned value to an extern declared
+in the same compilation unit outside a block raises `E0906`, and inside one it
+does not.
 
-The design goal is that `![unsafe]` in a call graph visibly marks every function that directly or indirectly performs unsafe operations. Auditors can grep for `![unsafe]` to find the full unsafe surface of a codebase.
+:::danger[`![unsafe]` is not an effect]
+`![unsafe]` was never implemented, and is now withdrawn. The canonical effects
+are `clock`, `gpu`, `io`, `model`, `net`, and `rand`; anything else is rejected
+with `E0404`:
 
-### Operations restricted to `unsafe` blocks
-
-| Operation | Syntax |
-|---|---|
-| Pointer dereference (read) | `*ptr` |
-| Pointer dereference (write) | `*ptr = value` |
-| Pointer arithmetic | `ptr + n`, `ptr - n` |
-| Pointer casting | `ptr as *OtherType` |
-| Calling unsafe extern functions | `malloc(n)`, `free(p)`, etc. |
-| Taking a raw pointer from a value | `&raw value` |
-
-## `unsafe extern fn` Declarations
-
-External C functions are declared using `unsafe extern fn`. This tells the compiler:
-
-- The function is defined in a foreign (C) library
-- It follows the C ABI calling convention
-- Calling it requires an active `![unsafe]` capability
-
-```sfn
-unsafe extern fn malloc(size: usize) -> *u8;
-unsafe extern fn free(ptr: *u8) -> void;
-unsafe extern fn memcpy(dest: *u8, src: *u8, n: usize) -> *u8;
-unsafe extern fn memset(dest: *u8, val: i32, n: usize) -> *u8;
-unsafe extern fn strlen(s: *u8) -> usize;
+```
+error[E0404]: function `f` declares unrecognized effect ![unsafe]
 ```
 
-Extern function parameters follow the same `name: Type` syntax as regular Sailfin
-parameters. The return type uses `->`.
-
-Key properties of `unsafe extern fn` declarations:
-
-- **C ABI by default.** Parameters are passed using the platform C calling convention.
-- **Ownership boundary for local declarations.** Passing a bare owned value to
-  a locally declared extern outside an `unsafe` block is rejected with `E0906`.
-  General extern-call gating is not yet enforced.
-- **Raw pointer types are permitted.** The `*T`, `*mut T`, and `*opaque` types are only valid in extern declarations and unsafe blocks.
-- **Must be linked.** The native library providing these functions must be linked into the final binary. Use `[build]` or linker flags to specify the library.
-- **No safety guarantees.** The compiler trusts extern declarations. An incorrect declaration — wrong parameter types, wrong return type — is undefined behavior.
+`[capabilities] required = ["unsafe"]` and the `[policies.unsafe]` workspace
+policy go with it (SFEP-0079 §3.5). As designed, the effect marked every caller
+in a chain and proved nothing about any of them. A *derived* record of a
+program's foreign edges replaces its audit purpose; that record is designed in
+SFEP-0079 §3.5 and not shipped.
+:::
 
 ## Raw Pointer Types
 
-Sailfin provides three raw pointer types for use in FFI:
-
 | Type | C equivalent | Description |
 |---|---|---|
-| `*T` | `const T*` | Read-only raw pointer to type `T`. Dereferencing reads the value; writing is not permitted. |
-| `*mut T` | `T*` | Mutable raw pointer to type `T`. Both read and write are permitted through dereference. |
-| `*opaque` | `void*` | Opaque pointer to foreign-managed memory. Used when the pointed-to type is unknown or irrelevant. |
+| `*T` | `T*` | Raw pointer to `T`. Reads and writes are both permitted. |
+| `*const T` | `const T*` | Accepted spelling. **Not enforced** — writes through it compile. |
+| `*mut T` | `T*` | Accepted spelling, identical to `*T`. |
+| `*void` | `void*` | Untyped pointer. Use this where C uses `void*`. |
+| `*Handle` | `struct Handle*` | Opaque foreign handle, by UpperCamelCase convention. |
+
+:::caution[Mutability is not enforced]
+`*T`, `*const T`, and `*mut T` all produce the same pointer type and permit the
+same operations. A `*const T` that rejects stores with `E0852` is designed in
+SFEP-0079 §3.2 and not shipped. Until it lands, `*const T` documents intent to
+a human reader and nothing more.
+
+`*opaque` is not a type. It is rejected with `E0805`, because the opaque-pointee
+rule requires an uppercase initial. Write `*void`.
+:::
 
 Raw pointers differ fundamentally from Sailfin references (`&T`, `&mut T`):
 
-- **No lifetime tracking.** The compiler does not know when the pointed-to memory is valid.
-- **No null safety.** A raw pointer may be null. You must check explicitly before dereferencing.
-- **No borrow checking.** Multiple `*mut T` pointers to the same memory are permitted (though aliasing mutable pointers is a common source of bugs).
-- **May be cast.** A `*T` may be cast to `*mut T`, `*opaque`, or `*OtherType` inside an unsafe block.
-- **Arithmetic permitted.** Pointer arithmetic is allowed inside unsafe blocks.
+- **No lifetime tracking.** The compiler does not know when the pointed-to
+  memory is valid.
+- **No null safety.** A raw pointer may be null; check before dereferencing.
+- **No borrow checking.** Multiple pointers to the same memory are permitted.
+- **Freely cast.** `p as *U` reinterprets with no check.
 
-Raw pointers do not appear in safe Sailfin code. They are only valid in `unsafe` blocks and in `unsafe extern fn` declarations.
+### Retention
 
-## The `![unsafe]` Capability
+A pointer into Sailfin-managed storage is valid **only for the duration of the
+foreign call it is passed to**. Sailfin storage may be arena-backed and
+reclaimed at a phase boundary, so a pointer the foreign side keeps can dangle.
+Anything C retains — a `user_data` payload, an `epoll` data pointer — must live
+in memory C owns, typically a `malloc` allocation.
 
-`unsafe` is a capability effect, treated by the effect system the same way `io` or `net` are. This means:
+This rule is **documented, not enforced.** Nothing rejects handing arena
+storage to a retaining parameter.
 
-1. Any function containing an `unsafe` block must declare `![unsafe]`.
-2. Any function calling an `![unsafe]` function must itself declare `![unsafe]` (unless the callee's unsafe behavior is fully encapsulated behind a safe return type).
-3. The capsule's `capsule.toml` must list `"unsafe"` in its `[capabilities] required` array.
+## Pointer Operations
 
-```sfn
-// Both callee and caller must declare ![unsafe]
-fn read_word(ptr: *u32) -> u32 ![unsafe] {
-    unsafe {
-        return *ptr;
-    }
-}
-
-fn inspect_memory(base: *u32, offset: usize) -> u32 ![unsafe] {
-    unsafe {
-        let target_ptr = base + offset;  // pointer arithmetic — must be in unsafe block
-        return *target_ptr;
-    }
-}
-```
-
-The capsule manifest:
-
-```toml
-[capabilities]
-required = ["unsafe"]
-```
-
-If `"unsafe"` is absent from the manifest, the compiler will reject capsule builds containing unsafe code once enforcement is active.
-
-## Type Mappings: Sailfin, C, and LLVM
-
-When writing extern declarations, use the Sailfin types that correspond to the C types in the library's header. Mismatched types cause undefined behavior.
-
-| Sailfin | C | LLVM |
-|---|---|---|
-| `i8` | `int8_t` / `char` | `i8` |
-| `i16` | `int16_t` | `i16` |
-| `i32` | `int32_t` | `i32` |
-| `i64` | `int64_t` | `i64` |
-| `u8` | `uint8_t` | `i8` |
-| `u16` | `uint16_t` | `i16` |
-| `u32` | `uint32_t` | `i32` |
-| `u64` | `uint64_t` | `i64` |
-| `usize` | `size_t` | `i64` (platform-dependent) |
-| `isize` | `ssize_t` | `i64` (platform-dependent) |
-| `f32` | `float` | `float` |
-| `f64` | `double` | `double` |
-| `boolean` | `_Bool` / `bool` | `i1` |
-| `*T` | `const T*` | `T*` |
-| `*mut T` | `T*` | `T*` |
-| `*opaque` | `void*` | `i8*` |
-
-**Important:** `usize` and `isize` are pointer-sized integers. On 64-bit platforms they are 64 bits; on 32-bit platforms they are 32 bits. The LLVM column above assumes a 64-bit target. Always use `usize` for sizes and counts that may be passed to C functions expecting `size_t`.
-
-## `@repr(C)` Structs
-
-When passing structs across FFI boundaries, Sailfin's default struct layout may not match C's. The `@repr(C)` decorator instructs the compiler to lay out the struct fields in declaration order, with C-compatible alignment and padding:
+All of these work today, inside an `unsafe` block or outside one.
 
 ```sfn
-@repr(C)
-struct Point {
-    x: f64;
-    y: f64;
-}
+extern fn malloc(size: usize) -> *u8;
+extern fn free(ptr: *u8) -> void;
 
-@repr(C)
-struct Rectangle {
-    top_left: Point;
-    bottom_right: Point;
-}
+fn pointer_example() ![io] {
+    let arr = malloc(40) as *i32;   // cast *u8 to *i32
 
-unsafe extern fn distance(p1: *Point, p2: *Point) -> f64;
-unsafe extern fn rect_area(r: *Rectangle) -> f64;
-```
-
-Without `@repr(C)`, the compiler may reorder or pack fields for Sailfin-native efficiency, which would produce an incorrect memory layout when the struct is passed to a C function.
-
-**When to use `@repr(C)`:**
-
-- Any struct passed to or returned from an `unsafe extern fn`
-- Any struct whose in-memory layout must match a C header definition
-- Any struct written to or read from a raw memory buffer shared with C code
-
-Sailfin-internal structs that never cross the FFI boundary do not need `@repr(C)`.
-
-## Pointer Arithmetic and Casting
-
-Inside `unsafe` blocks, pointer arithmetic follows C semantics. Offsets are in units of the pointed-to type's size (not bytes), matching how C pointer arithmetic works.
-
-```sfn
-fn pointer_example() ![unsafe, io] {
-    unsafe {
-        // Allocate 10 i32 values (40 bytes on a 32-bit i32)
-        let arr = malloc(10 * 4) as *i32;  // Cast *u8 to *i32
-
-        for i in 0..10 {
-            let element_ptr = arr + i;  // Advance by i elements (i * sizeof(i32) bytes)
-            *element_ptr = i * i;       // Write through pointer
-        }
-
-        let third = *(arr + 2);  // Read the third element (index 2)
-        print("{{third}}");      // prints 4
-
-        free(arr as *u8);  // Cast back to *u8 for free()
+    for i in 0..10 {
+        let element_ptr = arr + i;  // advance by i elements
+        *element_ptr = i * i;       // store through the pointer
     }
+
+    let third = *(arr + 2);         // load the third element
+    print("${ third }");            // prints 4
+
+    free(arr as *u8);
 }
 ```
-
-Supported pointer operations inside `unsafe` blocks:
 
 | Operation | Description |
 |---|---|
-| `ptr + n` | Advance pointer by `n` elements (scaled by `sizeof(T)`) |
-| `ptr - n` | Retreat pointer by `n` elements |
-| `ptr as *OtherType` | Reinterpret pointer as a different type |
-| `ptr == null` | Null check |
-| `ptr != null` | Non-null check |
-| `&raw value` | Obtain a raw pointer to a stack or heap value |
+| `*p` | Load a `T`. Dereferencing a non-pointer reports `E1006`. |
+| `*p = v` | Store a `T`. |
+| `p.f` | Load or store field `f` of a struct through the pointer, auto-dereferencing. |
+| `p + n`, `p - n` | Advance or retreat by `n` elements, scaled by the pointee's size. On `*u8` the step is one byte. |
+| `p as *U` | Reinterpret as a different pointer type. |
+| `p as i64`, `n as *T` | Convert between an address and an integer. |
+| `s as *S` | Address of a struct binding's storage. |
+| `s as *u8` | A string's data pointer — NUL-terminated only for literals. |
+| `p == null`, `p != null` | Null tests. `0 as *T` is also the null pointer. |
 
-## Safe Wrapper Pattern
+:::note[`&raw` does not exist]
+`&raw value` is documented in older material and in
+`examples/advanced/raw-pointers.sfn`, where it is kept in comments as a design
+sketch. It does not typecheck:
 
-The recommended practice for FFI is to keep `unsafe` contained within a small, well-tested module, and expose a completely safe public API to the rest of the codebase. This is the safe wrapper pattern.
+```
+error[E0818]: unstructured expression cannot be analyzed; rewrite so the compiler can parse it
+```
 
-The pattern:
+Use `s as *S` for a struct's address, and a `malloc`'d slot for a scalar.
+:::
 
-1. Declare the `unsafe extern fn` bindings privately (not exported).
-2. Write thin safe wrapper functions that handle all invariants: null checks, size validation, cleanup.
-3. Export only the safe wrappers.
-4. Use `Linear<T>` for resources that must be freed, so the type system enforces cleanup.
+## Struct Layout
 
-Here is the `ManagedBuffer` example from the specification:
+:::caution[`@repr(C)` is not implemented]
+`@repr(C)` parses into the struct's decorator list and is never read. So does
+`@anything_else(C)` — there is no decorator validation at all, so a typo is
+silent.
+
+Structs lower to LLVM identified types in field declaration order, which
+coincides with the C ABI for scalar fields on the supported targets. That is an
+accident of LLVM's default layout, not a guarantee, and it is not something to
+build a port on: it can change, and the `.sfn-asm` layout table already
+disagrees with it for narrow types.
+
+A validated layout contract — `@repr(C)` with field checking, `packed`,
+compile-time `size`/`align` assertions, and `size_of` / `align_of` /
+`offset_of` — is designed in SFEP-0079 §3.1 and not shipped. Inline fixed-size
+array fields (`[T; N]`) are rejected today with `E0830` and are designed in
+SFEP-0079 §3.6.
+:::
+
+Until that lands, a struct shared with C is a hazard. The workable pattern is
+to keep the foreign-facing shape as explicit scalar fields in declaration
+order, verify the offsets against the C header on each target you ship, and
+prefer passing scalars over passing structs.
+
+## Callbacks into Sailfin
+
+C calls back into Sailfin through a raw function address. Cast the function's
+name:
 
 ```sfn
-// Unsafe internals — not exported
-unsafe extern fn malloc(size: usize) -> *u8;
-unsafe extern fn free(ptr: *u8) -> void;
-unsafe extern fn memset(dest: *u8, val: i32, n: usize) -> *u8;
+extern fn pthread_create(thread: *u8, attr: *u8, start: *u8, arg: *u8) -> i32;
 
-// Internal struct — not exported
-struct ManagedBuffer {
-    ptr: *u8;
-    capacity: usize;
-    length: usize;
+fn worker(arg: *u8) -> *u8 {
+    return arg;
 }
 
-// Error type for allocation failures
-struct AllocError {
-    code: i32;
-    message: string;
-}
-
-// Safe allocation: wraps malloc, zero-initializes, returns a buffer or an error.
-// Linear<T> is exactly-once enforced.
-export fn allocate_buffer(size: usize) -> Linear<ManagedBuffer> | AllocError ![unsafe] {
-    unsafe {
-        let ptr = malloc(size);
-        if ptr == null {
-            return AllocError { code: -1, message: "allocation failed" };
-        }
-        memset(ptr, 0, size);
-        return Linear<ManagedBuffer>(ManagedBuffer {
-            ptr: ptr, capacity: size, length: 0
-        });
-    }
-}
-
-// Safe deallocation: consumes the Linear wrapper, preventing double-free
-export fn free_buffer(buffer: Linear<ManagedBuffer>) -> void ![unsafe] {
-    unsafe {
-        let inner = consume(buffer);
-        if inner.ptr != null {
-            free(inner.ptr);
-        }
-    }
+fn spawn(thread: *u8, arg: *u8) -> i32 {
+    return pthread_create(thread, 0 as *u8, worker as *u8, arg);
 }
 ```
 
-The `Linear<ManagedBuffer>` return type is an enforced safety mechanism: a
-`Linear<T>` value must be consumed exactly once and cannot be dropped silently.
+`worker as *u8` lowers to the function's code pointer, not a closure pair, so C
+can call it directly. Two diagnostics guard the form:
 
-> **Current status**: `Linear<T>`, `Affine<T>`, and related borrow-checker
-> single-use rules are enforced. Use-after-move/second binding raises
-> `E0901`/`E0904`; an unconsumed `Linear<T>` at scope exit raises `E0907`.
-> Shared-borrow and view-lifetime checking remain in progress.
+- `E0808` — a function name used as a value without the cast, or cast to
+  something other than `* u8` or a function-pointer type.
+- `E0809` — the named function is generic; only a concrete function has one
+  address.
+
+This is the shipped path, and the runtime scheduler depends on it. Two caveats:
+a Sailfin `throw` unwinding across a C frame is undefined, and there is no way
+to define a symbol C can call *by name* — defined functions are module-mangled.
+C-ABI definitions are designed in SFEP-0079 §3.4 and not shipped.
+
+## Safe Wrapper Pattern
+
+Keep the foreign surface in a small module and export only safe wrappers.
+
+1. Declare the `extern fn` bindings privately.
+2. Write wrappers that handle the invariants: null checks, size validation,
+   NUL-termination, cleanup.
+3. Export only the wrappers, carrying the effect clause the foreign call
+   deserves.
+4. Take a resource that must be released as `Linear<T>`, so the ownership
+   checker enforces the release.
+
+```sfn
+// Foreign internals — not exported
+extern fn malloc(size: usize) -> *u8;
+extern fn memset(dest: *u8, val: i32, n: usize) -> *u8;
+
+struct ManagedBuffer {
+    ptr: *u8;
+    capacity: usize;
+}
+
+// Zero-initialized allocation. A null return means the allocation failed.
+export fn allocate_buffer(size: usize) -> *u8 {
+    let ptr = malloc(size);
+    if ptr == null {
+        return ptr;
+    }
+    memset(ptr, 0, size);
+    return ptr;
+}
+
+// Taking the buffer as `Linear<ManagedBuffer>` makes releasing it mandatory:
+// a linear value must be consumed exactly once. `free(v)` is one of the
+// consumption forms the ownership checker recognizes — it is that rule, not a
+// call to libc `free`.
+export fn release_buffer(buffer: Linear<ManagedBuffer>) -> i32 {
+    free(buffer);
+    return 0;
+}
+
+// Forwarding a linear value to another function that takes it also consumes it.
+export fn release_all(buffer: Linear<ManagedBuffer>) -> i32 {
+    return release_buffer(buffer);
+}
+```
+
+Drop the `free(buffer)` and the compiler rejects the function:
+
+```
+error[E0907]: linear value `buffer` is never consumed at 2:20
+```
+
+> **What `Linear<T>` does and does not do today.** The ownership checker
+> recognizes `Linear<T>` and `Affine<T>` on a binding or parameter and enforces
+> single use: use-after-move and a second binding raise `E0901`/`E0904`, and a
+> linear value still live at scope exit raises `E0907`. A linear value is
+> consumed by returning it, by passing it to a function that takes it, or by
+> `free(v)`.
+>
+> There is **no `Linear<T>` constructor and no `consume()` function.** A
+> `Linear<T>` arrives as a parameter; you cannot wrap a value in one from
+> source. Shared-borrow and view-lifetime checking are in progress.
 
 ## Error Handling Across FFI
 
-C functions do not have exceptions or Sailfin's type-safe results. They signal errors through:
-
-- Return codes (`-1` for failure, non-negative for success)
-- Global `errno` (POSIX)
-- Out-parameters
-
-The pattern is to translate these C conventions into Sailfin's type-safe `enum` results inside the wrapper:
+C signals errors through return codes, a global `errno`, and out-parameters.
+Translate them inside the wrapper:
 
 ```sfn
-// Tagged-union error type mirroring POSIX conventions
 struct PosixError {
     errno: i32;
 }
 
-// Extern declarations for POSIX open and errno
-unsafe extern fn c_open(path: *u8, flags: i32) -> i32;
-unsafe extern fn c_errno() -> i32;
+extern fn c_open(path: *u8, flags: i32) -> i32;
+extern fn c_errno() -> i32;
 
-// Safe wrapper: hides the unsafe internals, returns a union
-fn open_file(path: string, flags: i32) -> i32 | PosixError ![unsafe, io] {
-    unsafe {
-        let fd = c_open(path.as_c_str(), flags);
-        if fd < 0 {
-            return PosixError { errno: c_errno() };
-        }
-        return fd;
+// The effect clause is the wrapper's claim about the foreign call; the
+// compiler derives nothing from the extern itself.
+fn open_file(path: *u8, flags: i32) -> i32 | PosixError ![io] {
+    let fd = c_open(path, flags);
+    if fd < 0 {
+        return PosixError { errno: c_errno() };
     }
+    return fd;
 }
 ```
 
-After the wrapper, callers use idiomatic Sailfin pattern matching. New wrappers
-can return the shipped `Result<T, E>` type and callers can use postfix `?` for
-propagation. An explicit union (`T | ErrorStruct`) remains valid when it better
-models the native API's outcomes:
+Callers then use ordinary Sailfin pattern matching. A wrapper can also return
+the shipped `Result<T, E>` and let callers propagate with postfix `?`; an
+explicit union stays valid where it models the native outcomes better.
 
 ```sfn
-fn read_config(path: string) ![unsafe, io] {
+fn read_config(path: *u8) ![io] {
     let result = open_file(path, 0);
     match result {
-        PosixError { errno } => print.err("Failed to open file, errno: {{errno}}"),
+        PosixError { errno } => print.err("Failed to open file, errno: ${ errno }"),
         _ => { /* `result` is the file descriptor */ },
     }
 }
 ```
 
-This keeps the `errno`-handling logic in one place, inside the wrapper. The
-rest of the codebase sees a clean `i32 | PosixError` result.
-
-## Capability Manifest for Unsafe
-
-Any capsule using `unsafe` must declare it in `capsule.toml`:
-
-```toml
-[capsule]
-name = "native-bindings"
-version = "0.1.0"
-description = "Low-level native library bindings"
-
-[capabilities]
-required = ["io", "unsafe"]
-```
-
-If the capsule is part of a workspace, the workspace can restrict which capsules are permitted to declare `unsafe`:
-
-```toml
-# workspace.toml
-[policies.unsafe]
-allowed_capsules = ["native-bindings"]
-require_annotation = "@security-reviewed"
-```
-
-With `require_annotation = "@security-reviewed"`, every function containing an `unsafe` block must carry the `@security-reviewed` decorator:
-
-```sfn
-@security-reviewed
-fn allocate_buffer(size: usize) -> *u8 ![unsafe] {
-    unsafe {
-        return malloc(size);
-    }
-}
-```
-
-This creates an enforceable audit trail: every unsafe function in the codebase must have been explicitly reviewed and annotated. Missing the annotation is a build-time policy violation.
-
 ## When to Use FFI
 
-FFI is powerful but carries real risk. Use it when:
+Use FFI when:
 
-- **A C library provides unique functionality** not available in the Sailfin standard library or registry (hardware drivers, OS-specific APIs, mature C libraries like `libsodium`, `libjpeg`, `sqlite`).
-- **A performance-critical hot path** requires SIMD intrinsics, custom allocators, or zero-copy I/O that cannot be expressed efficiently in safe Sailfin.
-- **Embedding in a C/C++ host** that calls into Sailfin code.
+- **A C library provides unique functionality** not available in the standard
+  library or registry — hardware drivers, OS-specific APIs, mature C libraries.
+- **A measured hot path** needs SIMD intrinsics, a custom allocator, or
+  zero-copy I/O that safe Sailfin cannot express.
+- **You are embedding in a C/C++ host** that calls into Sailfin.
 
 Do **not** use FFI when:
 
-- A safe Sailfin implementation is available in the standard library or a registry capsule. Prefer the safe version even if it is slightly slower.
-- The motivation is avoiding the effect system. Effect annotations are a feature, not a burden — they make your code's behavior explicit and auditable.
-- You are early in development. Start with safe Sailfin; reach for FFI only when a concrete, measured need exists.
+- A safe Sailfin implementation exists. Prefer it even if it is slower.
+- The motivation is avoiding the effect system. An extern does not remove the
+  capability — it removes the compiler's record of it.
+- You are early in development and the need is not yet concrete.
 
-Always wrap unsafe internals behind a safe public API. The goal is to make `unsafe` a quarantined implementation detail, invisible to callers.
+Given that layout and pointer mutability are not yet contracts, weigh a port
+that depends on either of them against waiting for the SFEP-0079 leaves that
+specify them.
 
 ## Example Reference
 
-The `examples/advanced/` directory in the Sailfin repository contains runnable examples:
+The `examples/advanced/` directory contains:
 
-- `examples/advanced/unsafe-extern-interop.sfn` — External function declarations and unsafe blocks
-- `examples/advanced/pointer-arithmetic.sfn` — Pointer arithmetic with `malloc`/`free`
-- `examples/advanced/raw-pointers.sfn` — Raw pointer creation with `&raw` and dereference
+- `examples/advanced/unsafe-extern-interop.sfn` — extern declarations and
+  `unsafe` blocks
+- `examples/advanced/pointer-arithmetic.sfn` — pointer arithmetic with
+  `malloc`/`free`
+- `examples/advanced/raw-pointers.sfn` — a design sketch: the `&raw` form is
+  kept in comments, and the runnable body uses shipped grammar
 
-These examples require `![unsafe]` and the `"unsafe"` capability in their capsule manifest.
+None of them needs an `![unsafe]` effect or an `"unsafe"` capability, because
+neither exists.
 
 ## Summary
 
 | Concept | Quick reference |
 |---|---|
-| Declare a C function | `unsafe extern fn name(param: Type) -> ReturnType;` |
-| Unsafe block | `unsafe { ... }` — required for all pointer operations and extern calls |
-| Required effect | `![unsafe]` on any function with an unsafe block |
-| Read-only pointer | `*T` |
-| Mutable pointer | `*mut T` |
-| Opaque pointer | `*opaque` |
-| C-layout struct | `@repr(C) struct Foo { field: Type; }` |
-| Pointer advance | `ptr + n` (scaled by element size) |
+| Declare a C function | `extern fn name(param: Type) -> ReturnType;` |
+| `unsafe` keyword on an extern | Accepted, inert — same meaning as plain `extern fn` |
+| `unsafe` block | Author-asserted region for the ownership checker (`E0906`). Not required for any pointer operation |
+| Effects | On the calling wrapper, never on the extern (`E0804`) |
+| Pointer | `*T` — reads **and writes** |
+| `*const T` / `*mut T` | Accepted spellings, no enforcement |
+| Untyped pointer | `*void` (**not** `*opaque`) |
+| Boolean across the boundary | `bool` (**not** `boolean`) |
+| Pointer advance | `ptr + n`, scaled by element size |
 | Null check | `ptr == null` |
-| Raw address of value | `&raw value` |
-| Capsule manifest | `[capabilities] required = ["unsafe"]` |
-| Workspace policy | `[policies.unsafe] allowed_capsules = [...]` |
-| Status | Extern declarations shipped; bounded ownership boundary enforced (`E0906`) |
+| Address of a struct | `s as *S` |
+| Function address for C | `name as *u8` (`E0808`/`E0809`) |
+| Layout control | None. `@repr(C)` is ignored — designed in SFEP-0079 §3.1 |
+| Raw address operator | None. `&raw` fails `E0818` |
+| Unsafe effect / capability / policy | Withdrawn (SFEP-0079 §3.5) |
+| Normative reference | [§13 Foreign Interface](/docs/reference/spec/13-foreign-interface/) |

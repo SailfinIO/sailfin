@@ -14,12 +14,13 @@ sidebar:
 | `float` | 64-bit IEEE-754 float (default for decimal literals) | `double` |
 | `number` | Deprecated alias for `float` (kept for migration) | `double` |
 | `string` | UTF-8 string | — |
-| `boolean` | Boolean | `_Bool` |
+| `boolean` | Boolean | `_Bool` (extern signatures spell it `bool`) |
 | `void` | No return value | `void` |
 | `null` | Absence of a value | — |
 
 **Integer and float types** (for FFI and low-level use):
-`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `usize`, `f32`, `f64`
+`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `usize`, `isize`,
+`f32`, `f64`, `f16`, `bf16`
 
 > Bare unsuffixed integer literals default to `int` (i64); decimal or
 > exponent literals default to `float` (f64). The `number` keyword is a
@@ -122,7 +123,17 @@ the prelude `Result<T, E>` enum. Postfix `?` propagation also ships; see
 - `&T` — shared (read-only) borrow
 - `&mut T` — exclusive mutable borrow
 
-**Raw pointer types** (FFI, `unsafe` only):
-- `*T` — read-only raw pointer
-- `*mut T` — mutable raw pointer
-- `*opaque` — opaque foreign pointer (`void*`)
+**Raw pointer types** (FFI):
+- `*T` — raw pointer to `T`. Both `*p` loads and `*p = v` stores are
+  permitted; there is no read-only raw pointer today.
+- `*const T` — accepted spelling, **not enforced**: a store through it
+  compiles. A `*const T` that rejects stores (`E0852`) is the contract being
+  implemented, specified in [SFEP-0079](/sfep/0079-systems-c-interop/) §3.2.
+- `*mut T` — accepted spelling, identical in meaning to `*T`.
+- `*void` — untyped foreign pointer (C's `void*`). `*opaque` is **not** a
+  type; it is rejected with `E0805`.
+
+Raw pointers are not restricted to `unsafe` blocks: deref, member access,
+element-scaled arithmetic, and casts all compile outside one. See
+[§13 Foreign Interface](/docs/reference/spec/13-foreign-interface/) for the
+normative rules and the extern accept-list.

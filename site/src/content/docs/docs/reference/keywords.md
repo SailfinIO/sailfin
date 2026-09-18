@@ -221,7 +221,7 @@ unsafe extern fn malloc(size: usize) -> *u8;
 unsafe extern fn free(ptr: *u8) -> void;
 ```
 
-`extern fn` signatures must use only C-ABI-compatible types that the LLVM backend can lower today: `int` (i64), `float` / `f64` (double), `f32` (single-precision float), `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `usize` (i64), `isize` (i64), `bool`, `void` (return only), raw pointers (`*T`, `**T`, `*const T`, `*mut T`, `*OpaqueStruct`, `*void`), or function pointers (`fn(A) -> B`). `usize`/`isize` are pointer-sized aliases that lower to `i64` on every platform Sailfin currently targets. Sailfin aggregates (`string`, `T[]`, structs) cannot cross the extern boundary directly — adapters must decompose them into pointer + length pairs first. Externs must not declare effects (`![io]`, `![net]`, …); effects belong on the wrapping adapter, not the raw extern.
+`extern fn` signatures must use only C-ABI-compatible types that the LLVM backend can lower today: `int` (i64), `float` / `f64` (double), `f32` (single-precision float), `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `usize` (i64), `isize` (i64), `f16`, `bf16`, `bool`, `void` (return only), raw pointers (`*T`, `**T`, `*const T`, `*mut T`, `*OpaqueStruct`, `*void`), or function pointers (`fn(A) -> B`). `usize`/`isize` are pointer-sized aliases that lower to `i64` on every platform Sailfin currently targets. Sailfin aggregates (`string`, `T[]`, structs) cannot cross the extern boundary directly — adapters must decompose them into pointer + length pairs first. Externs must not declare effects (`![io]`, `![net]`, …); effects belong on the wrapping adapter, not the raw extern.
 
 Diagnostic codes: `E0801` (`string` parameter/return), `E0802` (array), `E0803` (type parameters), `E0804` (effects on the extern), `E0805` (other non-C-ABI types — including the legacy `number` alias).
 
@@ -233,11 +233,15 @@ Diagnostic codes: `E0801` (`string` parameter/return), `E0802` (array), `E0803` 
 
 **Status: Parsed**
 
-Mark a block or function as opting out of Sailfin's safety guarantees. Recognized by the parser; semantic restrictions are not yet enforced.
+Mark a block or function as opting out of Sailfin's safety guarantees. The
+ownership checker treats an `unsafe { }` block as an author-asserted region
+(`E0906`); nothing else reads the keyword, and no pointer operation requires
+it. `![unsafe]` is **not** an effect — a function declaring it is rejected with
+`E0404` ([SFEP-0079](/sfep/0079-systems-c-interop/) §3.5).
 
 ```sfn
 unsafe fn write_raw(ptr: *mut u8, value: u8) -> void {
-    // raw memory access — safety not enforced yet
+    // raw memory access — safety not enforced
 }
 ```
 
@@ -688,11 +692,15 @@ fn connect(api_key: Secret<string>) ![net] {
 
 **Status: Parsed**
 
-Opt out of Sailfin's safety guarantees for a block or function. Syntax is accepted; no additional permissions are granted or revoked at this time.
+Opt out of Sailfin's safety guarantees for a block or function. The only
+shipped meaning is the ownership checker's author-asserted region (`E0906`);
+no permission is granted or revoked, and no pointer operation requires the
+block. The `![unsafe]` effect and the `"unsafe"` capability are withdrawn
+([SFEP-0079](/sfep/0079-systems-c-interop/) §3.5).
 
 ```sfn
 unsafe fn write_ptr(ptr: *mut u8, offset: usize, value: u8) -> void {
-    // raw pointer arithmetic — not enforced yet
+    // raw pointer arithmetic — not enforced
 }
 ```
 
@@ -714,30 +722,32 @@ unsafe extern fn platform_clock() -> i64;
 
 ### `raw`
 
-**Status: Parsed**
+**Status: Not implemented**
 
-Used in the `&raw x` borrow form to create a raw pointer from a value. Raw
-pointer expressions and the matching pointer types are only usable inside an
-`unsafe { }` block.
+`raw` is not a keyword. The `&raw x` form appears in older design material but
+does not typecheck:
 
-```sfn
-unsafe {
-    let ptr: *u8 = &raw buffer;
-    // ... raw pointer operations
-}
 ```
+error[E0818]: unstructured expression cannot be analyzed; rewrite so the compiler can parse it
+```
+
+Take a struct's address with `s as *S`, and use a `malloc`'d slot for a scalar.
+Raw-pointer operations do **not** require an `unsafe { }` block. See
+[§13 Foreign Interface](/docs/reference/spec/13-foreign-interface/).
 
 ---
 
 ### `opaque`
 
-**Status: Parsed**
+**Status: Not implemented**
 
-Used in the pointer type `*opaque` to denote an opaque foreign pointer
-(equivalent to C's `void*`) — most often in FFI declarations.
+`opaque` is not a keyword, and `*opaque` is rejected with `E0805`. The untyped
+foreign pointer (C's `void*`) is spelled `*void`; an UpperCamelCase pointee is
+accepted as an opaque foreign handle.
 
 ```sfn
-unsafe extern fn fopen(path: *u8, mode: *u8) -> *opaque;
+extern fn fopen(path: *u8, mode: *u8) -> *void;
+extern fn fclose(stream: *FileHandle) -> i32;
 ```
 
 ---
