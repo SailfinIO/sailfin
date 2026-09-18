@@ -355,7 +355,10 @@ implying an accelerator exists.
    lever; the more it proves, the closer to zero overhead.
 3. **FFI boundary semantics.** Does an `extern fn` call inherit the caller's
    capability context automatically, or must FFI be explicitly capability-typed?
-   Unresolved; owner-level design gate (`docs/strategy/decision-brief.md` §7).
+   **Decided by SFEP-0079 §3.5** (Accepted 2026-09-18, not shipped): externs
+   attest effects that flow through the effect checker, and the derived manifest
+   enumerates every foreign edge. Routing attested externs through the §3.4 gate
+   hook is designed there but unphased.
 4. **Link-time sealing — resolved** by §3.4. Vetted foreign code remains TCB, so
    only a `-nostdlib` artifact with no foreign executable input earns the
    process-wide fully sealed claim. Opcode inspection cannot establish it (§3.6).

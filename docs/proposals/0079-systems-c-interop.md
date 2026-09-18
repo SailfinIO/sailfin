@@ -1,18 +1,18 @@
 ---
-sfep: TBD
+sfep: 79
 title: Systems C Interop — a Specified Layout, Pointer, Callback, and Foreign-Reach Contract
-status: Draft
+status: Accepted
 type: language
 created: 2026-09-18
 updated: 2026-09-18
 author: "agent:compiler-architect (drafted); project owner (commissioned 2026-09-18)"
-tracking:
+tracking: https://linear.app/sailfin/project/systems-c-interop-828be16b7d55
 supersedes:
 superseded-by:
 graduates-to: reference/spec/13-foreign-interface.md
 ---
 
-# SFEP-XXXX — Systems C Interop
+# SFEP-0079 — Systems C Interop
 
 ## 1. Summary
 
@@ -358,9 +358,10 @@ ownership, and type checks all apply to its body against its declared
 
 ### 3.5 Externs and the Reach pillar
 
-This section is the proposed answer to the **owner-level design gate** in
-decision-brief §7.6 and SFEP-0016 §4.4 Q3. It is isolated so that the owner can
-revise it without disturbing §3.1–§3.4 or §3.6.
+This section answers the **owner-level design gate** in decision-brief §7.6
+and SFEP-0016 §4.4 Q3. **Owner decision (2026-09-18): accepted as drafted.**
+It is kept isolated so that a later revision does not disturb §3.1–§3.4 or
+§3.6.
 
 **(a) Effect-attested externs.** `E0804` is retired, and an extern may declare
 effects:
