@@ -10,21 +10,34 @@
 // The clang driver historically supplied all of this implicitly (CRT
 // objects, `-dynamic-linker`, `-L` search dirs, libc/libgcc). None of it
 // lived in the tree — this module makes it explicit and probes the host so
-// the final link no longer needs clang on PATH. Every prerequisite is
-// checked before the direct path is chosen; a missing one yields a
-// controlled fallback (`ok=false` + `reason`) to the clang driver rather
-// than a silent ABI change.
+// the final link no longer needs clang on PATH.
 //
-// Scope is deliberately glibc Linux x86-64 and aarch64. macOS, Windows,
-// musl, and other arches resolve `ok=false` and keep the clang link path.
+// Since SFN-953 the governed targets FAIL CLOSED rather than falling back:
+// on glibc Linux x86-64/aarch64 a missing prerequisite resolves
+// `ok=false` + `requires_direct_link=true`, which the caller renders as
+// E0628. Fallback is not ownership (SFEP-0066 §3.1) — a link that silently
+// degrades to clang cannot support the claim that Sailfin owns Link on
+// this target, because the provider that executed is not the one claimed.
+//
+// Scope is deliberately glibc Linux x86-64 and aarch64. macOS (SFN-954),
+// Windows (SFN-955), musl, and other arches resolve `ok=false` with
+// `requires_direct_link=false` and keep the clang link path, as does an
+// explicit `SAILFIN_LINKER` or `SAILFIN_LINK_PROVIDER=clang-oracle`
+// selection.
 // Self-host note: every argv builder is a free function calling the array
 // builtin `.push`, matching `backend.sfn`'s shape (the struct-method `.push`
 // lowering the self-hosting compiler does not resolve, #1389).
 import { _env_flag, _get_env_cmd } from "../build_flags";
-import { starts_with, substring } from "../string_utils";
+import {
+    char_code_at_text,
+    index_of,
+    starts_with,
+    substring
+} from "../string_utils";
 import { user_config_linker, user_config_linker_origin } from "../user_config";
-import { _shell_read_cmd } from "./fs";
-import { build_target_triple, triple_target_arch } from "./target";
+import { list_child_dirs } from "./fs_tree";
+import { _resolve_on_path } from "./llvm_toolchain_resolver";
+import { build_target_triple, native_host_os, triple_target_arch } from "./target";
 
 // The resolved Linux link contract. `ok` gates the direct path;
 // when false, `reason` names why the driver falls back to clang. Every
@@ -56,8 +69,28 @@ struct DirectLinkContract {
     // -L search directories (gcc dir first, then the multiarch/system dirs)
     // that resolve libc/libgcc/-l runtime libraries.
     search_dirs: string[];
+    // Meaningful only when `ok` is false, and the whole point of SFN-953:
+    // it splits the two incompatible things `ok=false` used to mean.
+    //
+    // true  — this target profile OWNS Link (SFEP-0066 §3.2 governs Linux
+    //         x86-64/aarch64) and a prerequisite is missing, skewed, or
+    //         unsupported. The caller fails closed with E0628. Falling back
+    //         here would make the ownership claim a lie, because the
+    //         provider that executed would not be the one we claim.
+    // false — the legacy clang route is the CORRECT route: a target with no
+    //         owned direct linker yet (Darwin/SFN-954, Windows/SFN-955, a
+    //         Linux arch outside the governed two), or an explicit user
+    //         selection of another provider (`SAILFIN_LINKER`,
+    //         `SAILFIN_LINK_PROVIDER=clang-oracle`). SFEP-0066 §3.1: an
+    //         explicitly selected migration oracle is reported as the
+    //         provider that executed and never counts toward ownership.
+    requires_direct_link: boolean;
 }
 
+// Not required: the legacy clang link is the correct route for this
+// resolution. Use for an unowned target profile or an explicit user
+// selection of another provider — never for a missing prerequisite on a
+// target Sailfin claims (that is `_direct_unmet`).
 fn _direct_fail(reason: string) -> DirectLinkContract {
     return DirectLinkContract {
         ok: false,
@@ -70,7 +103,28 @@ fn _direct_fail(reason: string) -> DirectLinkContract {
         crtn: "",
         crtbegin: "",
         crtend: "",
-        search_dirs: []
+        search_dirs: [],
+        requires_direct_link: false
+    };
+}
+
+// Required but unsatisfied: this target owns Link and a prerequisite is
+// missing, skewed, or unsupported. The caller renders E0628 and fails the
+// link (SFN-953); it must not reach the clang driver.
+fn _direct_unmet(reason: string) -> DirectLinkContract {
+    return DirectLinkContract {
+        ok: false,
+        reason: reason,
+        linker_emulation: "",
+        dynamic_linker: "",
+        static_link: false,
+        crt1: "",
+        crti: "",
+        crtn: "",
+        crtbegin: "",
+        crtend: "",
+        search_dirs: [],
+        requires_direct_link: true
     };
 }
 
@@ -111,17 +165,184 @@ fn _first_libdir_with(dirs: string[], filename: string) -> string ![io] {
 // that may co-exist on a development machine. Without it, the version sort
 // can select a mismatched crtbegin + `-lgcc` where clang's native-triple
 // resolution would have succeeded.
+//
+// SFN-953: reimplemented as native filesystem enumeration rather than
+// shelling out to `find | grep | grep -Ev | sort -V | tail -1` — this was
+// the last shell pipeline in the production link resolver. `find -maxdepth
+// 3` from each root is exactly two directory levels (triple dir, then
+// version dir) then the file, which `list_child_dirs` walks one level at a
+// time below.
 fn _gcc_crt_dir(arch: string, crt_name: string) -> string ![io] {
-    let found = _shell_read_cmd("find /usr/lib/gcc /usr/lib64/gcc -maxdepth 3 -name "
-        + crt_name
-        + " 2>/dev/null | grep "
-        + arch
-        + " | grep -Ev 'gnux32|musl|uclibc|mingw|w64|-none-|-elf|-eabi|android' | sort -V | tail -1");
-    if found.length == 0 { return ""; }
-    // Strip the trailing "/<crt_name>" to get the directory.
-    let suffix_len: int = crt_name.length + 1;
-    if found.length <= suffix_len { return ""; }
-    return substring(found, 0, found.length - suffix_len);
+    let roots: string[] = ["/usr/lib/gcc", "/usr/lib64/gcc"];
+    let denylist: string[] = ["gnux32", "musl", "uclibc", "mingw", "w64", "-none-", "-elf", "-eabi", "android"];
+    let mut best: string = "";
+    let mut have_best: boolean = false;
+    let mut ri: int = 0;
+    loop {
+        if ri >= roots.length { break; }
+        let root = roots[ri];
+        ri += 1;
+        if !fs.exists(root) { continue; }
+        let triple_dirs = list_child_dirs(root);
+        let mut ti: int = 0;
+        loop {
+            if ti >= triple_dirs.length { break; }
+            let version_dirs = list_child_dirs(triple_dirs[ti]);
+            ti += 1;
+            let mut vi: int = 0;
+            loop {
+                if vi >= version_dirs.length { break; }
+                let version_dir = version_dirs[vi];
+                vi += 1;
+                let candidate = version_dir + "/" + crt_name;
+                if !fs.exists(candidate) { continue; }
+                // Mirrors `grep <arch>`: keep only paths naming the arch.
+                if index_of(version_dir, arch) < 0 { continue; }
+                // Mirrors `grep -Ev '<denylist>'`: drop cross/foreign-ABI dirs.
+                let mut di: int = 0;
+                let mut denied: boolean = false;
+                loop {
+                    if di >= denylist.length { break; }
+                    if index_of(version_dir, denylist[di]) >= 0 {
+                        denied = true;
+                        break;
+                    }
+                    di += 1;
+                }
+                if denied { continue; }
+                // Sorting the version directories is equivalent to sorting
+                // the full candidate file paths the shell sorted (`sort -V`),
+                // since every surviving candidate shares the identical
+                // "/<crt_name>" suffix — not a behavior change.
+                if !have_best || _version_order_greater(version_dir, best) {
+                    best = version_dir;
+                    have_best = true;
+                }
+            }
+        }
+    }
+    return best;
+}
+
+// True when `a` sorts strictly after `b` under `sort -V` (GNU version-sort)
+// semantics: runs of ASCII digits compare numerically, runs of everything
+// else compare by ASCII character code, and a shorter string that is a
+// prefix of a longer one sorts before it. Needed because `_gcc_crt_dir`
+// must pick gcc 13 over gcc 9, and plain string comparison gets that
+// backwards ("13" < "9" lexicographically).
+fn _version_order_greater(a: string, b: string) -> boolean ![pure] {
+    let mut ia: int = 0;
+    let mut ib: int = 0;
+    loop {
+        if ia >= a.length && ib >= b.length { return false; }
+        // A shorter string that is a prefix of the other sorts before it.
+        if ia >= a.length { return false; }
+        if ib >= b.length { return true; }
+        let ca = char_code_at_text(a, ia);
+        let cb = char_code_at_text(b, ib);
+        let da = _is_ascii_digit(ca);
+        let db = _is_ascii_digit(cb);
+        if da != db {
+            // A digit run vs. a non-digit run at the same position: this is
+            // a corner case the on-disk gcc layout never hits, so just be
+            // deterministic by ASCII code.
+            if ca != cb { return ca > cb; }
+            ia += 1;
+            ib += 1;
+            continue;
+        }
+        if da {
+            let ea = _digit_run_end(a, ia);
+            let eb = _digit_run_end(b, ib);
+            let cmp = _compare_digit_runs(a, ia, ea, b, ib, eb);
+            if cmp != 0 { return cmp > 0; }
+            ia = ea;
+            ib = eb;
+            continue;
+        }
+        let ea = _non_digit_run_end(a, ia);
+        let eb = _non_digit_run_end(b, ib);
+        let cmp = _compare_char_runs(a, ia, ea, b, ib, eb);
+        if cmp != 0 { return cmp > 0; }
+        ia = ea;
+        ib = eb;
+    }
+}
+
+fn _is_ascii_digit(code: int) -> boolean ![pure] {
+    return code >= 48 && code <= 57;
+}
+
+// End index (exclusive) of the maximal run of ASCII digits starting at `start`.
+fn _digit_run_end(s: string, start: int) -> int ![pure] {
+    let mut i = start;
+    loop {
+        if i >= s.length { break; }
+        if !_is_ascii_digit(char_code_at_text(s, i)) { break; }
+        i += 1;
+    }
+    return i;
+}
+
+// End index (exclusive) of the maximal run of non-digit characters starting at `start`.
+fn _non_digit_run_end(s: string, start: int) -> int ![pure] {
+    let mut i = start;
+    loop {
+        if i >= s.length { break; }
+        if _is_ascii_digit(char_code_at_text(s, i)) { break; }
+        i += 1;
+    }
+    return i;
+}
+
+// Numeric comparison of two digit runs (never converted to int — a path
+// segment could be arbitrarily long and overflow): strip leading zeros,
+// compare by length, then digit by digit. Returns >0 when the `a` run is
+// greater, <0 when less, 0 when equal.
+fn _compare_digit_runs(a: string, a_start: int, a_end: int, b: string, b_start: int, b_end: int) -> int ![pure] {
+    let mut sa = a_start;
+    loop {
+        if sa >= a_end - 1 { break; }
+        if char_code_at_text(a, sa) != 48 { break; }
+        sa += 1;
+    }
+    let mut sb = b_start;
+    loop {
+        if sb >= b_end - 1 { break; }
+        if char_code_at_text(b, sb) != 48 { break; }
+        sb += 1;
+    }
+    let len_a = a_end - sa;
+    let len_b = b_end - sb;
+    if len_a != len_b { return len_a - len_b; }
+    let mut ja = sa;
+    let mut jb = sb;
+    loop {
+        if ja >= a_end { break; }
+        let cja = char_code_at_text(a, ja);
+        let cjb = char_code_at_text(b, jb);
+        if cja != cjb { return cja - cjb; }
+        ja += 1;
+        jb += 1;
+    }
+    return 0;
+}
+
+// ASCII character-code comparison of two non-digit runs. Returns >0 when the
+// `a` run is greater, <0 when less, 0 when equal; a shorter run that is a
+// prefix of the longer one is "less".
+fn _compare_char_runs(a: string, a_start: int, a_end: int, b: string, b_start: int, b_end: int) -> int ![pure] {
+    let mut ja = a_start;
+    let mut jb = b_start;
+    loop {
+        if ja >= a_end || jb >= b_end { break; }
+        let cja = char_code_at_text(a, ja);
+        let cjb = char_code_at_text(b, jb);
+        if cja != cjb { return cja - cjb; }
+        ja += 1;
+        jb += 1;
+    }
+    return (a_end - a_start) - (b_end - b_start);
 }
 
 // Append `dir` to `dirs` when it exists on disk and is not already present.
@@ -139,16 +360,49 @@ fn _push_dir_if_new(dirs: string[], dir: string) -> string[] ![io] {
     return out;
 }
 
-// Resolve `command -v <name>`, or "" when not on PATH.
+// Resolve `name` to an absolute path on PATH, or "" when absent.
+//
+// Native PATH walk, not `command -v` (SFN-953): the production resolver
+// spawns no shell. Reuses `llvm_toolchain_resolver`'s `_resolve_on_path`
+// rather than growing a second implementation — it already resolves to an
+// absolute path at probe time for the SFEP-0066 §3.8 fingerprinting
+// reasons, and already pairs `fs.is_executable` with `!fs.is_directory`,
+// which is load-bearing because `is_executable` degrades to `access(path,
+// 0)` on Windows and cannot itself tell a file from a directory.
 fn _which(name: string) -> string ![io] {
-    return _shell_read_cmd("command -v " + name + " 2>/dev/null");
+    return _resolve_on_path(name, native_host_os());
+}
+
+// The Link-role migration oracle (SFEP-0066 §3.1/§3.5, SFN-953). The
+// default and only supported first-party value is `direct`; `clang-oracle`
+// routes the final link back through the clang driver for differential
+// jobs. It is an explicit selection, never a fallback — which is why it
+// yields `_direct_fail` (legacy route is correct) rather than `_direct_unmet`.
+//
+// Mirrors the Assemble-role switch `SAILFIN_OBJECT_PROVIDER=clang-oracle`
+// (`./artifact_compile.sfn`) deliberately: one spelling per role, and an
+// unrecognized value is a hard failure rather than a silent fall-through to
+// whatever happens to be on PATH.
+//
+// Returns "" when the default direct provider is selected, otherwise the
+// reason string for the non-direct route.
+fn _link_provider_override() -> string ![io] {
+    let provider = _get_env_cmd("SAILFIN_LINK_PROVIDER");
+    if provider.length == 0 { return ""; }
+    if provider == "direct" { return ""; }
+    if provider == "clang-oracle" {
+        return "SAILFIN_LINK_PROVIDER=clang-oracle selects the migration oracle";
+    }
+    return "SAILFIN_LINK_PROVIDER=" + provider
+        + " is not a supported link provider (supported: direct, clang-oracle)";
 }
 
 // Target-profile selection for the Link role (SFEP-0066 section 3.6): one
 // entry point picks the platform's direct linker. Darwin and Windows
 // MSVC/COFF resolve to a structured not-yet-owned reason until SFN-954 and
-// SFN-955 implement their argv; both defer to the migration clang oracle
-// rather than failing the build.
+// SFN-955 implement their argv; both carry `requires_direct_link=false` so
+// they keep deferring to the clang driver rather than failing the build the
+// way an owned Linux target now does (SFN-953).
 fn resolve_link_contract(target_os: string, static_link: boolean) -> DirectLinkContract ![io] {
     if target_os == "Linux" {
         return resolve_direct_ld_lld(target_os, static_link);
@@ -181,14 +435,26 @@ fn resolve_link_contract(target_os: string, static_link: boolean) -> DirectLinkC
 // is stable per process.
 //
 // `static_link` selects the self-contained non-PIE contract (SFN-1268).
-// Note what `ok=false` MEANS differs by leg: on the dynamic leg it is a
-// controlled fallback to the clang driver; on the static leg the caller
-// must fail closed with `E0626` instead, because a dynamic binary is
-// precisely the outcome `--static` exists to prevent
-// (`cli/commands/build.sfn`, `backend.sfn:link`).
+// What `ok=false` means is no longer leg-dependent: `requires_direct_link`
+// carries it. A missing prerequisite fails closed on BOTH legs — E0626 for
+// `--static` (a dynamic binary is precisely the outcome `--static` exists
+// to prevent) and E0628 for the ordinary dynamic link (SFN-953). Only an
+// unowned target or an explicit provider selection still reaches clang.
 fn resolve_direct_ld_lld(target_os: string, static_link: boolean) -> DirectLinkContract ![io] {
     if target_os != "Linux" {
         return _direct_fail("target is not Linux (" + target_os + ")");
+    }
+    // Explicit provider selection outranks host probing: an operator who
+    // asked for the oracle gets it without first having to satisfy the
+    // prerequisites of the path they opted out of. An unrecognized value
+    // fails closed naming the knob (SFEP-0066 §3.7) instead of silently
+    // meaning "direct".
+    let provider_reason = _link_provider_override();
+    if provider_reason.length > 0 {
+        if starts_with(provider_reason, "SAILFIN_LINK_PROVIDER=clang-oracle") {
+            return _direct_fail(provider_reason);
+        }
+        return _direct_unmet(provider_reason);
     }
     // Mirror SFN-471's non-shelling host-arch seam: the override is the
     // cross-emit/e2e hook, then the resolved TARGET triple (SFN-923 — this
@@ -225,7 +491,7 @@ fn resolve_direct_ld_lld(target_os: string, static_link: boolean) -> DirectLinkC
         }
     }
     if _which("ld.lld").length == 0 {
-        return _direct_fail("ld.lld not on PATH");
+        return _direct_unmet("ld.lld not on PATH");
     }
     let mut emulation = "elf_x86_64";
     if arch == "aarch64" { emulation = "aarch64linux"; }
@@ -233,21 +499,21 @@ fn resolve_direct_ld_lld(target_os: string, static_link: boolean) -> DirectLinkC
     let mut dyn = "/lib64/ld-linux-x86-64.so.2";
     if arch == "aarch64" { dyn = "/lib/ld-linux-aarch64.so.1"; }
     if !fs.exists(dyn) {
-        return _direct_fail("dynamic linker missing (" + dyn + ")");
+        return _direct_unmet("dynamic linker missing (" + dyn + ")");
     }
     let libdir = _first_libdir_with(_multiarch_libdirs(arch), "Scrt1.o");
     if libdir.length == 0 {
-        return _direct_fail("Scrt1.o not found in standard libdirs");
+        return _direct_unmet("Scrt1.o not found in standard libdirs");
     }
     if !fs.exists(libdir + "/crti.o") || !fs.exists(libdir + "/crtn.o") {
-        return _direct_fail("crti.o/crtn.o not found in " + libdir);
+        return _direct_unmet("crti.o/crtn.o not found in " + libdir);
     }
     let gccdir = _gcc_crt_dir(arch, "crtbeginS.o");
     if gccdir.length == 0 {
-        return _direct_fail("crtbeginS.o not found in a gcc libdir");
+        return _direct_unmet("crtbeginS.o not found in a gcc libdir");
     }
     if !fs.exists(gccdir + "/crtendS.o") {
-        return _direct_fail("crtendS.o not found in " + gccdir);
+        return _direct_unmet("crtendS.o not found in " + gccdir);
     }
     return DirectLinkContract {
         ok: true,
@@ -260,7 +526,8 @@ fn resolve_direct_ld_lld(target_os: string, static_link: boolean) -> DirectLinkC
         crtn: libdir + "/crtn.o",
         crtbegin: gccdir + "/crtbeginS.o",
         crtend: gccdir + "/crtendS.o",
-        search_dirs: _link_search_dirs(arch, gccdir, libdir, "")
+        search_dirs: _link_search_dirs(arch, gccdir, libdir, ""),
+        requires_direct_link: false
     };
 }
 
@@ -307,24 +574,24 @@ fn _resolve_static_contract(arch: string, emulation: string) -> DirectLinkContra
     let libdirs = _multiarch_libdirs(arch);
     let libdir = _first_libdir_with(libdirs, "crt1.o");
     if libdir.length == 0 {
-        return _direct_fail("crt1.o not found in standard libdirs");
+        return _direct_unmet("crt1.o not found in standard libdirs");
     }
     if !fs.exists(libdir + "/crti.o") || !fs.exists(libdir + "/crtn.o") {
-        return _direct_fail("crti.o/crtn.o not found in " + libdir);
+        return _direct_unmet("crti.o/crtn.o not found in " + libdir);
     }
     // Probed independently of the CRT libdir: a host can carry the startup
     // objects in the multiarch dir and libc.a in /usr/lib64, and the `-L`
     // list must cover both or the `--start-group` tail cannot resolve.
     let libc_dir = _first_libdir_with(libdirs, "libc.a");
     if libc_dir.length == 0 {
-        return _direct_fail("libc.a not found in standard libdirs");
+        return _direct_unmet("libc.a not found in standard libdirs");
     }
     let gccdir = _gcc_crt_dir(arch, "crtbeginT.o");
     if gccdir.length == 0 {
-        return _direct_fail("crtbeginT.o not found in a gcc libdir");
+        return _direct_unmet("crtbeginT.o not found in a gcc libdir");
     }
     if !fs.exists(gccdir + "/crtend.o") {
-        return _direct_fail("crtend.o not found in " + gccdir);
+        return _direct_unmet("crtend.o not found in " + gccdir);
     }
     // The static tail's `--start-group -lgcc -lgcc_eh` resolves these two
     // by name, and a distro can ship crtbeginT.o without the static
@@ -333,10 +600,10 @@ fn _resolve_static_contract(arch: string, emulation: string) -> DirectLinkContra
     // artifact" promise of E0626 true rather than deferring to an
     // `ld.lld: unable to find library` error (SFN-1268).
     if !fs.exists(gccdir + "/libgcc.a") {
-        return _direct_fail("libgcc.a not found in " + gccdir);
+        return _direct_unmet("libgcc.a not found in " + gccdir);
     }
     if !fs.exists(gccdir + "/libgcc_eh.a") {
-        return _direct_fail("libgcc_eh.a not found in " + gccdir);
+        return _direct_unmet("libgcc_eh.a not found in " + gccdir);
     }
     return DirectLinkContract {
         ok: true,
@@ -349,7 +616,8 @@ fn _resolve_static_contract(arch: string, emulation: string) -> DirectLinkContra
         crtn: libdir + "/crtn.o",
         crtbegin: gccdir + "/crtbeginT.o",
         crtend: gccdir + "/crtend.o",
-        search_dirs: _link_search_dirs(arch, gccdir, libdir, libc_dir)
+        search_dirs: _link_search_dirs(arch, gccdir, libdir, libc_dir),
+        requires_direct_link: false
     };
 }
 
@@ -522,6 +790,7 @@ fn trace_direct_link_fallback(reason: string) ![io] {
 
 export {
     DirectLinkContract,
+    _version_order_greater,
     resolve_direct_ld_lld,
     resolve_link_contract,
     direct_ld_lld_argv,
