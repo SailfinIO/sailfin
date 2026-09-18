@@ -188,8 +188,9 @@ test "direct-link: SAILFIN_LINKER=ld falls back to clang with a traced reason" !
 }
 
 // Host-independent like E0625 above: an unrecognized provider is rejected in
-// `resolve_direct_ld_lld` before any host probing, so this runs everywhere
-// and needs no eligibility gate. It is also the cheapest reachable proof
+// `resolve_link_contract` ahead of the OS dispatch, so it fails closed on
+// every target rather than silently meaning "direct" off Linux. That is
+// why this needs no eligibility gate. It is also the cheapest reachable proof
 // that the fail-closed path renders rather than falling through, since
 // hiding a real prerequisite (ld.lld, the loader, a CRT object) from a
 // child process cannot be done hermetically.
