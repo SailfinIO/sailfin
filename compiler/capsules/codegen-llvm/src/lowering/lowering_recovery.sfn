@@ -617,10 +617,8 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
         let ls_align_idx = index_of(ls_text, "align=");
         let ls_size_val = extract_kv_number(ls_text, "size=", 5);
         let ls_align_val = extract_kv_number(ls_text, "align=", 6);
-        // `packed=1` is present only for a `@repr(C, packed)` struct
-        // (SFN-1289). Dropping it here would rebuild the struct unpacked and
-        // render `{ ... }` instead of `<{ ... }>`, moving every field offset.
-        let ls_packed_idx = index_of(ls_text, "packed=");
+        // Absent and `packed=0` both mean unpacked, so no index probe is
+        // needed here (SFN-1289).
         let ls_packed_val = extract_kv_number(ls_text, "packed=", 7);
 
         let lf_text = trim_text_local(substring(line, 14, line.length));
@@ -696,9 +694,7 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
         }
         if is_layout_struct {
             if ls_align_idx >= 0 { layout_align = ls_align_val; }
-        }
-        if is_layout_struct {
-            if ls_packed_idx >= 0 { layout_packed = ls_packed_val == 1; }
+            layout_packed = ls_packed_val == 1;
         }
         if is_layout_struct {
             index += 1;
