@@ -84,6 +84,11 @@ struct ParameterListParseResult {
     // such as `fn broken( {`); `parse_function` turns this into an `E0501`
     // parse diagnostic (SFN-18). Callers that don't gate on it ignore it.
     closed: boolean;
+    // Parameter index at which a `...` marker was consumed, or -1 when none
+    // was. Only set when the caller passed `allow_variadic`; the parser
+    // records the position and leaves legality to the analyzer's E0851 so a
+    // misplaced `...` does not degrade into a parse error. SFN-1291.
+    variadic_index: int;
 }
 
 struct StructFieldParseResult {

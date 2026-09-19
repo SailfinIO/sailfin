@@ -320,6 +320,22 @@ fn lex(source: string) -> Token[] {
         let _lex_next = state.index + 1;
         let _lex_next2 = state.index + 2;
         let mut lexeme = slice(source, state.index, _lex_next);
+        // `...` is scanned before the two-character path: `..` is a real
+        // symbol (ranges), so a pair-first scanner would split the variadic
+        // marker into `..` + `.` and the extern parameter list could never
+        // see it. SFN-1291.
+        let _lex_next3 = state.index + 3;
+        if _lex_next3 <= state.source_len {
+            let triple = slice(source, state.index, _lex_next3);
+            if triple == "..." {
+                state.index += 3;
+                state.column += 3;
+                tokens = append(tokens, Token {
+                    kind: TokenKind.Symbol(), lexeme: triple, line: start_line, column: start_column
+                });
+                continue;
+            }
+        }
         if _lex_next < state.source_len {
             let pair = slice(source, state.index, _lex_next2);
             // Fast-path: keep <= / >= stable.

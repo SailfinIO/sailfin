@@ -70,6 +70,7 @@ fn _mirror_fn(name: string, return_type: string, parameter_types: string[]) -> N
         effects: [],
         decorators: [],
         is_extern: true,
+        is_variadic: false,
         instructions: []
     };
 }

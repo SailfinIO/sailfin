@@ -470,11 +470,16 @@ fn parse_implements_clause(parser: Parser) -> ImplementsParseResult {
 // ============================================================================
 // Parameter Parsing
 // ============================================================================
-fn parse_parameter_list(initial_parser: Parser) -> ParameterListParseResult {
+// `allow_variadic` is set only by `parse_extern_function`: a C `...` marker
+// is meaningful on an extern declaration and nowhere else, so every other
+// caller leaves the token unconsumed and keeps today's parse-error behaviour
+// for `fn f(a: i32, ...)`. SFN-1291.
+fn parse_parameter_list(initial_parser: Parser, allow_variadic: boolean) -> ParameterListParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
     let mut parameters: Parameter[] = [];
     let mut closed: boolean = false;
+    let mut variadic_index: int = -1;
 
     let token = parser_peek_raw(parser);
     if symbol_matches(token, ")") {
@@ -482,14 +487,29 @@ fn parse_parameter_list(initial_parser: Parser) -> ParameterListParseResult {
         return ParameterListParseResult {
             parser: parser,
             parameters: parameters,
-            closed: true
+            closed: true,
+            variadic_index: -1
         };
     }
 
     loop {
-        let param_result = parse_single_parameter(parser);
-        parser = param_result.parser;
-        parameters = append_parameter(parameters, param_result.parameter);
+        // A `...` is recorded at the position it appears and does not become
+        // a `Parameter`. Parsing continues normally afterwards, so a
+        // misplaced marker leaves `variadic_index < parameters.length` for
+        // the analyzer to reject rather than derailing the list. SFN-1291.
+        let mut consumed_variadic: boolean = false;
+        if allow_variadic {
+            if symbol_matches(parser_peek_raw(parser), "...") {
+                if variadic_index < 0 { variadic_index = parameters.length; }
+                parser = parser_advance_raw(parser);
+                consumed_variadic = true;
+            }
+        }
+        if !consumed_variadic {
+            let param_result = parse_single_parameter(parser);
+            parser = param_result.parser;
+            parameters = append_parameter(parameters, param_result.parameter);
+        }
         parser = skip_trivia(parser);
         let separator = parser_peek_raw(parser);
         if symbol_matches(separator, ",") {
@@ -522,7 +542,8 @@ fn parse_parameter_list(initial_parser: Parser) -> ParameterListParseResult {
     return ParameterListParseResult {
         parser: parser,
         parameters: parameters,
-        closed: closed
+        closed: closed,
+        variadic_index: variadic_index
     };
 }
 

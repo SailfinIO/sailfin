@@ -72,8 +72,24 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
     if _trace_ccl {
         trace_log("call_lowering: checkpoint-C _if56=" + number_to_string(0));
     }
+    // A C variadic accepts anything past its fixed prototype, so the arity
+    // compare is a floor rather than an equality for those callees. SFN-1291.
+    let mut _callee_is_variadic: boolean = false;
+    if function_entry != null {
+        if function_entry.is_variadic { _callee_is_variadic = true; }
+    }
     if _if56 {
-        if expected_params.length != final_operands.length {
+        let mut _arity_mismatch: boolean = false;
+        if _callee_is_variadic {
+            if final_operands.length < expected_params.length {
+                _arity_mismatch = true;
+            }
+        } else {
+            if expected_params.length != final_operands.length {
+                _arity_mismatch = true;
+            }
+        }
+        if _arity_mismatch {
             let message = "call to `" + trimmed_target + "` expected "
                 + number_to_string(expected_params.length)
                 + " arguments but received "
@@ -447,8 +463,20 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
             + " call_symbol="
             + call_symbol);
     }
+    // LLVM resolves a call against the callee's declared type only when the
+    // call states that type. Without the explicit `(<fixed>, ...)` form a
+    // variadic call is emitted against an implied fixed-arity type, which
+    // LLVM rejects outright against the `declare` — and which would silently
+    // pass arguments by the wrong convention if it did not. SFN-1291.
+    let mut variadic_fn_type: string = "";
+    if _callee_is_variadic {
+        variadic_fn_type = " (" + join_with_separator(expected_params, ", ")
+            + ", ...)";
+    }
     if llvm_return == "void" {
-        let call_line = "  call void @" + call_symbol + "(" + argument_text
+        let call_line = "  call void" + variadic_fn_type + " @" + call_symbol
+            + "("
+            + argument_text
             + ")";
         result_lines.push(call_line);
         if _trace_ccl {
@@ -484,7 +512,9 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
             if abi.length > 0 { abi_return_type = abi; }
         }
     }
-    let call_line = "  " + temp_name + " = call " + abi_return_type + " @"
+    let call_line = "  " + temp_name + " = call " + abi_return_type
+        + variadic_fn_type
+        + " @"
         + call_symbol
         + "("
         + argument_text

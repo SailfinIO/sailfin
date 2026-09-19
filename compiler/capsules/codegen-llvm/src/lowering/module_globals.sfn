@@ -427,6 +427,7 @@ fn lower_module_bindings_to_globals(bindings: NativeBinding[], context: TypeCont
             effects: [],
             decorators: [],
             is_extern: false,
+            is_variadic: false,
             instructions: init_instructions
         };
     }

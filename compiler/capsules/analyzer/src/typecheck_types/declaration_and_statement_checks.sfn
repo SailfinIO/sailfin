@@ -32,7 +32,8 @@ import {
     make_extern_return_type_diagnostic,
     make_extern_type_parameters_diagnostic,
     make_extern_var_missing_type_diagnostic,
-    make_extern_var_type_diagnostic
+    make_extern_var_type_diagnostic,
+    make_extern_variadic_placement_diagnostic
 } from "./extern_abi";
 import { check_type_parameters } from "./generic_bounds";
 import { SymbolEntry, make_duplicate_symbol_diagnostic } from "./symbol_table_and_raw_exprs";
@@ -196,8 +197,22 @@ fn check_function_signature(signature: FunctionSignature, interfaces: Statement[
 // documentation marker that may grow into an enforced
 // "unsafe-required-to-call" gate in a future PR; this validator
 // will care about it at that point.
-fn check_extern_signature(signature: FunctionSignature) -> Diagnostic[] {
+// `variadic_index` is the `Statement.ExternFunctionDeclaration` field: -1
+// when the declaration carries no `...`, otherwise the parameter position
+// the marker appeared at. SFN-1291.
+fn check_extern_signature(signature: FunctionSignature, variadic_index: int) -> Diagnostic[] {
     let mut diagnostics: Diagnostic[] = [];
+
+    if variadic_index >= 0 {
+        let mut placement_ok: boolean = true;
+        if variadic_index != signature.parameters.length {
+            placement_ok = false;
+        }
+        if variadic_index == 0 { placement_ok = false; }
+        if !placement_ok {
+            diagnostics.push(make_extern_variadic_placement_diagnostic(signature.name, variadic_index, signature.parameters.length));
+        }
+    }
 
     if signature.type_parameters.length > 0 {
         diagnostics.push(make_extern_type_parameters_diagnostic(signature.name));

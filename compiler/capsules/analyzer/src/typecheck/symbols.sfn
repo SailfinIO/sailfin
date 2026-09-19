@@ -104,7 +104,7 @@ fn _symbols_from_global_names(names: string[]) -> SymbolEntry[] {
     loop {
         if i >= names.length { break; }
         out.push(SymbolEntry {
-            name: names[i], kind: "prelude", span: null, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: "", declared_type: "", function_parameter_types: [], function_return_type: "", function_effects: [], function_is_async: false, is_top_level_function: false, is_nested_function: false
+            name: names[i], kind: "prelude", span: null, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: "", declared_type: "", function_parameter_types: [], function_return_type: "", function_effects: [], function_is_async: false, variadic_fixed_arity: -1, is_top_level_function: false, is_nested_function: false
         });
         i += 1;
     }
@@ -125,7 +125,7 @@ fn _symbols_from_implicit_provider(symbols: ImplicitSymbol[]) -> SymbolEntry[] {
         let mut kind = symbol.kind;
         if kind == "value" { kind = "variable"; }
         out.push(SymbolEntry {
-            name: symbol.name, kind: kind, span: null, is_generic: symbol.is_generic, is_c_abi: symbol.is_c_abi, element_kind: "", declared_prim: "", declared_struct: "", declared_type: symbol.declared_type, function_parameter_types: symbol.parameter_types, function_return_type: symbol.return_type, function_effects: symbol.effects, function_is_async: symbol.is_async, is_top_level_function: kind == "function", is_nested_function: false
+            name: symbol.name, kind: kind, span: null, is_generic: symbol.is_generic, is_c_abi: symbol.is_c_abi, element_kind: "", declared_prim: "", declared_struct: "", declared_type: symbol.declared_type, function_parameter_types: symbol.parameter_types, function_return_type: symbol.return_type, function_effects: symbol.effects, function_is_async: symbol.is_async, variadic_fixed_arity: -1, is_top_level_function: kind == "function", is_nested_function: false
         });
         index += 1;
     }
@@ -253,7 +253,7 @@ fn _collect_imported_call_symbols(program: Program) -> SymbolEntry[] {
                     if alias_str.length > 0 { local_name = alias_str; }
                 }
                 symbols.push(SymbolEntry {
-                    name: local_name, kind: "import", span: null, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: "", declared_type: "", function_parameter_types: [], function_return_type: "", function_effects: [], function_is_async: false, is_top_level_function: false, is_nested_function: false
+                    name: local_name, kind: "import", span: null, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: "", declared_type: "", function_parameter_types: [], function_return_type: "", function_effects: [], function_is_async: false, variadic_fixed_arity: -1, is_top_level_function: false, is_nested_function: false
                 });
                 s += 1;
             }
@@ -350,7 +350,18 @@ fn register_top_level_symbol(statement: Statement, existing: SymbolEntry[]) -> S
         return register_function_symbol(statement.signature, "function", existing);
     }
     if statement.variant == "ExternFunctionDeclaration" {
-        return register_function_symbol(statement.signature, "extern function", existing);
+        // Only a well-formed `...` (last position, at least one fixed
+        // parameter) records a variadic arity; a misplaced marker is
+        // already E0851 from `check_extern_signature`, and recording it
+        // here would compound one error into a second at every call site.
+        // SFN-1291.
+        let mut fixed_arity: int = -1;
+        if statement.variadic_index == statement.signature.parameters.length {
+            if statement.variadic_index > 0 {
+                fixed_arity = statement.variadic_index;
+            }
+        }
+        return register_function_symbol(statement.signature, "extern function", existing, fixed_arity);
     }
     if statement.variant == "ExternVarDeclaration" {
         return register_symbol(statement.name, "extern variable", statement.name_span, existing);

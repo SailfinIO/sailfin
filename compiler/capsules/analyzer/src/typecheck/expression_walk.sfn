@@ -90,6 +90,7 @@ import {
 import { _declared_struct_annotation, _string_list_has } from "./symbols";
 import { _is_syscall_name, _syscall_call_diagnostics } from "./syscalls";
 import { _conditional_branch_type, check_conditional_types } from "./try_and_conditional";
+import { variadic_argument_diagnostics } from "./variadic_rules";
 
 fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
     let bindings = ctx.bindings;
@@ -177,6 +178,9 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // lowerer would fatal on ("callee signature is not known").
         diagnostics = diagnostics.concat(primitive_method_diagnostics(expression, ctx));
         diagnostics = diagnostics.concat(call_argument_type_diagnostics(expression, bindings));
+        // An argument past a variadic extern's last fixed parameter must
+        // already carry a C-promoted type -> E0851 (SFN-1291).
+        diagnostics = diagnostics.concat(variadic_argument_diagnostics(expression, bindings));
         return diagnostics;
     }
     if expression.variant == "Binary" {

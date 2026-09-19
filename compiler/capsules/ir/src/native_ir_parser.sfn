@@ -228,6 +228,7 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
                 effects: [],
                 decorators: pending_decorators,
                 is_extern: false,
+                is_variadic: false,
                 instructions: []
             };
             pending_decorators = [];
@@ -301,6 +302,7 @@ fn parse_native_artifact_impl_from_lines(lines: string[], include_instructions: 
                 effects: [],
                 decorators: [],
                 is_extern: false,
+                is_variadic: false,
                 instructions: []
             };
             index += 1;
