@@ -107,6 +107,11 @@ fn _parse_decimal(text: string) -> _DecimalParse {
     if text.length == 0 {
         return _DecimalParse { valid: false, value: 0 };
     }
+    // `int` is i64, so anything past 19 digits wraps. Rejecting it keeps the
+    // E0848 message honest rather than quoting a wrapped asserted size.
+    if text.length > 19 {
+        return _DecimalParse { valid: false, value: 0 };
+    }
     let mut value: int = 0;
     let mut index: int = 0;
     loop {
@@ -182,9 +187,14 @@ fn repr_c_spec(decorators: Decorator[]) -> ReprCSpec {
                             }
                         }
                     }
-                } else if strings_equal(argument.expression.variant, "Identifier") {
-                    if strings_equal(argument.expression.name, "packed") {
-                        spec.packed = true;
+                } else if strings_equal(key, "") {
+                    // Only a *positional* identifier is a flag. `foo: packed`
+                    // carries a key, so it is an unknown named argument for
+                    // `_check_arguments` to reject, never a way to pack.
+                    if strings_equal(argument.expression.variant, "Identifier") {
+                        if strings_equal(argument.expression.name, "packed") {
+                            spec.packed = true;
+                        }
                     }
                 }
                 argument_index += 1;
@@ -197,8 +207,9 @@ fn repr_c_spec(decorators: Decorator[]) -> ReprCSpec {
 
 // ── The C layout engine ──────────────────────────────────────────────
 // Round `value` up to a multiple of `alignment`. Repeated subtraction rather
-// than `%` mirrors `emit_native_layout.sfn:707` and stays on integer
-// arithmetic; alignments here are at most 8, so the loop is trivially bounded.
+// than `%` mirrors `align_to` in `emit_native_layout.sfn` and stays on integer
+// arithmetic. The loop runs `value / alignment` times, which is bounded by the
+// struct size rather than by the alignment.
 fn _align_to(value: int, alignment: int) -> int {
     if alignment <= 1 { return value; }
     let mut remainder: int = value;
@@ -245,6 +256,13 @@ fn _scalar_layout(text: string) -> CTypeLayout {
 }
 
 // Find a top-level struct declaration by name.
+//
+// Current module only. `ctx.imported_structs` is rebuilt from a compiled
+// artifact and records no decorators (`typecheck/context.sfn`), so an
+// imported struct's repr is unknowable — admitting one would hand a C layout
+// to a struct that may not carry `@repr(C)`, which is the exact guarantee
+// this feature sells. A cross-module nested field is therefore rejected with
+// E0847; spec §13.3 documents the restriction and the `*T` workaround.
 fn _find_struct(declarations: Statement[], name: string) -> Statement? {
     let mut index: int = 0;
     loop {
@@ -400,6 +418,7 @@ fn _describe_layout(layout: CLayout) -> string {
 fn _check_arguments(decorators: Decorator[], name: string, span: SourceSpan?) -> Diagnostic[] {
     let mut diagnostics: Diagnostic[] = [];
     let mut saw_c: boolean = false;
+    let mut named_argument_rejected: boolean = false;
     let mut index: int = 0;
     loop {
         if index >= decorators.length { break; }
@@ -441,9 +460,17 @@ fn _check_arguments(decorators: Decorator[], name: string, span: SourceSpan?) ->
                             + "` must assert a power-of-two alignment.", name, span));
                     }
                 }
+            } else if !strings_equal(key, "") {
+                named_argument_rejected = true;
+                diagnostics.push(_repr_diagnostic("E0846", "unknown `@repr` argument `"
+                    + key
+                    + "` on struct `"
+                    + name
+                    + "`; the supported arguments are `C`, `packed`, `size = N` and `align = N`.", name, span));
             } else if strings_equal(argument.expression.variant, "Identifier") {
                 let argument_text = argument.expression.name;
                 if strings_equal(argument_text, "C") { saw_c = true; } else if !strings_equal(argument_text, "packed") {
+                    named_argument_rejected = true;
                     diagnostics.push(_repr_diagnostic("E0846", "unknown `@repr` argument `"
                         + argument_text
                         + "` on struct `"
@@ -451,6 +478,7 @@ fn _check_arguments(decorators: Decorator[], name: string, span: SourceSpan?) ->
                         + "`; the supported arguments are `C`, `packed`, `size = N` and `align = N`.", name, span));
                 }
             } else {
+                named_argument_rejected = true;
                 diagnostics.push(_repr_diagnostic("E0846", "malformed `@repr` argument on struct `"
                     + name
                     + "`; the supported arguments are `C`, `packed`, `size = N` and `align = N`.", name, span));
@@ -459,9 +487,15 @@ fn _check_arguments(decorators: Decorator[], name: string, span: SourceSpan?) ->
         }
         index += 1;
     }
+    // One typo earns one diagnostic: `@repr(c)` already reported `c` as an
+    // unknown argument, so do not also claim no representation was named.
+    // This message is for `@repr()` and `@repr(size = 4)`, which name none.
     if !saw_c {
-        diagnostics.push(_repr_diagnostic("E0846", "`@repr` on struct `" + name
-            + "` must name a representation; `@repr(C)` is the only one Sailfin defines.", name, span));
+        if !named_argument_rejected {
+            diagnostics.push(_repr_diagnostic("E0846", "`@repr` on struct `"
+                + name
+                + "` must name a representation; `@repr(C)` is the only one Sailfin defines.", name, span));
+        }
     }
     return diagnostics;
 }

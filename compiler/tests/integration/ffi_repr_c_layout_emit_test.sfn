@@ -136,6 +136,18 @@ test "repr(C) layout: packed lowers to an LLVM packed struct type" ![io] {
     fs.deleteFile(source);
 }
 
+test "repr(C) layout: destructuring a packed struct carries align 1" ![io] {
+    // The struct-pattern reader in `lowering/instructions_match.sfn` loads
+    // fields through its own GEP, a path distinct from `.field` access
+    // (SFN-1289).
+    let body = _epoll_event_text() + "fn take(e: EpollEvent) -> u64 {\n"
+        + "    match e {\n        EpollEvent { data } => { return data; }\n    }\n}\n";
+    let source = _fixture(body);
+    let output = _emit(source, "llvm", "repr_c_llvm_destructure");
+    assert expect_contains_str(output, ", align 1").ok;
+    fs.deleteFile(source);
+}
+
 test "repr(C) layout: packed field access carries align 1" ![io] {
     // Differential against the same struct unpacked. Asserting only that
     // `align 1` appears somewhere would pass vacuously — an unrelated

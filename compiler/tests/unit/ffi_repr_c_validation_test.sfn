@@ -135,6 +135,34 @@ test "repr(C): E0846 for a lowercase repr(c)" ![io] {
     assert _has_code(diagnostics, "E0846");
 }
 
+test "repr(C): a lowercase repr(c) earns exactly one E0846" ![io] {
+    // One typo, one diagnostic: the unknown-argument report must not be
+    // joined by a second "must name a representation" complaint.
+    let program = parse_program(_input_event_source("@repr(c)"));
+    let diagnostics = typecheck_diagnostics(program);
+    assert _count_code(diagnostics, "E0846") == 1;
+}
+
+test "repr(C): E0846 for a bare @repr with no representation named" ![io] {
+    let program = parse_program(_input_event_source("@repr(size = 24)"));
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0846");
+}
+
+test "repr(C): a named argument whose value is `packed` does not pack" ![io] {
+    // `foo: packed` carries a key, so it is an unknown named argument — it
+    // must be rejected, never silently interpreted as the packed flag.
+    let source = "@repr(C, foo: packed, size = 24, align = 8)\nstruct InputEvent {\n"
+        + "    sec: i64;\n    usec: i64;\n    kind: u16;\n    code: u16;\n"
+        + "    value: i32;\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0846");
+    // Still 24 bytes: had `packed` leaked through, the size would be 20 and
+    // this would also raise E0848.
+    assert ! _has_code(diagnostics, "E0848");
+}
+
 test "repr(C): E0846 for an unknown argument" ![io] {
     let program = parse_program(_input_event_source("@repr(C, pack)"));
     let diagnostics = typecheck_diagnostics(program);
@@ -159,6 +187,43 @@ test "repr(C): E0846 for a non-power-of-two align assertion" ![io] {
     let program = parse_program(_input_event_source("@repr(C, align = 3)"));
     let diagnostics = typecheck_diagnostics(program);
     assert _has_code(diagnostics, "E0846");
+}
+
+// ── Degenerate and recursive shapes ──────────────────────────────────
+test "repr(C): accepts an empty struct" ![io] {
+    let source = "@repr(C, size = 0, align = 1)\nstruct Empty {\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+test "repr(C): a self-referential struct terminates with E0847" ![io] {
+    // The layout of a struct containing itself by value is not finite. The
+    // cycle guard must report it, not recurse forever.
+    let source = "@repr(C)\nstruct Node {\n    next: Node;\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0847");
+}
+
+test "repr(C): mutually recursive structs terminate with E0847" ![io] {
+    let source = "@repr(C)\nstruct A {\n    b: B;\n}\n"
+        + "@repr(C)\nstruct B {\n    a: A;\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0847");
+}
+
+test "repr(C): a packed struct nested in an unpacked one keeps its own layout" ![io] {
+    // `Inner` is 12 bytes at align 1 packed, so `Outer` places it at 0 and
+    // `tail` at the next multiple of 8.
+    let source = "@repr(C, packed, size = 12, align = 1)\nstruct Inner {\n"
+        + "    events: u32;\n    data: u64;\n}\n"
+        + "@repr(C, size = 24, align = 8)\nstruct Outer {\n"
+        + "    head: Inner;\n    tail: u64;\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
 }
 
 // ── E0847: inadmissible field types ──────────────────────────────────

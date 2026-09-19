@@ -633,12 +633,19 @@ fn lower_match_instruction(function: NativeFunction, start_index: int, llvm_retu
                             + number_to_string(binding.field_index));
                         let load_temp = format_temp_name(current_temp);
                         current_temp += 1;
+                        // Packed fields sit at unaligned byte offsets
+                        // (SFN-1289): destructuring reads them through this
+                        // GEP, so it needs the same `align 1` as a `.field`
+                        // read in `core_member_lowering.sfn`.
+                        let mut bind_align: string = "";
+                        if struct_info_val.packed { bind_align = ", align 1"; }
                         current_lines.push("  " + load_temp + " = load "
                             + binding.field_type
                             + ", "
                             + binding.field_type
                             + "* "
-                            + gep_temp);
+                            + gep_temp
+                            + bind_align);
 
                         // Allocate a local for this binding.
                         let local_alloca_temp = format_temp_name(current_temp);

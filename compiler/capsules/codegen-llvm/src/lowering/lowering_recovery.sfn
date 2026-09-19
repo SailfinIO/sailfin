@@ -563,6 +563,7 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
     let mut layout_fields: NativeStructLayoutField[] = [];
     let mut layout_size: int = 0;
     let mut layout_align: int = 0;
+    let mut layout_packed: boolean = false;
 
     let mut index: int = 0;
     loop {
@@ -616,6 +617,11 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
         let ls_align_idx = index_of(ls_text, "align=");
         let ls_size_val = extract_kv_number(ls_text, "size=", 5);
         let ls_align_val = extract_kv_number(ls_text, "align=", 6);
+        // `packed=1` is present only for a `@repr(C, packed)` struct
+        // (SFN-1289). Dropping it here would rebuild the struct unpacked and
+        // render `{ ... }` instead of `<{ ... }>`, moving every field offset.
+        let ls_packed_idx = index_of(ls_text, "packed=");
+        let ls_packed_val = extract_kv_number(ls_text, "packed=", 7);
 
         let lf_text = trim_text_local(substring(line, 14, line.length));
         let lf_name_end = index_of(lf_text, " ");
@@ -633,6 +639,7 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
             layout_fields = [];
             layout_size = 0;
             layout_align = 0;
+            layout_packed = false;
             struct_layout = null;
             index += 1;
             continue;
@@ -648,7 +655,7 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
             }
         }
         if _if242 {
-            struct_layout = make_native_struct_layout(layout_size, layout_align, layout_fields, false);
+            struct_layout = make_native_struct_layout(layout_size, layout_align, layout_fields, layout_packed);
             structs = structs.push(make_native_struct(struct_name, struct_fields, struct_methods, struct_layout));
             in_struct = false;
             index += 1;
@@ -691,6 +698,9 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
             if ls_align_idx >= 0 { layout_align = ls_align_val; }
         }
         if is_layout_struct {
+            if ls_packed_idx >= 0 { layout_packed = ls_packed_val == 1; }
+        }
+        if is_layout_struct {
             index += 1;
             continue;
         }
@@ -722,7 +732,7 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
         if _if260 { _if243 = true; }
     }
     if _if243 {
-        struct_layout = make_native_struct_layout(layout_size, layout_align, layout_fields, false);
+        struct_layout = make_native_struct_layout(layout_size, layout_align, layout_fields, layout_packed);
         structs = structs.push(make_native_struct(struct_name, struct_fields, struct_methods, struct_layout));
     }
     if in_struct {

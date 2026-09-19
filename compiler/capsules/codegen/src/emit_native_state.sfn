@@ -32,8 +32,7 @@ struct LayoutContext {
     structs: LayoutStructDefinition[];
     enums: LayoutEnumDefinition[];
     // Top-level statements, carried so the `@repr(C)` layout engine can
-    // resolve a nested `@repr(C)` struct field by value (SFN-1289). Appended
-    // last so existing positional field reads stay stable.
+    // resolve a nested `@repr(C)` struct field by value (SFN-1289).
     declarations: Statement[];
 }
 

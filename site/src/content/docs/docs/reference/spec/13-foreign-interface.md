@@ -144,6 +144,13 @@ behavior. Use `u8` instead. Admitting `bool` later with `i8` storage is a
 compatible widening. An inline fixed-size array field (`[T; N]`) is **not**
 admissible yet — designed, not shipped (SFEP-0079 §3.1, leaf L9, SFN-1299).
 
+A nested `@repr(C)` struct field must be **declared in the same module**. A
+struct imported from another module is reconstructed from that module's
+compiled artifact, which records no decorators, so the compiler cannot tell
+whether it carries `@repr(C)` and conservatively rejects the field with
+`E0847`. Declare the mirror alongside the struct that embeds it, or hold it
+behind a pointer (`*Timespec`), which is admissible across modules.
+
 **`packed`.** `@repr(C, packed)` lowers to an LLVM packed struct
 (`<{ ... }>`): alignment 1, no padding between or after fields — the same
 guarantee as `__attribute__((packed))`. Field loads and stores against a
