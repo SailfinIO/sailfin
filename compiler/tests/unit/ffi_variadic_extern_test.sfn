@@ -78,6 +78,16 @@ test "ffi variadic: `...` not last is rejected" ![io] {
     assert expect_eq_bool(_has_code(diagnostics, "E0851"), true).ok;
 }
 
+// A repeated `...` marker recorded a placement that happened to satisfy the
+// last-position test, so it silently compiled as an ordinary one-fixed-param
+// variadic instead of erroring (SFN-1291 review defect #2).
+test "ffi variadic: a repeated `...` is rejected" ![io] {
+    let source = "extern fn bad(a: i32, ..., ...) -> i32;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert expect_eq_bool(_has_code(diagnostics, "E0851"), true).ok;
+}
+
 // -------------------------------------------------------------------
 // Promotion — E0851 fires at the call site.
 // -------------------------------------------------------------------

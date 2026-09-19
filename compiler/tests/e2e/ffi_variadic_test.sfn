@@ -198,6 +198,64 @@ fn _emit_fixture(dir: string, label: string) -> string ![io] {
     return fs.readFile(ll);
 }
 
+// Cross-module regression fixture (SFN-1291 review defect #1): a variadic
+// extern declared and exported in module `a` must keep its `...` tail when
+// module `b` imports it and calls it. Pre-fix,
+// `render_imported_function_declarations` dropped the tail on the imported
+// declare while the call site (produced from `b`'s own signature knowledge)
+// kept the variadic call form -- a fixed-arity declare beside a variadic
+// call, which clang rejects and which is the wrong calling convention on
+// Apple arm64 stack-passed variadics. `sfn/strings` needs a `sum_va`-only
+// scan since `_line_is_variadic_declare`/`_line_is_variadic_call` above key
+// on the same literal symbol, so this fixture reuses the name `sum_va`
+// rather than inventing a second symbol.
+fn _xmod_scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    dir = dir + "/sfn-ffi-variadic-xmod";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Module `a`: declares and inline-exports the variadic extern.
+// Module `b`: imports it and calls it with variadic arguments.
+fn _write_xmod_fixture(dir: string) -> void ![io] {
+    fs.writeFile(dir + "/a.sfn", "export extern fn sum_va(n: i32, ...) -> i32;\n");
+    fs.writeFile(dir + "/b.sfn", "import { sum_va } from \"./a\";\n" + "\n"
+        + "fn call_sum_va() -> i32 {\n"
+        + "    return sum_va(2, 1, 2);\n"
+        + "}\n");
+}
+
+// Stages `a`'s native ASM into the import-context tree at
+// `<dir>/build/compiler/import-context/a.sfn-asm`, then emits `b`'s LLVM IR
+// against that root -- the same manual staging `sfn emit` requires outside a
+// full capsule build (mirrors `cross_module_int_signature_ir_test.sfn`).
+// Returns `b`'s emitted IR text, or "" on any failure.
+fn _emit_xmod_importer_ll(dir: string, label: string) -> string ![io] {
+    let sfn = sfn_bin_abs_path();
+    let root = dir + "/build/compiler/import-context";
+    fs.createDirectory(root, true);
+    let asm = root + "/a.sfn-asm";
+    let asm_env = clean_runner_env(nested_runner_scratch(label + "-a"));
+    let asm_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "a", "-o", asm, "native", "a.sfn"], asm_env, dir);
+    let asm_out = process.capture_take_stdout();
+    let asm_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic xmod emit a", asm_exit, asm_out, asm_err);
+    if asm_exit != 0 { return ""; }
+    if !fs.exists(asm) { return ""; }
+
+    let ll = dir + "/b.ll";
+    let ll_env = clean_runner_env(nested_runner_scratch(label + "-b"));
+    let ll_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "b", "--import-context", root, "-o", ll, "llvm", "b.sfn"], ll_env, dir);
+    let ll_out = process.capture_take_stdout();
+    let ll_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic xmod emit b", ll_exit, ll_out, ll_err);
+    if ll_exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    return fs.readFile(ll);
+}
+
 test "ffi variadic: sum_va's extern declare carries the ... tail in emitted IR" ![io] {
     let dir = _scratch_dir();
     _write_fixture(dir);
@@ -211,6 +269,21 @@ test "ffi variadic: the sum_va call site uses the explicit function-type form" !
     _write_fixture(dir);
     let ir = _emit_fixture(dir, "ffi-variadic-emit-call");
     assert expect_eq_bool(ir.length > 0, true).ok;
+    assert expect_eq_bool(_ir_has_variadic_call(ir), true).ok;
+}
+
+// Cross-module regression (SFN-1291 review defect #1): an imported variadic
+// extern's declare must carry the `...` tail in the IMPORTING module's IR,
+// matching the variadic call form the same module emits for it. This is the
+// only path that reaches `render_imported_function_declarations` -- a
+// single-module fixture only ever exercises `emit_llvm_function`'s own
+// extern branch, which was never the buggy one.
+test "ffi variadic: an imported variadic extern's declare carries the ... tail in the importing module's IR" ![io] {
+    let dir = _xmod_scratch_dir();
+    _write_xmod_fixture(dir);
+    let ir = _emit_xmod_importer_ll(dir, "ffi-variadic-xmod");
+    assert expect_eq_bool(ir.length > 0, true).ok;
+    assert expect_eq_bool(_ir_has_variadic_declare(ir), true).ok;
     assert expect_eq_bool(_ir_has_variadic_call(ir), true).ok;
 }
 
