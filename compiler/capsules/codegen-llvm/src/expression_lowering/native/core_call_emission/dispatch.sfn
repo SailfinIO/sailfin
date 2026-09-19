@@ -470,8 +470,16 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
     // pass arguments by the wrong convention if it did not. SFN-1291.
     let mut variadic_fn_type: string = "";
     if _callee_is_variadic {
-        variadic_fn_type = " (" + join_with_separator(expected_params, ", ")
-            + ", ...)";
+        // Guarded on a non-empty fixed list for the same reason
+        // `emission.sfn` guards its declare: `(, ...)` is not parseable LLVM,
+        // and a caller that reached here with no declared parameters would
+        // surface as an opaque IR error instead of a diagnostic. The
+        // analyzer rejects a `...` with no fixed parameter (E0851), so the
+        // two sides agree on what an empty list means. SFN-1291.
+        let fixed_text = join_with_separator(expected_params, ", ");
+        if fixed_text.length > 0 {
+            variadic_fn_type = " (" + fixed_text + ", ...)";
+        }
     }
     if llvm_return == "void" {
         let call_line = "  call void" + variadic_fn_type + " @" + call_symbol

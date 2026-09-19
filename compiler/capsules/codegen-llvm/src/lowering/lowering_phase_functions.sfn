@@ -31,6 +31,7 @@ import {
     get_function_instructions_at,
     get_function_is_async_at,
     get_function_is_extern_at,
+    get_function_is_variadic_at,
     get_function_name_at,
     get_function_parameters_at,
     get_function_return_type_at
@@ -88,6 +89,7 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
         if safe_return_type == null { safe_return_type = ""; }
         let fn_is_async = get_function_is_async_at(local_functions, index);
         let fn_is_extern = get_function_is_extern_at(local_functions, index);
+        let fn_is_variadic = get_function_is_variadic_at(local_functions, index);
 
         let effective_function = NativeFunction {
             name: safe_function_name,
@@ -98,7 +100,7 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
             decorators: safe_decorators,
             instructions: safe_instructions,
             is_extern: fn_is_extern,
-            is_variadic: current_function.is_variadic
+            is_variadic: fn_is_variadic
         };
         if trace {
             let mut return_count: int = 0;

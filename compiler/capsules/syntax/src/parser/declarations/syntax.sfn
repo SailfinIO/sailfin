@@ -480,6 +480,7 @@ fn parse_parameter_list(initial_parser: Parser, allow_variadic: boolean) -> Para
     let mut parameters: Parameter[] = [];
     let mut closed: boolean = false;
     let mut variadic_index: int = -1;
+    let mut variadic_repeated: boolean = false;
 
     let token = parser_peek_raw(parser);
     if symbol_matches(token, ")") {
@@ -500,7 +501,14 @@ fn parse_parameter_list(initial_parser: Parser, allow_variadic: boolean) -> Para
         let mut consumed_variadic: boolean = false;
         if allow_variadic {
             if symbol_matches(parser_peek_raw(parser), "...") {
-                if variadic_index < 0 { variadic_index = parameters.length; }
+                if variadic_index < 0 { variadic_index = parameters.length; } else {
+                    // A repeat marker keeps the first position (so
+                    // `f(..., a, ...)` still reports the leading one) but
+                    // forces rejection: `f(a, ..., ...)` would otherwise
+                    // satisfy the last-position test and compile as an
+                    // ordinary one-fixed-parameter variadic. SFN-1291.
+                    variadic_repeated = true;
+                }
                 parser = parser_advance_raw(parser);
                 consumed_variadic = true;
             }
@@ -539,11 +547,16 @@ fn parse_parameter_list(initial_parser: Parser, allow_variadic: boolean) -> Para
         break;
     }
 
+    let mut reported_index: int = variadic_index;
+    // `check_extern_signature` accepts exactly `index == parameters.length`
+    // with `index > 0`; forcing 0 makes a repeated marker fail that test and
+    // report as a placement error rather than compiling silently. SFN-1291.
+    if variadic_repeated { reported_index = 0; }
     return ParameterListParseResult {
         parser: parser,
         parameters: parameters,
         closed: closed,
-        variadic_index: variadic_index
+        variadic_index: reported_index
     };
 }
 

@@ -10,7 +10,10 @@
 // The rule is a narrow, fail-open bridge in the same spirit as
 // `primitive_rules.sfn`: it judges only arguments whose type the source
 // states outright — an explicit `as` cast, or an identifier bound with an
-// explicit annotation — and stays silent on every shape it cannot name.
+// explicit annotation — and stays silent on every shape it cannot name. It
+// is silent across a module boundary too: imported symbol rows carry no
+// variadic arity, so a call to an *imported* variadic extern is not checked.
+import { strings_equal } from "sfn/strings";
 import { Expression } from "sfn/syntax";
 
 import { Diagnostic } from "../typecheck_types";
@@ -48,6 +51,10 @@ fn variadic_argument_diagnostics(expression: Expression, bindings: SymbolEntry[]
     let name = expression.callee.name;
     let entry = find_value_symbol(bindings, name);
     if entry == null { return []; }
+    // Only an extern declaration ever records an arity below, but checking
+    // the kind keeps that a local invariant rather than one a reader has to
+    // re-confirm at every registration site.
+    if !strings_equal(entry.kind, "extern function") { return []; }
     // Set only for an extern declared with a well-formed trailing `...`.
     let fixed_arity = entry.variadic_fixed_arity;
     if fixed_arity < 0 { return []; }

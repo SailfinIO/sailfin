@@ -387,6 +387,11 @@ fn get_function_is_extern_at(functions: NativeFunction[], idx: int) -> boolean {
     return f.is_extern;
 }
 
+fn get_function_is_variadic_at(functions: NativeFunction[], idx: int) -> boolean {
+    let f = functions[idx];
+    return f.is_variadic;
+}
+
 fn get_function_parameters_at(functions: NativeFunction[], idx: int) -> NativeParameter[] {
     let f = functions[idx];
     return f.parameters;
