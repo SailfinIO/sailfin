@@ -604,7 +604,7 @@ fn emit_struct(state: NativeState, statement: Statement) -> NativeState {
         header = header + " implements " + join_type_annotations(statement.implements_types);
     }
     current = state_emit_line(current, header);
-    let struct_layout = compute_struct_layout_lines(state.layout_context, statement.name, statement.fields);
+    let struct_layout = compute_struct_layout_lines(state.layout_context, statement.name, statement.fields, statement.decorators);
     current = emit_layout_lines(current, struct_layout.lines);
     current = state_push_indent(current);
     current = state_merge_layout_diagnostics(current, struct_layout.diagnostics, _span_from_source(statement.name_span));

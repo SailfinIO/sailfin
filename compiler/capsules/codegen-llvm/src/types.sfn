@@ -328,6 +328,7 @@ struct StructTypeInfo {
     fields: StructFieldInfo[];
     size: int;
     align: int;
+    packed: boolean;
 }
 
 struct EnumVariantInfo {

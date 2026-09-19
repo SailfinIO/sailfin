@@ -34,6 +34,17 @@ import { ends_with, number_to_string, trim_text } from "../../utils";
 // Try to resolve a struct field access via in-memory TypeContext when the
 // base type is i8* (opaque pointer). Returns an ExpressionResult with the
 // loaded field value, or null if resolution fails.
+// The alignment suffix for a load or store against a struct field.
+//
+// A `@repr(C, packed)` struct has no inter-field padding, so a field can sit
+// at any byte offset. Without this LLVM assumes the field type's natural
+// alignment and may emit an aligned access against an unaligned address
+// (SFN-1289). Empty for an unpacked struct, so its IR stays byte-identical.
+fn packed_align_suffix(struct_packed: boolean) -> string {
+    if struct_packed { return ", align 1"; }
+    return "";
+}
+
 fn lower_inline_gep_field_access(base_name: string, field_name: string, base_operand: LLVMOperand, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: int, lines: string[], diags: LoweringDiagnostic[], string_constants: StringConstant[], context: TypeContext) -> ExpressionResult? {
     let _igep_base = trim_text(base_name);
     let mut _igep_struct: string = "";
@@ -96,7 +107,8 @@ fn lower_inline_gep_field_access(base_name: string, field_name: string, base_ope
     current_lines.push("  " + _igep_ct3 + " = load " + _igep_ftype + ", "
         + _igep_ftype
         + "* "
-        + _igep_ct2_name);
+        + _igep_ct2_name
+        + packed_align_suffix(info.packed));
     current_temp += 1;
     let _igep_op = LLVMOperand { llvm_type: _igep_ftype, value: _igep_ct3 };
     return ExpressionResult {

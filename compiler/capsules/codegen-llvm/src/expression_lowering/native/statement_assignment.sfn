@@ -50,6 +50,7 @@ import {
     bindings_update_local_ownership
 } from "../bindings";
 import { analyze_value_ownership, lower_expression } from "./core";
+import { packed_align_suffix } from "./core_member_helpers";
 import { coerce_operand_to_type } from "./core_operands/dispatch";
 import { parse_index_expression, parse_member_access } from "./core_parse";
 import {
@@ -440,7 +441,8 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                 + ", "
                                 + coerced.operand.llvm_type
                                 + "* "
-                                + field_ptr_temp);
+                                + field_ptr_temp
+                                + packed_align_suffix(struct_info.packed));
                         }
                     }
                 }

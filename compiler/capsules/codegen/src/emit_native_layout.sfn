@@ -3,6 +3,11 @@
 // Struct / enum layout computation and manifest generation for the
 // native emitter.  Extracted from emit_native.sfn to reduce per-file
 // memory footprint during self-hosting compilation.
+// The `@repr(C)` C layout engine lives in the analyzer and is the single
+// layout authority for decorated structs (SFN-1289, SFEP-0079 §3.1): the same
+// function that raised E0848 computes the `.layout` record emitted here, so
+// the two can never disagree.
+import { CLayout, compute_c_layout, repr_c_spec } from "sfn/analyzer/typecheck_types/repr_c";
 import { NativeArtifact } from "sfn/ir";
 import {
     char_at_index as char_at,
@@ -11,6 +16,7 @@ import {
     substring
 } from "sfn/strings";
 import {
+    Decorator,
     EnumVariant,
     FieldDeclaration,
     Program,
@@ -120,11 +126,58 @@ fn build_layout_context(program: Program) -> LayoutContext {
         }
         index += 1;
     }
-    return LayoutContext { structs: structs, enums: enums };
+    return LayoutContext {
+        structs: structs,
+        enums: enums,
+        declarations: program.statements
+    };
 }
 
 // ── Layout computation ───────────────────────────────────────────────
-fn compute_struct_layout_lines(context: LayoutContext, struct_name: string, fields: FieldDeclaration[]) -> LayoutEmitResult {
+// Render `.layout` records from a computed C layout. `packed=1` is the bit
+// the LLVM type renderer reads back to emit `<{ ... }>`; it is emitted only
+// for a packed struct so every existing `.layout` line stays byte-identical
+// (`parse_struct_layout_header` rejects unknown keys, so an unconditional
+// `packed=0` would break the seed's reader).
+fn _c_layout_lines(struct_name: string, packed: boolean, layout: CLayout) -> LayoutEmitResult {
+    let mut header: string = ".layout struct name=" + struct_name + " size="
+        + number_to_string(layout.size)
+        + " align="
+        + number_to_string(layout.align);
+    if packed { header = header + " packed=1"; }
+    let mut lines: string[] = [];
+    lines.push(header);
+    let mut index: int = 0;
+    loop {
+        if index >= layout.fields.length { break; }
+        let field = layout.fields[index];
+        let mut line: string = ".layout field " + field.name;
+        line = line + " type=" + field.type_annotation;
+        line = line + " offset=" + number_to_string(field.offset);
+        line = line + " size=" + number_to_string(field.size);
+        line = line + " align=" + number_to_string(field.align);
+        lines.push(line);
+        index += 1;
+    }
+    return LayoutEmitResult { lines: lines, diagnostics: [] };
+}
+
+fn compute_struct_layout_lines(context: LayoutContext, struct_name: string, fields: FieldDeclaration[], decorators: Decorator[]) -> LayoutEmitResult {
+    // `@repr(C)` structs are laid out by the analyzer's C engine, which knows
+    // the narrow scalar widths this module's legacy table sizes at 8 bytes.
+    // The legacy path is left untouched for every other type on purpose:
+    // correcting it globally would move enum aggregate offsets across the
+    // seed/fresh boundary (SFEP-0079 §5, SFN-1300).
+    let repr = repr_c_spec(decorators);
+    if repr.present {
+        let c_layout = compute_c_layout(fields, repr.packed, context.declarations);
+        // `ok` is false only when a field has no C representation, which the
+        // analyzer already rejected with E0847; fall back so a rejected
+        // program still emits a well-formed artifact.
+        if c_layout.ok {
+            return _c_layout_lines(struct_name, repr.packed, c_layout);
+        }
+    }
     let inputs = convert_struct_fields(fields);
     let layout = calculate_record_layout(context, inputs, "struct", struct_name, append_string([], struct_name));
     let mut lines: string[] = [];
@@ -728,7 +781,7 @@ fn generate_layout_manifest(program: Program, context: LayoutContext) -> NativeA
         if index >= program.statements.length { break; }
         let statement = program.statements[index];
         if statement.variant == "StructDeclaration" {
-            let result = compute_struct_layout_lines(context, statement.name, statement.fields);
+            let result = compute_struct_layout_lines(context, statement.name, statement.fields, statement.decorators);
             let mut line_index: int = 0;
             loop {
                 if line_index >= result.lines.length { break; }

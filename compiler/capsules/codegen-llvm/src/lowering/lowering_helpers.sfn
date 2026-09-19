@@ -220,6 +220,7 @@ fn inject_prelude_error_struct(structs: NativeStruct[]) -> NativeStruct[] {
         layout: NativeStructLayout {
             size: 8,
             align: 8,
+            packed: false,
             fields: [NativeStructLayoutField {
                 name: "message", type_annotation: "string", offset: 0, size: 8, align: 8
             }]

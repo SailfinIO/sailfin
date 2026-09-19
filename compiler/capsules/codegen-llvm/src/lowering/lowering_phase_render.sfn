@@ -315,7 +315,11 @@ fn recover_struct_types_from_context(type_context: TypeContext) -> string[] {
             ftypes = ftypes + info.fields[fi].llvm_type;
             fi += 1;
         }
-        result.push(info.llvm_name + " = type { " + ftypes + " }");
+        if info.packed {
+            result.push(info.llvm_name + " = type <{ " + ftypes + " }>");
+        } else {
+            result.push(info.llvm_name + " = type { " + ftypes + " }");
+        }
         si += 1;
     }
     return result;

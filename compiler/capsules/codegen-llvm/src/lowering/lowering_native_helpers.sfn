@@ -88,8 +88,13 @@ fn make_native_import(module_path: string) -> NativeImport {
     };
 }
 
-fn make_native_struct_layout(sz: int, al: int, flds: NativeStructLayoutField[]) -> NativeStructLayout {
-    return NativeStructLayout { size: sz, align: al, fields: flds };
+fn make_native_struct_layout(sz: int, al: int, flds: NativeStructLayoutField[], pk: boolean) -> NativeStructLayout {
+    return NativeStructLayout {
+        size: sz,
+        align: al,
+        packed: pk,
+        fields: flds
+    };
 }
 
 fn make_native_struct(sname: string, sfields: NativeStructField[], smethods: NativeFunction[], slayout: NativeStructLayout?) -> NativeStruct {

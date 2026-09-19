@@ -61,6 +61,7 @@ import {
     enum_payload_inst_args,
     generic_payload_load_slot_type,
     lower_inline_gep_field_access,
+    packed_align_suffix,
     resolve_generic_payload_field
 } from "./core_member_helpers";
 import {
@@ -1111,7 +1112,8 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
             + ", "
             + field_info.llvm_type
             + "* "
-            + gep_name);
+            + gep_name
+            + packed_align_suffix(info.packed));
         current_temp += 1;
 
         if field_info.llvm_type == "i8*" {

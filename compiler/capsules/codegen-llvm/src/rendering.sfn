@@ -793,7 +793,11 @@ fn render_struct_type_definitions(context: TypeContext, functions: NativeFunctio
             field_index += 1;
         }
         let mut body: string = "";
-        if field_types.length == 0 { body = "{}"; } else {
+        if field_types.length == 0 {
+            if info.packed { body = "<{}>"; } else { body = "{}"; }
+        } else if info.packed {
+            body = "<{ " + join_with_separator(field_types, ", ") + " }>";
+        } else {
             body = "{ " + join_with_separator(field_types, ", ") + " }";
         }
         lines.push(info.llvm_name + " = type " + body);

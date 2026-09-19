@@ -54,8 +54,20 @@ fn _grandfathered_lowering_ceiling(path: string) -> int {
     // materialization block, which is self-contained and the obvious next
     // extraction; it was left alone here because it is untouched by the fix.
     // SFN-639 tracks the decomposition.
-    if path == LOWERING_ROOT + "/lowering_helpers.sfn" { return 1512; }
-    if path == LOWERING_ROOT + "/lowering_recovery.sfn" { return 1056; }
+    //
+    // 1512 -> 1513: SFN-1289. `NativeStructLayout` gained a `packed` field
+    // and Sailfin rejects a partial struct literal at lowering (`E1002`), so
+    // the synthesized `Error` layout here must name it. One mandatory line
+    // with no net-zero form.
+    if path == LOWERING_ROOT + "/lowering_helpers.sfn" { return 1513; }
+    // 1056 -> 1062: SFN-1289. The light struct reader dropped the
+    // `@repr(C, packed)` bit, rebuilding a packed struct unpacked and
+    // re-rendering `{ ... }` for `<{ ... }>` — every field offset moved.
+    // Reading it back costs a local, its reset per struct, the `packed=`
+    // extraction and the assignment. A raise against the shrink-only rule,
+    // called out for review: the alternative is a recovery path that
+    // silently corrupts the layout it exists to salvage.
+    if path == LOWERING_ROOT + "/lowering_recovery.sfn" { return 1062; }
     // SFN-695 raises `instructions_let.sfn` 984 -> 1020. A `let` whose
     // initializer is a bare identifier bound to a channel (`let alias = ch;`)
     // now adopts the source binding's `channel` / `channel:<kind>` annotation,
@@ -80,7 +92,12 @@ fn _grandfathered_lowering_ceiling(path: string) -> int {
     // taking it would let the ceiling shrink instead.
     // 923 -> 850: SFN-772 moves the subject-annotation resolvers to
     // `expressions_bindings.sfn` so the member-access reader shares them.
-    if path == LOWERING_ROOT + "/instructions_match.sfn" { return 850; }
+    // 850 -> 852: SFN-1289. Destructuring a `@repr(C, packed)` struct reads
+    // its fields through this module's own GEP, so the load needs `align 1`
+    // like every other field access. The rule is one shared
+    // `packed_align_suffix` in `core_member_helpers.sfn`, so the cost here
+    // is only the import and the argument line.
+    if path == LOWERING_ROOT + "/instructions_match.sfn" { return 852; }
     if path == LOWERING_ROOT + "/instructions.sfn" { return 779; }
     if path == LOWERING_ROOT + "/instructions_helpers.sfn" { return 849; }
     // SFN-916 raises `instructions_if.sfn` 784 -> 785. Retiring the legacy

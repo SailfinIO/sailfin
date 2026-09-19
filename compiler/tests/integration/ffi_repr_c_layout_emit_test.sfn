@@ -1,0 +1,180 @@
+// Integration tests for `@repr(C)` layout emission.
+//
+// SFN-1289; design SFEP-0079 §3.1 (`docs/proposals/0079-systems-c-interop.md`).
+//
+// The point of the feature is that one engine produces both the native-IR
+// `.layout` record and the LLVM struct type, so these tests drive
+// `sfn emit native` and `sfn emit llvm` over the same fixture and assert the
+// two agree. They also pin the guarantee that a decorated struct changes no
+// LLVM IR unless it is `packed`, and that undecorated types keep the legacy
+// `.layout` output byte-for-byte.
+//
+// The nested compile writes IR under a cache dir, so the child is given a
+// dedicated scratch via `clean_runner_env(nested_runner_scratch(...))` —
+// without it, concurrent pool jobs overwrite each other's `program.ll`
+// (`.claude/rules/no-bash-e2e.md`).
+import {
+    clean_runner_env,
+    expect_contains_str,
+    expect_eq_bool,
+    nested_runner_scratch,
+    sfn_bin_path
+} from "sfn/test";
+
+// `struct input_event` from `linux/input.h`: 24 bytes on LP64. The narrow
+// `u16` pair is the interesting part — the legacy `.layout` table sized every
+// narrow scalar at 8 bytes and reported this struct as 40.
+fn _input_event_text() -> string {
+    return "@repr(C, size = 24, align = 8)\nstruct InputEvent {\n    sec: i64;\n"
+        + "    usec: i64;\n    kind: u16;\n    code: u16;\n    value: i32;\n}\n";
+}
+
+// Unpacked this would be 16 bytes (4 bytes of padding before `data`); packed
+// it is 12 at alignment 1.
+fn _epoll_event_text() -> string {
+    return "@repr(C, packed, size = 12, align = 1)\nstruct EpollEvent {\n"
+        + "    events: u32;\n    data: u64;\n}\n";
+}
+
+// A plain struct and an enum, to hold the legacy layout path still.
+fn _legacy_text() -> string {
+    return "struct Plain {\n    a: i32;\n    b: i64;\n}\n"
+        + "enum Shape {\n    Dot,\n    Line { length: i64 },\n}\n";
+}
+
+fn _fixture(body: string) -> string ![io] {
+    let dir = fs.mkdtemp("sfn-repr-c-layout-");
+    assert dir.length > 0;
+    let source = dir + "/fixture.sfn";
+    let main = "fn main() -> int {\n    return 0;\n}\n";
+    fs.writeFile(source, body + main);
+    return source;
+}
+
+fn _emit(source: string, kind: string, label: string) -> string ![io] {
+    let argv: string[] = [sfn_bin_path(), "emit", kind, source];
+    let child_env = clean_runner_env(nested_runner_scratch(label));
+    let exit_code = process.run_capture(argv, child_env);
+    let stdout = process.capture_take_stdout();
+    let stderr = process.capture_take_stderr();
+    assert expect_eq_bool(exit_code == 0, true).ok;
+    assert stderr.length >= 0;
+    return stdout;
+}
+
+// ── `.layout` records for `@repr(C)` structs ─────────────────────────
+test "repr(C) layout: native .layout uses the C layout for narrow scalars" ![io] {
+    let source = _fixture(_input_event_text());
+    let output = _emit(source, "native", "repr_c_native");
+    // 24, not the legacy 40.
+    assert expect_contains_str(output, ".layout struct name=InputEvent size=24 align=8").ok;
+    assert expect_contains_str(output, ".layout field sec type=i64 offset=0 size=8 align=8").ok;
+    assert expect_contains_str(output, ".layout field usec type=i64 offset=8 size=8 align=8").ok;
+    assert expect_contains_str(output, ".layout field kind type=u16 offset=16 size=2 align=2").ok;
+    assert expect_contains_str(output, ".layout field code type=u16 offset=18 size=2 align=2").ok;
+    assert expect_contains_str(output, ".layout field value type=i32 offset=20 size=4 align=4").ok;
+    fs.deleteFile(source);
+}
+
+test "repr(C) layout: a packed struct records packed=1 and no padding" ![io] {
+    let source = _fixture(_epoll_event_text());
+    let output = _emit(source, "native", "repr_c_packed_native");
+    assert expect_contains_str(output, ".layout struct name=EpollEvent size=12 align=1 packed=1").ok;
+    assert expect_contains_str(output, ".layout field events type=u32 offset=0 size=4 align=1").ok;
+    // Unpacked this field would sit at offset 8, not 4.
+    assert expect_contains_str(output, ".layout field data type=u64 offset=4 size=8 align=1").ok;
+    fs.deleteFile(source);
+}
+
+test "repr(C) layout: f32 and f64 fields get their natural widths" ![io] {
+    let body = "@repr(C, size = 16, align = 8)\nstruct Mixed {\n    a: u8;\n"
+        + "    b: f32;\n    c: f64;\n}\n";
+    let source = _fixture(body);
+    let output = _emit(source, "native", "repr_c_float_native");
+    assert expect_contains_str(output, ".layout struct name=Mixed size=16 align=8").ok;
+    assert expect_contains_str(output, ".layout field a type=u8 offset=0 size=1 align=1").ok;
+    assert expect_contains_str(output, ".layout field b type=f32 offset=4 size=4 align=4").ok;
+    assert expect_contains_str(output, ".layout field c type=f64 offset=8 size=8 align=8").ok;
+    fs.deleteFile(source);
+}
+
+// ── The legacy path is untouched ─────────────────────────────────────
+test "repr(C) layout: undecorated structs and enums keep the legacy .layout" ![io] {
+    // SFEP-0079 §5 forbids moving these: enum aggregate offsets cross the
+    // seed/fresh boundary, so the 8-byte fallback stays until SFN-1300.
+    let source = _fixture(_legacy_text());
+    let output = _emit(source, "native", "repr_c_legacy_native");
+    assert expect_contains_str(output, ".layout struct name=Plain size=16 align=8").ok;
+    assert expect_contains_str(output, ".layout field a type=i32 offset=0 size=4 align=4").ok;
+    assert expect_contains_str(output, ".layout field b type=i64 offset=8 size=8 align=8").ok;
+    // No packed key is emitted for an undecorated struct: the IR header
+    // parser rejects unknown keys, so the line must stay exactly as it was.
+    assert expect_eq_bool(expect_contains_str(output, "name=Plain size=16 align=8 packed").ok, false).ok;
+    assert expect_contains_str(output, ".layout enum name=Shape").ok;
+    fs.deleteFile(source);
+}
+
+// ── LLVM agreement ───────────────────────────────────────────────────
+test "repr(C) layout: a valid unpacked struct changes no LLVM IR" ![io] {
+    // The guarantee is the contract, not a codegen change — the type must
+    // be the same one the undecorated struct already produced.
+    let decorated = _fixture(_input_event_text());
+    let plain = _fixture("struct InputEvent {\n    sec: i64;\n    usec: i64;\n"
+        + "    kind: u16;\n    code: u16;\n    value: i32;\n}\n");
+    let decorated_ir = _emit(decorated, "llvm", "repr_c_llvm_decorated");
+    let plain_ir = _emit(plain, "llvm", "repr_c_llvm_plain");
+    assert expect_contains_str(decorated_ir, "%InputEvent = type { i64, i64, i16, i16, i32 }").ok;
+    assert expect_contains_str(plain_ir, "%InputEvent = type { i64, i64, i16, i16, i32 }").ok;
+    fs.deleteFile(decorated);
+    fs.deleteFile(plain);
+}
+
+test "repr(C) layout: packed lowers to an LLVM packed struct type" ![io] {
+    let source = _fixture(_epoll_event_text());
+    let output = _emit(source, "llvm", "repr_c_llvm_packed");
+    assert expect_contains_str(output, "%EpollEvent = type <{ i32, i64 }>").ok;
+    fs.deleteFile(source);
+}
+
+test "repr(C) layout: union destructuring of a packed struct carries align 1" ![io] {
+    // The union struct-pattern reader in `lowering/instructions_match.sfn`
+    // loads fields through its own GEP, a path distinct from `.field` access
+    // (SFN-1289). A bare-struct `match` arm is parsed as a struct *literal*,
+    // so reaching this path needs a union-typed subject.
+    let body = "struct Tagged {\n    value: int;\n}\n"
+        + "fn show(v: EpollEvent | Tagged) ![io] {\n    match v {\n"
+        + "        EpollEvent { data } => print(\"e:\${data}\"),\n"
+        + "        Tagged { value } => print(\"t:\${value}\")\n    }\n}\n";
+    let packed_source = _fixture("@repr(C, packed)\nstruct EpollEvent {\n"
+        + "    data: u64;\n}\n"
+        + body);
+    let unpacked_source = _fixture("@repr(C)\nstruct EpollEvent {\n"
+        + "    data: u64;\n}\n"
+        + body);
+    let packed_ir = _emit(packed_source, "llvm", "repr_c_llvm_union_packed");
+    let unpacked_ir = _emit(unpacked_source, "llvm", "repr_c_llvm_union_unpacked");
+    assert expect_contains_str(packed_ir, "load i64, i64* %t3, align 1").ok;
+    assert expect_contains_str(unpacked_ir, "load i64, i64* %t3\n").ok;
+    assert expect_eq_bool(expect_contains_str(unpacked_ir, "load i64, i64* %t3, align 1").ok, false).ok;
+    fs.deleteFile(packed_source);
+    fs.deleteFile(unpacked_source);
+}
+
+test "repr(C) layout: packed field access carries align 1" ![io] {
+    // Differential against the same struct unpacked. Asserting only that
+    // `align 1` appears somewhere would pass vacuously — an unrelated
+    // `alloca [64 x i64], align 16` and friends are always in the output —
+    // so the unpacked leg pins that the bare load is what changes.
+    let reader = "fn read_data(e: EpollEvent) -> u64 {\n    return e.data;\n}\n";
+    let packed_source = _fixture(_epoll_event_text() + reader);
+    let unpacked_source = _fixture("@repr(C)\nstruct EpollEvent {\n"
+        + "    events: u32;\n    data: u64;\n}\n"
+        + reader);
+    let packed_ir = _emit(packed_source, "llvm", "repr_c_llvm_align_packed");
+    let unpacked_ir = _emit(unpacked_source, "llvm", "repr_c_llvm_align_unpacked");
+    assert expect_contains_str(packed_ir, "load i64, i64* %t0, align 1").ok;
+    assert expect_contains_str(unpacked_ir, "load i64, i64* %t0\n").ok;
+    assert expect_eq_bool(expect_contains_str(unpacked_ir, "load i64, i64* %t0, align 1").ok, false).ok;
+    fs.deleteFile(packed_source);
+    fs.deleteFile(unpacked_source);
+}

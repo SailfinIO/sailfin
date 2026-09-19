@@ -6,7 +6,7 @@
 import { Diag, Span } from "sfn/analyzer/diagnostic";
 import { lines_to_native_text } from "sfn/ir";
 import { contains_string, ends_with, substring } from "sfn/strings";
-import { TypeAnnotation } from "sfn/syntax";
+import { Statement, TypeAnnotation } from "sfn/syntax";
 
 // ── Data structures ──────────────────────────────────────────────────
 struct TextBuilder {
@@ -31,6 +31,9 @@ struct StatementDispatchResult {
 struct LayoutContext {
     structs: LayoutStructDefinition[];
     enums: LayoutEnumDefinition[];
+    // Top-level statements, carried so the `@repr(C)` layout engine can
+    // resolve a nested `@repr(C)` struct field by value (SFN-1289).
+    declarations: Statement[];
 }
 
 struct LayoutStructDefinition {

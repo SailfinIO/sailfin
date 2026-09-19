@@ -1,17 +1,17 @@
 ---
 title: "§13 Foreign Interface"
-description: "Sailfin language specification — extern declarations, the C-ABI accept-list, raw pointer operations, and function addresses."
+description: "Sailfin language specification — extern declarations, the C-ABI accept-list, the @repr(C) layout contract, raw pointer operations, and function addresses."
 sidebar:
   order: 13
   label: "§13 Foreign Interface"
 ---
 
-Sailfin reaches foreign code through `extern fn` declarations and raw pointers.
-This chapter is normative for the surface that **ships today**. The broader
-interop contract — guaranteed `@repr(C)` layout, a read-only `*const T`,
-variadic externs, typed callback parameters, and effect-attested externs — is
-designed in [SFEP-0079](/sfep/0079-systems-c-interop/) and is called out as
-**designed, not shipped** wherever it appears below.
+Sailfin reaches foreign code through `extern fn` declarations, raw pointers,
+and a validated `@repr(C)` struct layout. This chapter is normative for the
+surface that **ships today**. The broader interop contract — a read-only
+`*const T`, variadic externs, typed callback parameters, and effect-attested
+externs — is designed in [SFEP-0079](/sfep/0079-systems-c-interop/) and is
+called out as **designed, not shipped** wherever it appears below.
 
 For the practical guide, see [Unsafe & FFI](/docs/advanced/ffi/).
 
@@ -41,7 +41,7 @@ a bare `void` is rejected there too.
 `unsafe extern fn` is also accepted. The `unsafe` keyword on an extern is a
 parsed marker: it is consumed by the parser and no analysis pass reads it back,
 so `extern fn` and `unsafe extern fn` typecheck and lower identically. `unsafe`
-is **not** an effect — see §13.5.
+is **not** an effect — see §13.6.
 
 An extern declaring effects is rejected with `E0804`; effects belong on the
 Sailfin wrapper that calls the extern, not on the extern itself.
@@ -74,7 +74,7 @@ C strings.
 
 `*const T` and `*mut T` are accepted: the checker strips the `const ` or `mut `
 prefix and applies the same rule to the pointee. Neither prefix carries meaning
-today — see §13.3.
+today — see §13.4.
 
 > **Not admissible:** `*opaque` is rejected with `E0805`. The opaque-pointee
 > rule requires an uppercase initial, so the lowercase `opaque` matches nothing.
@@ -85,7 +85,7 @@ spelling with no space before `(`. `sfn fmt` normalizes that to `fn (A, B) -> C`
 which the checker then rejects with `E0805`, so a formatted source file cannot
 carry a typed function-pointer extern parameter. Typed callback parameters are
 **designed, not shipped** (SFEP-0079 §3.4, leaf L5). Pass a callback as a raw
-address instead — §13.4.
+address instead — §13.5.
 
 ### Declaration diagnostics
 
@@ -97,7 +97,120 @@ address instead — §13.4.
 | `E0804` | The extern declares effects (`![...]`). Move the clause onto the calling wrapper. |
 | `E0805` | Any other inadmissible or missing type: a missing parameter or `extern var` annotation, bare `void` in parameter position, an unrecognized name such as `number` or `boolean`, and any `string`/array shape the two rules above do not reach (a nested `Foo<int[]>` lands here, not on `E0802`). |
 
-## 13.3 Raw pointer operations
+## 13.3 The `@repr(C)` layout contract
+
+`@repr(C)` on a struct guarantees a C-compatible layout: fields are placed in
+declaration order at each field's natural alignment, the struct's alignment is
+the maximum field alignment, and the size is rounded up to that alignment
+(tail padding). For a valid unpacked struct this changes **no generated IR** —
+the LLVM lowering for a struct already does this — what `@repr(C)` adds is the
+*guarantee*: a future Sailfin-native layout optimization (reordering, niche
+packing, field elision) must skip a `@repr(C)` struct.
+
+```sfn
+// linux/input.h — 24 bytes on LP64 (aarch64 and x86_64 Linux).
+@repr(C, size = 24)
+struct InputEvent {
+    sec: i64;
+    usec: i64;
+    kind: u16;
+    code: u16;
+    value: i32;
+}
+```
+
+`InputEvent` lays out at offsets 0, 8, 16, 18, 20, for a size of 24 and an
+alignment of 8, mirroring `struct input_event` from `linux/input.h` on LP64.
+
+**Admissible field types.** A `@repr(C)` struct field must be one of:
+
+| Sailfin | Size / align (bytes) |
+|---|---|
+| `i8`, `u8` | 1 / 1 |
+| `i16`, `u16` | 2 / 2 |
+| `i32`, `u32` | 4 / 4 |
+| `i64`, `u64`, `isize`, `usize` | 8 / 8 |
+| `f32` | 4 / 4 |
+| `f64` | 8 / 8 |
+| `f16`, `bf16` | 2 / 2 |
+| `*T`, `*const T`, `*mut T` | 8 / 8 |
+| another `@repr(C)` struct, by value | that struct's computed size / align |
+
+Every other field type is `E0847`: `string`, `T[]`, closures, enums,
+optionals (`T?`), generics, a non-`@repr(C)` struct by value, and **`bool`**.
+`bool` is rejected because C's `_Bool` is a byte while Sailfin's `bool`
+storage is `i1`; a loaded byte other than `0`/`1` would be undefined
+behavior. Use `u8` instead. Admitting `bool` later with `i8` storage is a
+compatible widening. An inline fixed-size array field (`[T; N]`) is **not**
+admissible yet — designed, not shipped (SFEP-0079 §3.1, leaf L9, SFN-1299).
+
+A nested `@repr(C)` struct field must be **declared in the same module**. A
+struct imported from another module is reconstructed from that module's
+compiled artifact, which records no decorators, so the compiler cannot tell
+whether it carries `@repr(C)` and conservatively rejects the field with
+`E0847`. Declare the mirror alongside the struct that embeds it, or hold it
+behind a pointer (`*Timespec`), which is admissible across modules.
+
+**`packed`.** `@repr(C, packed)` lowers to an LLVM packed struct
+(`<{ ... }>`): alignment 1, no padding between or after fields — the same
+guarantee as `__attribute__((packed))`. Field loads and stores against a
+packed struct use `align 1`.
+
+```sfn
+@repr(C, packed)
+struct EpollEvent {
+    events: u32;
+    data: u64;
+}
+```
+
+Unpacked, `EpollEvent` would lay out as `{ i32, [4 x i8], i64 }` — 16 bytes,
+with 4 bytes of padding before `data` so it lands at its natural 8-byte
+alignment. Packed, it lowers to `<{ i32, i64 }>` and is 12 bytes: `data`
+follows `events` immediately, at offset 4.
+
+**Assertions.** `size = N` and `align = N` are optional named arguments,
+checked against the computed layout. `align = N` must be a power of two. A
+mismatch is `E0848`, and the diagnostic prints the computed per-field offsets
+so a C header transcription error is caught at compile time instead of
+becoming a silent ABI mismatch. `InputEvent` above uses `size = 24` this way.
+
+**Target invariance.** Every governed target (SFEP-0066 §3.2: x86_64 and
+aarch64 Linux, arm64 macOS, x86_64 Windows) is 64-bit with identical natural
+alignment for every admissible field type, so a valid `@repr(C)` layout is
+**target-invariant** — with one exception, `packed`, which reproduces
+whatever ABI the platform's C compiler assigns a packed struct. A C type
+whose layout genuinely differs per target (`long`, `struct stat`) must still
+be modeled per target by the binding library; `@repr(C)` does not make a
+target-varying C type target-invariant, it only guarantees that Sailfin lays
+out the fields you wrote exactly as specified everywhere.
+
+**Misuse.** `E0846` covers:
+
+- an unknown or malformed decorator argument (`@repr(c)`, `@repr(C, pack)`,
+  a non-literal or non-power-of-two `align`)
+- `@repr(C)` on an **enum**
+- `@repr(C)` on a **generic struct** — a type parameter has no single C
+  layout
+
+Methods are allowed on a `@repr(C)` struct; the decorator constrains data
+layout only.
+
+**Not shipped.** The layout builtins `size_of`, `align_of`, and `offset_of`
+are **designed, not shipped** (SFEP-0079 §3.1, leaf L2b, SFN-1295). There is
+no way yet to query a `@repr(C)` struct's layout from Sailfin source; the
+guarantee is enforced at compile time by the checker and the LLVM lowering,
+not exposed as a value.
+
+### Layout diagnostics
+
+| Code | Raised when |
+|---|---|
+| `E0846` | An unrecognized or malformed `@repr` argument, or `@repr(C)` applied to an enum or a generic struct. |
+| `E0847` | A `@repr(C)` struct field's type has no C representation: `string`, `T[]`, a closure, an enum, `T?`, a generic, a non-`@repr(C)` struct by value, or `bool`. |
+| `E0848` | A `size =` or `align =` assertion disagrees with the computed layout. The message prints the computed per-field offsets. |
+
+## 13.4 Raw pointer operations
 
 The following operate on any raw pointer and are specified here as shipped
 behavior. None of them requires an `unsafe` block.
@@ -139,14 +252,13 @@ arena-backed and reclaimed at a phase boundary. Anything the foreign side
 retains beyond the call must live in memory it owns, such as a `malloc`
 allocation. This rule is **documented, not enforced**.
 
-**Layout is not specified.** Structs lower to LLVM identified types in field
-declaration order, which coincides with the C ABI for scalar fields on the
-supported targets, but no part of that is a contract and no layout attribute is
-honored. `@repr(C)` parses and is ignored, as is any other unrecognized
-decorator. A validated layout contract with `size_of` / `align_of` /
-`offset_of` is **designed, not shipped** (SFEP-0079 §3.1, leaf L2).
+**Layout is unspecified except under `@repr(C)`.** A struct without `@repr(C)`
+lowers to an LLVM identified type in field declaration order, which coincides
+with the C ABI for scalar fields on the supported targets, but no part of that
+is a contract: nothing prevents a future layout optimization from reordering
+its fields. `@repr(C)` is the guarantee — see §13.3.
 
-## 13.4 Function addresses
+## 13.5 Function addresses
 
 A named Sailfin function's address is taken with an explicit cast:
 
@@ -171,7 +283,7 @@ an unmangled name (`extern fn … { body }`) is **designed, not shipped**
 (SFEP-0079 §3.4, leaf L6). A Sailfin `throw` unwinding across a foreign frame
 is undefined.
 
-## 13.5 Effects and `unsafe`
+## 13.6 Effects and `unsafe`
 
 Extern calls are invisible to the effect checker: `E0804` forbids effects on
 the declaration, and no analysis pass attributes an effect to an extern call.
@@ -209,7 +321,7 @@ and a derived record of the program's foreign edges supersedes the audit
 purpose they were meant to serve. That record is **designed, not shipped**
 (SFEP-0079 §3.5, leaf L8).
 
-## 13.6 Linking
+## 13.7 Linking
 
 The foreign library providing an extern symbol must be linked into the final
 binary. Name it in the capsule's manifest:
