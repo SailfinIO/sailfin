@@ -818,11 +818,9 @@ fn _extract_call_entry(line: string) -> CallEntry? {
     if ret_type.length == 0 { return null; }
     // A variadic call states the callee's whole function type before the
     // symbol — `call i32 (i8*, ...) @printf(...)` — so this slice is a
-    // function type, not a return type. Recording it would hand
-    // `_render_declare_line` `declare i32 (i8*, ...) @printf(i8*)`, which
-    // LLVM rejects. The declare-backed tiers of `find_signature_in_index`
-    // already describe such a callee correctly, so decline instead.
-    // SFN-1291.
+    // function type, not a return type. Recording it would render
+    // `declare i32 (i8*, ...) @printf(i8*)`, which LLVM rejects; the
+    // declare-backed tiers describe such a callee correctly. SFN-1291.
     if index_of(ret_type, "(") >= 0 { return null; }
     let params_start = at_index + call_needle.length;
     let close_paren = index_of(substring(line, params_start, line.length), ")");
