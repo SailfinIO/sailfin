@@ -91,7 +91,15 @@ fn _grandfathered_ceiling(name: string) -> int {
     // reader threads the base's instantiation through its variant scan and
     // slot load, and the call frames widen by one parameter. The
     // substitution itself lives in `core_member_helpers.sfn`.
-    if name == "core_member_lowering.sfn" { return 1254; }
+    // 1254 -> 1256: SFN-1289, a raise against the shrink-only rule, called
+    // out for review. A `@repr(C, packed)` struct has no inter-field
+    // padding, so a field load must carry `align 1` or LLVM assumes the
+    // field type's natural alignment against an unaligned address. The rule
+    // is one shared `packed_align_suffix` in `core_member_helpers.sfn`
+    // rather than a copy at each of the four access sites, so the cost in
+    // this module is only the import and the argument line — there is no
+    // net-zero form.
+    if name == "core_member_lowering.sfn" { return 1256; }
     if name == "core_parse.sfn" { return 1059; }
     if name == "core_parsing.sfn" { return 959; }
     if name == "statement.sfn" { return 845; }

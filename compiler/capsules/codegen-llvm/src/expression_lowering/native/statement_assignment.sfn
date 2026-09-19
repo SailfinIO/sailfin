@@ -50,6 +50,7 @@ import {
     bindings_update_local_ownership
 } from "../bindings";
 import { analyze_value_ownership, lower_expression } from "./core";
+import { packed_align_suffix } from "./core_member_helpers";
 import { coerce_operand_to_type } from "./core_operands/dispatch";
 import { parse_index_expression, parse_member_access } from "./core_parse";
 import {
@@ -434,11 +435,6 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                 + base_pointer_value
                                 + ", i32 0, i32 "
                                 + number_to_string(field_index));
-                            // Packed fields sit at unaligned byte offsets
-                            // (SFN-1289); see the matching load in
-                            // `core_member_lowering.sfn`.
-                            let mut store_align: string = "";
-                            if struct_info.packed { store_align = ", align 1"; }
                             current_lines.push("  store " + coerced.operand.llvm_type
                                 + " "
                                 + coerced.operand.value
@@ -446,7 +442,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                 + coerced.operand.llvm_type
                                 + "* "
                                 + field_ptr_temp
-                                + store_align);
+                                + packed_align_suffix(struct_info.packed));
                         }
                     }
                 }
