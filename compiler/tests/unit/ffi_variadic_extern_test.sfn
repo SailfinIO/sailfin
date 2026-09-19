@@ -9,7 +9,7 @@
 import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
 import { Diagnostic } from "sfn/analyzer/typecheck_types";
 import { parse_program } from "sfn/syntax";
-import { expect_contains_str } from "sfn/test";
+import { expect_contains_str, expect_eq_bool } from "sfn/test";
 
 fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
     let mut i: int = 0;
@@ -42,7 +42,7 @@ test "ffi variadic: a well-formed variadic extern declares cleanly" ![io] {
     let source = "extern fn sum_va(n: i32, ...) -> i32;";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
-    assert ! _has_code(diagnostics, "E0851");
+    assert expect_eq_bool(_has_code(diagnostics, "E0851"), false).ok;
 }
 
 test "ffi variadic: plain integer literal arguments raise no E0851" ![io] {
@@ -50,7 +50,7 @@ test "ffi variadic: plain integer literal arguments raise no E0851" ![io] {
         + "fn main() { let v = sum_va(2, 10, 20); }";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
-    assert ! _has_code(diagnostics, "E0851");
+    assert expect_eq_bool(_has_code(diagnostics, "E0851"), false).ok;
 }
 
 test "ffi variadic: an explicitly cast narrow argument is accepted" ![io] {
@@ -58,7 +58,7 @@ test "ffi variadic: an explicitly cast narrow argument is accepted" ![io] {
         + "fn main() { let x: u16 = 1; let v = sum_va(1, x as i32); }";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
-    assert ! _has_code(diagnostics, "E0851");
+    assert expect_eq_bool(_has_code(diagnostics, "E0851"), false).ok;
 }
 
 // -------------------------------------------------------------------
@@ -68,14 +68,14 @@ test "ffi variadic: `...` with no fixed parameter is rejected" ![io] {
     let source = "extern fn bad(...) -> i32;";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
-    assert _has_code(diagnostics, "E0851");
+    assert expect_eq_bool(_has_code(diagnostics, "E0851"), true).ok;
 }
 
 test "ffi variadic: `...` not last is rejected" ![io] {
     let source = "extern fn bad(a: i32, ..., b: i32) -> i32;";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
-    assert _has_code(diagnostics, "E0851");
+    assert expect_eq_bool(_has_code(diagnostics, "E0851"), true).ok;
 }
 
 // -------------------------------------------------------------------
@@ -86,7 +86,7 @@ test "ffi variadic: an f32-annotated local in variadic position is rejected" ![i
         + "fn main() { let x: f32 = 1.0; let v = sum_va(1, x); }";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
-    assert _has_code(diagnostics, "E0851");
+    assert expect_eq_bool(_has_code(diagnostics, "E0851"), true).ok;
 }
 
 test "ffi variadic: a u16-annotated local in variadic position is rejected" ![io] {
@@ -94,14 +94,14 @@ test "ffi variadic: a u16-annotated local in variadic position is rejected" ![io
         + "fn main() { let x: u16 = 1; let v = sum_va(1, x); }";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
-    assert _has_code(diagnostics, "E0851");
+    assert expect_eq_bool(_has_code(diagnostics, "E0851"), true).ok;
 }
 
 test "ffi variadic: the f32 promotion message hints `as f64`" ![io] {
     let source = "extern fn sum_va(n: i32, ...) -> i32;\n"
         + "fn main() { let x: f32 = 1.0; let v = sum_va(1, x); }";
     let message = _first_message(source, "E0851");
-    assert message.length > 0;
+    assert expect_eq_bool(message.length > 0, true).ok;
     assert expect_contains_str(message, "as f64").ok;
 }
 
@@ -109,7 +109,7 @@ test "ffi variadic: the u16 promotion message hints `as i32`" ![io] {
     let source = "extern fn sum_va(n: i32, ...) -> i32;\n"
         + "fn main() { let x: u16 = 1; let v = sum_va(1, x); }";
     let message = _first_message(source, "E0851");
-    assert message.length > 0;
+    assert expect_eq_bool(message.length > 0, true).ok;
     assert expect_contains_str(message, "as i32").ok;
 }
 
@@ -121,7 +121,7 @@ test "ffi variadic: a narrow local in a fixed parameter position stays silent" !
         + "fn main() { let x: u16 = 1; let v = sum_va(x, 10); }";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
-    assert ! _has_code(diagnostics, "E0851");
+    assert expect_eq_bool(_has_code(diagnostics, "E0851"), false).ok;
 }
 
 test "ffi variadic: an unstated argument type stays silent" ![io] {
@@ -130,7 +130,7 @@ test "ffi variadic: an unstated argument type stays silent" ![io] {
         + "fn main() { let v = sum_va(1, helper()); }";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
-    assert ! _has_code(diagnostics, "E0851");
+    assert expect_eq_bool(_has_code(diagnostics, "E0851"), false).ok;
 }
 
 test "ffi variadic: a narrow local passed to a non-variadic extern stays silent" ![io] {
@@ -138,5 +138,5 @@ test "ffi variadic: a narrow local passed to a non-variadic extern stays silent"
         + "fn main() { let x: u16 = 1; let v = plain(1, x); }";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
-    assert ! _has_code(diagnostics, "E0851");
+    assert expect_eq_bool(_has_code(diagnostics, "E0851"), false).ok;
 }
