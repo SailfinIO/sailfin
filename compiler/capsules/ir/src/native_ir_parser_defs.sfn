@@ -233,6 +233,7 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
     let mut struct_layout_fields: NativeStructLayoutField[] = [];
     let mut struct_layout_size: int = 0;
     let mut struct_layout_align: int = 0;
+    let mut struct_layout_packed: boolean = false;
     let mut struct_layout_header_success: boolean = false;
     let mut struct_layout_reported_missing_header: boolean = false;
     let mut index = start_index + 1;
@@ -244,6 +245,7 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
                 struct_layout_value = NativeStructLayout {
                     size: struct_layout_size,
                     align: struct_layout_align,
+                    packed: struct_layout_packed,
                     fields: struct_layout_fields
                 };
             }
@@ -380,6 +382,7 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
                     } else {
                         struct_layout_size = header_result.size;
                         struct_layout_align = header_result.align;
+                        struct_layout_packed = header_result.packed;
                         struct_layout_header_success = true;
                     }
                 }
@@ -405,6 +408,7 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
                         } else {
                             struct_layout_size = header_result.size;
                             struct_layout_align = header_result.align;
+                            struct_layout_packed = header_result.packed;
                             struct_layout_header_success = true;
                         }
                     }
@@ -500,6 +504,7 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
         struct_layout_value = NativeStructLayout {
             size: struct_layout_size,
             align: struct_layout_align,
+            packed: struct_layout_packed,
             fields: struct_layout_fields
         };
     }

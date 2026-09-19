@@ -35,6 +35,7 @@ import {
 } from "../typecheck_types/expr_type_rules";
 import { check_type_parameters } from "../typecheck_types/generic_bounds";
 import { check_struct_implements_interfaces } from "../typecheck_types/interface_and_generics";
+import { check_repr_c, check_repr_c_not_a_struct } from "../typecheck_types/repr_c";
 import {
     ScopeResult,
     SymbolEntry,
@@ -307,6 +308,15 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
             diagnostics.push(_si_diags[_ci4]);
             _ci4 += 1;
         }
+        // `@repr(C)` layout contract (E0846-E0848, SFN-1289). `ctx.declarations`
+        // resolves a nested `@repr(C)` struct field by value.
+        let _rc_diags = check_repr_c(statement, ctx.declarations);
+        let mut _ci5: int = 0;
+        loop {
+            if _ci5 >= _rc_diags.length { break; }
+            diagnostics.push(_rc_diags[_ci5]);
+            _ci5 += 1;
+        }
         let method_ctx = ctx_with_type_params(ctx, type_parameter_names(statement.type_parameters));
         let mut index: int = 0;
         loop {
@@ -342,6 +352,14 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
             if _ci2 >= _ev_diags.length { break; }
             diagnostics.push(_ev_diags[_ci2]);
             _ci2 += 1;
+        }
+        // E0846: the layout contract is defined for structs only (SFN-1289).
+        let _rc_diags = check_repr_c_not_a_struct(statement.decorators, statement.name, statement.name_span, "enum");
+        let mut _ci3: int = 0;
+        loop {
+            if _ci3 >= _rc_diags.length { break; }
+            diagnostics.push(_rc_diags[_ci3]);
+            _ci3 += 1;
         }
         return ScopeResult {
             bindings: registration.bindings,

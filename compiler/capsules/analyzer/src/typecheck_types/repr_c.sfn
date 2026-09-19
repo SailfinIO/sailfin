@@ -1,0 +1,556 @@
+// compiler/capsules/analyzer/src/typecheck_types/repr_c.sfn
+//
+// The `@repr(C)` layout contract — E0846, E0847, E0848 (SFN-1289).
+// Design: SFEP-0079 §3.1 (`docs/proposals/0079-systems-c-interop.md`).
+//
+// This module is the single C-layout authority. It both raises the
+// diagnostics and exports `compute_c_layout`, which `sfn/codegen` calls when
+// it emits `.layout` records for a `@repr(C)` struct. Keeping one engine is
+// the point of the feature: a `.sfn-asm` record can never disagree with the
+// `size =` assertion that accepted the declaration, because the same
+// function produced both.
+//
+// The engine runs for `@repr(C)` structs *only*. The legacy layout table in
+// `compiler/capsules/codegen/src/emit_native_layout.sfn` is deliberately
+// untouched for every other type: correcting its 8-byte narrow-type fallback
+// globally would move enum aggregate offsets across the seed/fresh boundary,
+// which is a separate seed-gated change (SFEP-0079 §5, SFN-1300).
+//
+// `@repr(C)` changes no generated IR for a valid unpacked struct. What it
+// adds is the guarantee — plus `packed`, which does change lowering.
+import { starts_with, strings_equal } from "sfn/strings";
+import {
+    Decorator,
+    Expression,
+    FieldDeclaration,
+    SourceSpan,
+    Statement
+} from "sfn/syntax";
+
+import { Diagnostic } from "../typecheck_types";
+import { token_from_name, trim_text, typecheck_int_to_string } from "./text_utils";
+
+// The decorator as written, after argument recovery. `present` is false for
+// a struct with no `@repr` at all, which is the overwhelmingly common case
+// and the only one that costs nothing to check.
+struct ReprCSpec {
+    present: boolean;
+    packed: boolean;
+    has_size: boolean;
+    size: int;
+    has_align: boolean;
+    align: int;
+}
+
+// One field's placement in the C layout. `type_annotation` is carried so the
+// `.layout field` emitter and the E0848 message can print it without
+// re-walking the declaration.
+struct CFieldLayout {
+    name: string;
+    type_annotation: string;
+    offset: int;
+    size: int;
+    align: int;
+}
+
+// `ok` is false when some field is not C-representable. The caller has
+// already raised E0847 for that field, so the layout is suppressed rather
+// than reported against a guessed size.
+struct CLayout {
+    ok: boolean;
+    size: int;
+    align: int;
+    fields: CFieldLayout[];
+}
+
+struct CTypeLayout {
+    known: boolean;
+    size: int;
+    align: int;
+}
+
+// ── Decorator recovery ───────────────────────────────────────────────
+// `@repr(C, size = 24)` does not parse into a named `DecoratorArgument`.
+// `parse_decorator_argument` splits named arguments on a top-level *colon*
+// (`compiler/capsules/syntax/src/parser/declarations/syntax.sfn:194`), and
+// `=` is not a colon, so the Pratt parser consumes `size = 24` as an
+// assignment-expression and hands it back as one positional argument
+// (`Expression.Assignment`). Both spellings are accepted here rather than
+// changing the parser: the colon form is what the grammar already calls a
+// named argument, and the `=` form is what SFEP-0079 §3.1 writes.
+fn _argument_key(argument_name: string?, expression: Expression) -> string {
+    if argument_name != null { return argument_name; }
+    if strings_equal(expression.variant, "Assignment") {
+        let target = expression.target;
+        if strings_equal(target.variant, "Identifier") { return target.name; }
+    }
+    return "";
+}
+
+// The value half of a `key = value` / `key: value` decorator argument.
+fn _argument_value(argument_name: string?, expression: Expression) -> Expression? {
+    if argument_name != null { return expression; }
+    if strings_equal(expression.variant, "Assignment") {
+        return expression.rhs;
+    }
+    return null;
+}
+
+// Non-negative decimal literal. `valid` is false for anything else, which
+// the caller turns into E0846 rather than silently asserting against 0.
+struct _DecimalParse {
+    valid: boolean;
+    value: int;
+}
+
+fn _parse_decimal(text: string) -> _DecimalParse {
+    if text.length == 0 {
+        return _DecimalParse { valid: false, value: 0 };
+    }
+    let mut value: int = 0;
+    let mut index: int = 0;
+    loop {
+        if index >= text.length { break; }
+        let ch = text[index];
+        let mut digit: int = -1;
+        if ch == "0" { digit = 0; } else if ch == "1" { digit = 1; } else if ch == "2" {
+            digit = 2;
+        } else if ch == "3" { digit = 3; } else if ch == "4" { digit = 4; } else if ch == "5" {
+            digit = 5;
+        } else if ch == "6" { digit = 6; } else if ch == "7" { digit = 7; } else if ch == "8" {
+            digit = 8;
+        } else if ch == "9" { digit = 9; }
+        if digit < 0 {
+            return _DecimalParse { valid: false, value: 0 };
+        }
+        value = value * 10 + digit;
+        index += 1;
+    }
+    return _DecimalParse { valid: true, value: value };
+}
+
+// A power of two is the only legal `align =` value, and the only alignment
+// the layout engine can honour.
+fn _is_power_of_two(value: int) -> boolean {
+    if value <= 0 { return false; }
+    let mut remaining: int = value;
+    loop {
+        if remaining == 1 { return true; }
+        let half = remaining / 2;
+        if half * 2 != remaining { return false; }
+        remaining = half;
+    }
+    return false;
+}
+
+// Extract the `@repr` decorator without diagnosing it. `check_repr_c` is the
+// validating entry point; this one exists so `sfn/codegen` can ask "is this
+// struct `@repr(C)`, and is it packed?" on an already-checked program.
+fn repr_c_spec(decorators: Decorator[]) -> ReprCSpec {
+    let mut spec = ReprCSpec {
+        present: false,
+        packed: false,
+        has_size: false,
+        size: 0,
+        has_align: false,
+        align: 0
+    };
+    let mut index: int = 0;
+    loop {
+        if index >= decorators.length { break; }
+        let decorator = decorators[index];
+        if strings_equal(decorator.name, "repr") {
+            spec.present = true;
+            let mut argument_index: int = 0;
+            loop {
+                if argument_index >= decorator.arguments.length { break; }
+                let argument = decorator.arguments[argument_index];
+                let key = _argument_key(argument.name, argument.expression);
+                if strings_equal(key, "size") || strings_equal(key, "align") {
+                    let value_expression = _argument_value(argument.name, argument.expression);
+                    if value_expression != null {
+                        if strings_equal(value_expression.variant, "NumberLiteral") {
+                            let parsed = _parse_decimal(value_expression.value);
+                            if parsed.valid {
+                                if strings_equal(key, "size") {
+                                    spec.has_size = true;
+                                    spec.size = parsed.value;
+                                } else {
+                                    spec.has_align = true;
+                                    spec.align = parsed.value;
+                                }
+                            }
+                        }
+                    }
+                } else if strings_equal(argument.expression.variant, "Identifier") {
+                    if strings_equal(argument.expression.name, "packed") {
+                        spec.packed = true;
+                    }
+                }
+                argument_index += 1;
+            }
+        }
+        index += 1;
+    }
+    return spec;
+}
+
+// ── The C layout engine ──────────────────────────────────────────────
+// Round `value` up to a multiple of `alignment`. Repeated subtraction rather
+// than `%` mirrors `emit_native_layout.sfn:707` and stays on integer
+// arithmetic; alignments here are at most 8, so the loop is trivially bounded.
+fn _align_to(value: int, alignment: int) -> int {
+    if alignment <= 1 { return value; }
+    let mut remainder: int = value;
+    loop {
+        if remainder < alignment { break; }
+        remainder -= alignment;
+    }
+    if remainder == 0 { return value; }
+    return value + (alignment - remainder);
+}
+
+// Natural size/align for the scalar and pointer field types SFEP-0079 §3.1
+// admits. Every governed target is 64-bit with identical natural alignment
+// for these, so a valid `@repr(C)` layout is target-invariant.
+fn _scalar_layout(text: string) -> CTypeLayout {
+    if starts_with(text, "*") {
+        return CTypeLayout { known: true, size: 8, align: 8 };
+    }
+    if strings_equal(text, "i8") || strings_equal(text, "u8") {
+        return CTypeLayout { known: true, size: 1, align: 1 };
+    }
+    if strings_equal(text, "i16") || strings_equal(text, "u16") {
+        return CTypeLayout { known: true, size: 2, align: 2 };
+    }
+    if strings_equal(text, "f16") || strings_equal(text, "bf16") {
+        return CTypeLayout { known: true, size: 2, align: 2 };
+    }
+    if strings_equal(text, "i32") || strings_equal(text, "u32") {
+        return CTypeLayout { known: true, size: 4, align: 4 };
+    }
+    if strings_equal(text, "f32") {
+        return CTypeLayout { known: true, size: 4, align: 4 };
+    }
+    if strings_equal(text, "i64") || strings_equal(text, "u64") {
+        return CTypeLayout { known: true, size: 8, align: 8 };
+    }
+    if strings_equal(text, "isize") || strings_equal(text, "usize") {
+        return CTypeLayout { known: true, size: 8, align: 8 };
+    }
+    if strings_equal(text, "f64") {
+        return CTypeLayout { known: true, size: 8, align: 8 };
+    }
+    return CTypeLayout { known: false, size: 0, align: 0 };
+}
+
+// Find a top-level struct declaration by name.
+fn _find_struct(declarations: Statement[], name: string) -> Statement? {
+    let mut index: int = 0;
+    loop {
+        if index >= declarations.length { break; }
+        let statement = declarations[index];
+        if strings_equal(statement.variant, "StructDeclaration") {
+            if strings_equal(statement.name, name) { return statement; }
+        }
+        index += 1;
+    }
+    return null;
+}
+
+// Resolve a field's type annotation to its C layout. `visiting` is the
+// cycle guard for `@repr(C)` structs nested by value: a struct that contains
+// itself by value has no finite layout, and is reported as unrepresentable
+// rather than recursed into forever.
+fn _field_layout(text: string, declarations: Statement[], visiting: string[]) -> CTypeLayout {
+    let annotation = trim_text(text);
+    let scalar = _scalar_layout(annotation);
+    if scalar.known { return scalar; }
+
+    // A nested `@repr(C)` struct by value is admissible; anything else that
+    // resolves to a declared name is not. Arrays, optionals, closures,
+    // generics, `string`, `bool` and enums all fall through to `known:
+    // false` and become E0847 at the call site.
+    let nested = _find_struct(declarations, annotation);
+    if nested == null {
+        return CTypeLayout { known: false, size: 0, align: 0 };
+    }
+    if nested.type_parameters.length > 0 {
+        return CTypeLayout { known: false, size: 0, align: 0 };
+    }
+    let nested_spec = repr_c_spec(nested.decorators);
+    if !nested_spec.present {
+        return CTypeLayout { known: false, size: 0, align: 0 };
+    }
+
+    let mut guard: int = 0;
+    loop {
+        if guard >= visiting.length { break; }
+        if strings_equal(visiting[guard], annotation) {
+            return CTypeLayout { known: false, size: 0, align: 0 };
+        }
+        guard += 1;
+    }
+
+    let mut next_visiting: string[] = [];
+    let mut copy_index: int = 0;
+    loop {
+        if copy_index >= visiting.length { break; }
+        next_visiting.push(visiting[copy_index]);
+        copy_index += 1;
+    }
+    next_visiting.push(annotation);
+
+    let nested_layout = _layout_fields(nested.fields, nested_spec.packed, declarations, next_visiting);
+    if !nested_layout.ok {
+        return CTypeLayout { known: false, size: 0, align: 0 };
+    }
+    return CTypeLayout {
+        known: true,
+        size: nested_layout.size,
+        align: nested_layout.align
+    };
+}
+
+// Place `fields` in declaration order. Unpacked: each field starts at the
+// next multiple of its alignment, the struct's alignment is the maximum
+// field alignment, and its size is rounded up to that alignment (tail
+// padding). Packed: every field alignment is forced to 1 and no padding is
+// inserted anywhere, which is what `__attribute__((packed))` means.
+fn _layout_fields(fields: FieldDeclaration[], packed: boolean, declarations: Statement[], visiting: string[]) -> CLayout {
+    let mut placed: CFieldLayout[] = [];
+    let mut offset: int = 0;
+    let mut max_align: int = 1;
+    let mut index: int = 0;
+    loop {
+        if index >= fields.length { break; }
+        let field = fields[index];
+        let annotation = trim_text(field.type_annotation.text);
+        let resolved = _field_layout(annotation, declarations, visiting);
+        if !resolved.known {
+            return CLayout {
+                ok: false,
+                size: 0,
+                align: 1,
+                fields: []
+            };
+        }
+        let mut field_align = resolved.align;
+        if packed { field_align = 1; }
+        if field_align > max_align { max_align = field_align; }
+        offset = _align_to(offset, field_align);
+        placed.push(CFieldLayout {
+            name: field.name, type_annotation: annotation, offset: offset, size: resolved.size, align: field_align
+        });
+        offset += resolved.size;
+        index += 1;
+    }
+    let mut struct_align = max_align;
+    if packed { struct_align = 1; }
+    return CLayout {
+        ok: true,
+        size: _align_to(offset, struct_align),
+        align: struct_align,
+        fields: placed
+    };
+}
+
+// The engine's public entry point. `sfn/codegen` calls this to emit
+// `.layout` records for a `@repr(C)` struct.
+fn compute_c_layout(fields: FieldDeclaration[], packed: boolean, declarations: Statement[]) -> CLayout {
+    return _layout_fields(fields, packed, declarations, []);
+}
+
+// ── Diagnostics ──────────────────────────────────────────────────────
+fn _repr_diagnostic(code: string, message: string, name: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: code,
+        severity: "error",
+        message: message,
+        file_path: "",
+        primary: token_from_name(name, span),
+        suggestion: null
+    };
+}
+
+// Render the computed placement for the E0848 message, so a header
+// transcription error shows which field moved rather than only that the
+// total is wrong.
+fn _describe_layout(layout: CLayout) -> string {
+    let mut text: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= layout.fields.length { break; }
+        let field = layout.fields[index];
+        if index > 0 { text = text + ", "; }
+        text = text + field.name + ": " + field.type_annotation + " @ offset "
+            + typecheck_int_to_string(field.offset)
+            + " (size "
+            + typecheck_int_to_string(field.size)
+            + ", align "
+            + typecheck_int_to_string(field.align)
+            + ")";
+        index += 1;
+    }
+    if text.length == 0 { return "<no fields>"; }
+    return text;
+}
+
+// E0846 — the decorator itself is malformed or applied where it cannot hold.
+fn _check_arguments(decorators: Decorator[], name: string, span: SourceSpan?) -> Diagnostic[] {
+    let mut diagnostics: Diagnostic[] = [];
+    let mut saw_c: boolean = false;
+    let mut index: int = 0;
+    loop {
+        if index >= decorators.length { break; }
+        let decorator = decorators[index];
+        if !strings_equal(decorator.name, "repr") {
+            index += 1;
+            continue;
+        }
+        let mut argument_index: int = 0;
+        loop {
+            if argument_index >= decorator.arguments.length { break; }
+            let argument = decorator.arguments[argument_index];
+            let key = _argument_key(argument.name, argument.expression);
+            if strings_equal(key, "size") || strings_equal(key, "align") {
+                let value_expression = _argument_value(argument.name, argument.expression);
+                let mut valid: boolean = false;
+                let mut value: int = 0;
+                if value_expression != null {
+                    if strings_equal(value_expression.variant, "NumberLiteral") {
+                        let parsed = _parse_decimal(value_expression.value);
+                        valid = parsed.valid;
+                        value = parsed.value;
+                    }
+                }
+                if !valid {
+                    diagnostics.push(_repr_diagnostic("E0846", "`@repr(C)` argument `"
+                        + key
+                        + "` on struct `"
+                        + name
+                        + "` must be a non-negative integer literal, as in `@repr(C, "
+                        + key
+                        + " = 24)`.", name, span));
+                } else if strings_equal(key, "align") {
+                    if !_is_power_of_two(value) {
+                        diagnostics.push(_repr_diagnostic("E0846", "`@repr(C, align = "
+                            + typecheck_int_to_string(value)
+                            + ")` on struct `"
+                            + name
+                            + "` must assert a power-of-two alignment.", name, span));
+                    }
+                }
+            } else if strings_equal(argument.expression.variant, "Identifier") {
+                let argument_text = argument.expression.name;
+                if strings_equal(argument_text, "C") { saw_c = true; } else if !strings_equal(argument_text, "packed") {
+                    diagnostics.push(_repr_diagnostic("E0846", "unknown `@repr` argument `"
+                        + argument_text
+                        + "` on struct `"
+                        + name
+                        + "`; the supported arguments are `C`, `packed`, `size = N` and `align = N`.", name, span));
+                }
+            } else {
+                diagnostics.push(_repr_diagnostic("E0846", "malformed `@repr` argument on struct `"
+                    + name
+                    + "`; the supported arguments are `C`, `packed`, `size = N` and `align = N`.", name, span));
+            }
+            argument_index += 1;
+        }
+        index += 1;
+    }
+    if !saw_c {
+        diagnostics.push(_repr_diagnostic("E0846", "`@repr` on struct `" + name
+            + "` must name a representation; `@repr(C)` is the only one Sailfin defines.", name, span));
+    }
+    return diagnostics;
+}
+
+// Validate a `@repr(C)` struct declaration. Returns no diagnostics for a
+// struct that carries no `@repr` decorator at all.
+//
+// `declarations` is the top-level statement list, used to resolve a nested
+// `@repr(C)` struct field by value.
+fn check_repr_c(statement: Statement, declarations: Statement[]) -> Diagnostic[] {
+    let spec = repr_c_spec(statement.decorators);
+    if !spec.present { return []; }
+
+    let name = statement.name;
+    let span = statement.name_span;
+    let mut diagnostics = _check_arguments(statement.decorators, name, span);
+
+    // A generic struct has no single layout, so the contract cannot hold.
+    if statement.type_parameters.length > 0 {
+        diagnostics.push(_repr_diagnostic("E0846", "`@repr(C)` cannot apply to generic struct `"
+            + name
+            + "`; a type parameter has no single C layout.", name, span));
+        return diagnostics;
+    }
+
+    // E0847 — per field, so every offending field is reported in one pass
+    // rather than only the first.
+    let mut index: int = 0;
+    loop {
+        if index >= statement.fields.length { break; }
+        let field = statement.fields[index];
+        let annotation = trim_text(field.type_annotation.text);
+        let resolved = _field_layout(annotation, declarations, [name]);
+        if !resolved.known {
+            diagnostics.push(_repr_diagnostic("E0847", "field `" + field.name
+                + "` of `@repr(C)` struct `"
+                + name
+                + "` has type `"
+                + annotation
+                + "`, which has no C representation. Admissible field types are the sized "
+                + "integers and floats, raw pointers, and another `@repr(C)` struct by value. "
+                + "Use `u8` in place of `bool`, and `*u8` in place of `string` or an array.", field.name, field.name_span));
+        }
+        index += 1;
+    }
+
+    // E0848 — the assertions, checked against the computed layout. Skipped
+    // when a field was rejected above: the layout would be a guess.
+    let layout = compute_c_layout(statement.fields, spec.packed, declarations);
+    if !layout.ok { return diagnostics; }
+
+    if spec.has_size {
+        if spec.size != layout.size {
+            diagnostics.push(_repr_diagnostic("E0848", "`@repr(C)` struct `"
+                + name
+                + "` is "
+                + typecheck_int_to_string(layout.size)
+                + " bytes, not the asserted "
+                + typecheck_int_to_string(spec.size)
+                + ". Computed layout: "
+                + _describe_layout(layout)
+                + ".", name, span));
+        }
+    }
+    if spec.has_align {
+        if spec.align != layout.align {
+            diagnostics.push(_repr_diagnostic("E0848", "`@repr(C)` struct `"
+                + name
+                + "` has alignment "
+                + typecheck_int_to_string(layout.align)
+                + ", not the asserted "
+                + typecheck_int_to_string(spec.align)
+                + ". Computed layout: "
+                + _describe_layout(layout)
+                + ".", name, span));
+        }
+    }
+
+    return diagnostics;
+}
+
+// E0846 for `@repr` on a declaration that is not a struct. Enum variants
+// carry payloads whose layout the C engine does not model, so the contract
+// is rejected outright rather than partially honoured.
+fn check_repr_c_not_a_struct(decorators: Decorator[], name: string, span: SourceSpan?, kind: string) -> Diagnostic[] {
+    let spec = repr_c_spec(decorators);
+    if !spec.present { return []; }
+    return [_repr_diagnostic("E0846", "`@repr(C)` cannot apply to " + kind
+        + " `"
+        + name
+        + "`; the layout contract is defined for structs only.", name, span)];
+}

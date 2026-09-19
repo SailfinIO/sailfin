@@ -648,7 +648,7 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
             }
         }
         if _if242 {
-            struct_layout = make_native_struct_layout(layout_size, layout_align, layout_fields);
+            struct_layout = make_native_struct_layout(layout_size, layout_align, layout_fields, false);
             structs = structs.push(make_native_struct(struct_name, struct_fields, struct_methods, struct_layout));
             in_struct = false;
             index += 1;
@@ -722,7 +722,7 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
         if _if260 { _if243 = true; }
     }
     if _if243 {
-        struct_layout = make_native_struct_layout(layout_size, layout_align, layout_fields);
+        struct_layout = make_native_struct_layout(layout_size, layout_align, layout_fields, false);
         structs = structs.push(make_native_struct(struct_name, struct_fields, struct_methods, struct_layout));
     }
     if in_struct {

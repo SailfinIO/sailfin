@@ -147,6 +147,7 @@ struct NativeStructLayoutField {
 struct NativeStructLayout {
     size: int;
     align: int;
+    packed: boolean;
     fields: NativeStructLayoutField[];
 }
 
@@ -312,6 +313,7 @@ struct StructLayoutHeaderParse {
     name: string;
     size: int;
     align: int;
+    packed: boolean;
 }
 
 struct StructLayoutFieldParse {

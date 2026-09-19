@@ -81,7 +81,8 @@ fn parse_struct_layout_header(text: string) -> StructLayoutHeaderParse {
             success: false,
             name: "",
             size: 0,
-            align: 0
+            align: 0,
+            packed: false
         };
     }
     let mut name_found: boolean = false;
@@ -90,6 +91,7 @@ fn parse_struct_layout_header(text: string) -> StructLayoutHeaderParse {
     let mut name_value: string = "";
     let mut size_value: int = 0;
     let mut align_value: int = 0;
+    let mut packed_value: boolean = false;
     let mut invalid: boolean = false;
     let mut index: int = 0;
     loop {
@@ -112,6 +114,11 @@ fn parse_struct_layout_header(text: string) -> StructLayoutHeaderParse {
                 align_found = true;
                 align_value = parsed.value;
             } else { invalid = true; }
+        } else if starts_with(token, "packed=") {
+            let value_text = substring(token, 7, token.length);
+            if value_text == "1" { packed_value = true; } else if value_text == "0" {
+                packed_value = false;
+            } else { invalid = true; }
         } else { invalid = true; }
         index += 1;
     }
@@ -126,7 +133,8 @@ fn parse_struct_layout_header(text: string) -> StructLayoutHeaderParse {
         success: success,
         name: name_value,
         size: size_value,
-        align: align_value
+        align: align_value,
+        packed: packed_value
     };
 }
 

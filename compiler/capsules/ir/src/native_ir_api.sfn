@@ -292,6 +292,7 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
                     layout: NativeStructLayout {
                         size: header_result.size,
                         align: header_result.align,
+                        packed: header_result.packed,
                         fields: fields
                     }
                 };

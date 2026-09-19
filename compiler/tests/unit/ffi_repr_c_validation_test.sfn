@@ -1,0 +1,271 @@
+// Unit tests for the `@repr(C)` layout contract — E0846, E0847, E0848.
+//
+// SFN-1289; design SFEP-0079 §3.1 (`docs/proposals/0079-systems-c-interop.md`).
+//
+// Each test parses a small `.sfn` source through `parse_program` and runs
+// `typecheck_diagnostics` end-to-end, asserting on `Diagnostic.code`. That
+// exercises the real registration path in
+// `compiler/capsules/analyzer/src/typecheck/statement_checks.sfn` as well as
+// the validator itself, so a validator that is written but never called still
+// fails these tests.
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
+import { parse_program } from "sfn/syntax";
+
+fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _count_code(diagnostics: Diagnostic[], code: string) -> int {
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+fn _message_for(diagnostics: Diagnostic[], code: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { return diagnostics[i].message; }
+        i += 1;
+    }
+    return "";
+}
+
+// The canonical `struct input_event` mirror from `linux/input.h`: 24 bytes on
+// LP64, with `kind`/`code` packed into the 16..20 window and `value` at 20.
+fn _input_event_source(decorator: string) -> string {
+    return decorator + "\nstruct InputEvent {\n    sec: i64;\n    usec: i64;\n"
+        + "    kind: u16;\n    code: u16;\n    value: i32;\n}\n";
+}
+
+// ── Accept path ──────────────────────────────────────────────────────
+// A correct contract is silent. These guard against a validator that
+// over-fires, which would break every existing struct in the tree.
+
+test "repr(C): accepts a valid struct with no assertions" ![io] {
+    let program = parse_program(_input_event_source("@repr(C)"));
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+test "repr(C): accepts a correct size assertion" ![io] {
+    let program = parse_program(_input_event_source("@repr(C, size = 24)"));
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+test "repr(C): accepts correct size and align assertions together" ![io] {
+    let program = parse_program(_input_event_source("@repr(C, size = 24, align = 8)"));
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+test "repr(C): accepts every admissible scalar width" ![io] {
+    let source = "@repr(C)\nstruct Scalars {\n    a: i8;\n    b: u8;\n    c: i16;\n"
+        + "    d: u16;\n    e: i32;\n    f: u32;\n    g: i64;\n    h: u64;\n"
+        + "    i: isize;\n    j: usize;\n    k: f32;\n    l: f64;\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+test "repr(C): accepts raw pointer fields" ![io] {
+    let source = "@repr(C)\nstruct Buffers {\n    data: *u8;\n    read_only: *const u8;\n"
+        + "    handle: *File;\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+test "repr(C): accepts a nested repr(C) struct by value" ![io] {
+    let source = "@repr(C)\nstruct Inner {\n    a: u32;\n    b: u32;\n}\n"
+        + "@repr(C, size = 16, align = 8)\nstruct Outer {\n    head: Inner;\n    tail: u64;\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+test "repr(C): accepts a packed struct with its packed size" ![io] {
+    // Packed removes the 4 bytes of padding an unpacked {u32, u64} would
+    // carry before `data`, so the struct is 12 bytes at alignment 1.
+    let source = "@repr(C, packed, size = 12, align = 1)\nstruct EpollEvent {\n"
+        + "    events: u32;\n    data: u64;\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+test "repr(C): methods are allowed — the contract constrains data only" ![io] {
+    let source = "@repr(C)\nstruct Point {\n    x: i32;\n    y: i32;\n"
+        + "    fn sum(self) -> i32 { return self.x + self.y; }\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+test "repr(C): an undecorated struct is untouched by the validator" ![io] {
+    // The legacy layout path must stay silent: a plain struct may hold
+    // strings, arrays and bools that `@repr(C)` would reject.
+    let source = "struct Plain {\n    name: string;\n    flags: bool;\n    items: i32[];\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert !_has_code(diagnostics, "E0846");
+    assert !_has_code(diagnostics, "E0847");
+    assert !_has_code(diagnostics, "E0848");
+}
+
+// ── E0846: decorator misuse ──────────────────────────────────────────
+
+test "repr(C): E0846 for a lowercase repr(c)" ![io] {
+    let program = parse_program(_input_event_source("@repr(c)"));
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0846");
+}
+
+test "repr(C): E0846 for an unknown argument" ![io] {
+    let program = parse_program(_input_event_source("@repr(C, pack)"));
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0846");
+}
+
+test "repr(C): E0846 on an enum" ![io] {
+    let source = "@repr(C)\nenum Color {\n    Red,\n    Green,\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0846");
+}
+
+test "repr(C): E0846 on a generic struct" ![io] {
+    let source = "@repr(C)\nstruct Holder<T> {\n    value: i64;\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0846");
+}
+
+test "repr(C): E0846 for a non-power-of-two align assertion" ![io] {
+    let program = parse_program(_input_event_source("@repr(C, align = 3)"));
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0846");
+}
+
+// ── E0847: inadmissible field types ──────────────────────────────────
+
+test "repr(C): E0847 for a string field" ![io] {
+    let source = "@repr(C)\nstruct Bad {\n    name: string;\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0847");
+}
+
+test "repr(C): E0847 for an array field" ![io] {
+    let source = "@repr(C)\nstruct Bad {\n    items: i32[];\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0847");
+}
+
+test "repr(C): E0847 for an optional field" ![io] {
+    let source = "@repr(C)\nstruct Bad {\n    maybe: i32?;\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0847");
+}
+
+test "repr(C): E0847 for a bool field — C _Bool is a byte, use u8" ![io] {
+    let source = "@repr(C)\nstruct Bad {\n    flag: bool;\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0847");
+}
+
+test "repr(C): E0847 for a boolean field" ![io] {
+    let source = "@repr(C)\nstruct Bad {\n    flag: boolean;\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0847");
+}
+
+test "repr(C): E0847 for an enum-typed field" ![io] {
+    let source = "enum Color {\n    Red,\n    Green,\n}\n"
+        + "@repr(C)\nstruct Bad {\n    tint: Color;\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0847");
+}
+
+test "repr(C): E0847 for a non-repr(C) struct field by value" ![io] {
+    let source = "struct Plain {\n    a: i32;\n}\n"
+        + "@repr(C)\nstruct Bad {\n    inner: Plain;\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0847");
+}
+
+test "repr(C): E0847 reports every offending field, not just the first" ![io] {
+    let source = "@repr(C)\nstruct Bad {\n    name: string;\n    flag: bool;\n"
+        + "    items: i32[];\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _count_code(diagnostics, "E0847") == 3;
+}
+
+// ── E0848: assertion mismatch ────────────────────────────────────────
+
+test "repr(C): E0848 for a size assertion that disagrees with the layout" ![io] {
+    // `InputEvent` is 24 bytes; asserting 20 is the header-transcription
+    // error the contract exists to catch.
+    let program = parse_program(_input_event_source("@repr(C, size = 20)"));
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0848");
+}
+
+test "repr(C): the E0848 message carries the computed per-field offsets" ![io] {
+    let program = parse_program(_input_event_source("@repr(C, size = 20)"));
+    let diagnostics = typecheck_diagnostics(program);
+    let message = _message_for(diagnostics, "E0848");
+    // The narrow fields are the ones a reader needs: `kind` and `code` sit
+    // inside the 16..20 window and `value` lands at 20, which is exactly
+    // what the legacy 8-byte fallback used to get wrong.
+    assert contains(message, "sec: i64 @ offset 0");
+    assert contains(message, "kind: u16 @ offset 16");
+    assert contains(message, "code: u16 @ offset 18");
+    assert contains(message, "value: i32 @ offset 20");
+}
+
+test "repr(C): E0848 for an align assertion that disagrees with the layout" ![io] {
+    let program = parse_program(_input_event_source("@repr(C, align = 4)"));
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0848");
+}
+
+test "repr(C): E0848 fires when packed changes the size out from under an assertion" ![io] {
+    // Unpacked this is 16 bytes; packed it is 12. Asserting the unpacked
+    // size on a packed struct must fail.
+    let source = "@repr(C, packed, size = 16)\nstruct EpollEvent {\n"
+        + "    events: u32;\n    data: u64;\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0848");
+}
+
+test "repr(C): no E0848 when a field was already rejected" ![io] {
+    // The layout would be a guess, so the assertion is not second-guessed
+    // on top of the E0847 the field already earned.
+    let source = "@repr(C, size = 8)\nstruct Bad {\n    name: string;\n}\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0847");
+    assert !_has_code(diagnostics, "E0848");
+}
