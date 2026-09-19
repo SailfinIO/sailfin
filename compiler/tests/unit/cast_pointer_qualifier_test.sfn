@@ -1,0 +1,56 @@
+// SFN-1290 / SFEP-0079 §3.2 — `read_cast_target` (Step 1b,
+// `compiler/capsules/syntax/src/parser/expressions/type_targets.sfn`) must
+// consume an optional `const`/`mut` qualifier immediately after a pointer
+// prefix (`*const T`, `*mut T`) and retain it in `target_type.text`, while
+// leaving a plain `*T` cast and a qualifier-shaped IDENTIFIER target (`mut`
+// with no preceding `*`) exactly as before. Pre-fix, `*const i32` fell
+// through to Step 2b, which consumed `const` as the pointee name, left the
+// real pointee (`i32`) dangling, broke the enclosing statement's parse, and
+// degraded the whole cast to `Expression.Raw` — which then failed closed at
+// E0818.
+//
+// Model: `compiler/tests/unit/effect_cast_operand_test.sfn`'s `_probe_expr`.
+import { Expression } from "sfn/syntax";
+import { parse_program } from "sfn/syntax";
+
+fn _probe_expr(snippet: string) -> Expression ![io] {
+    let program = parse_program("fn probe() { " + snippet + "; }");
+    assert program.statements.length >= 1;
+    let fn_stmt = program.statements[0];
+    assert fn_stmt.variant == "FunctionDeclaration";
+    assert fn_stmt.body.statements.length >= 1;
+    let stmt = fn_stmt.body.statements[0];
+    assert stmt.variant == "ExpressionStatement";
+    return stmt.expression;
+}
+
+// `_cast_target_append` joins consumed lexemes with single spaces and no
+// leading space, so `*` then `const` then `i32` joins to `"* const i32"`.
+test "cast: *const target structures into Cast with the qualifier retained" ![io] {
+    let expr = _probe_expr("p as *const i32");
+    assert expr.variant == "Cast";
+    assert expr.target_type.text == "* const i32";
+}
+
+test "cast: *mut target structures into Cast with the qualifier retained" ![io] {
+    let expr = _probe_expr("p as *mut i32");
+    assert expr.variant == "Cast";
+    assert expr.target_type.text == "* mut i32";
+}
+
+// Regression guard: Step 1b is gated on `saw_pointer_prefix`, so a plain
+// `*T` cast with no qualifier keyword must lower unchanged.
+test "cast: unqualified pointer target is unchanged" ![io] {
+    let expr = _probe_expr("p as *i32");
+    assert expr.variant == "Cast";
+    assert expr.target_type.text == "* i32";
+}
+
+// Step 1b only fires after an actual `*` prefix (`saw_pointer_prefix`); with
+// no leading `*`, `mut` is read by Step 2b as an ordinary named-type
+// identifier, so the target text is the bare keyword itself.
+test "cast: qualifier keyword is only special after a pointer prefix" ![io] {
+    let expr = _probe_expr("p as mut");
+    assert expr.variant == "Cast";
+    assert expr.target_type.text == "mut";
+}

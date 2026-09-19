@@ -14,6 +14,7 @@ import {
     ends_with_pointer_suffix,
     layout_annotation_represents_user_value,
     map_type_annotation,
+    strip_pointer_qualifier,
     strip_pointer_suffix
 } from "../../type_mapping";
 import { TypeContext } from "../../types";
@@ -398,9 +399,7 @@ fn _map_type_core(context: TypeContext, normalized: string) -> string {
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.
     if starts_with(normalized, "*") {
         let mut remainder = trim_text(substring(normalized, 1, normalized.length));
-        if starts_with(remainder, "mut") {
-            remainder = trim_text(substring(remainder, 3, remainder.length));
-        }
+        remainder = strip_pointer_qualifier(remainder);
         let mut _if_raw: boolean = false;
         if remainder == "opaque" { _if_raw = true; }
         if remainder.length == 0 { _if_raw = true; }
