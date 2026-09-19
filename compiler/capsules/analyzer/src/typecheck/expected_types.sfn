@@ -1,0 +1,61 @@
+// compiler/capsules/analyzer/src/typecheck/expected_types.sfn
+//
+// Expected-type derivation for the three syntactic positions that feed a
+// declared type back into the expression walk: a call argument, an
+// assignment target, and an array element. Split out of `expression_walk.sfn`
+// by SFN-1291 to keep that module under the line budget enforced by
+// `typecheck_line_budget_test.sfn`.
+import { parse_fn_type_text } from "sfn/ir";
+import { ends_with, substring } from "sfn/strings";
+import { Expression, TypeAnnotation } from "sfn/syntax";
+
+import { find_value_symbol, is_function_kind } from "../typecheck_types/symbol_table_and_raw_exprs";
+import { trim_text } from "../typecheck_types/text_utils";
+import { TypeckCtx } from "./context";
+
+fn _call_argument_expected_type(expression: Expression, index: int, ctx: TypeckCtx) -> TypeAnnotation? {
+    if expression.callee == null { return null; }
+    if expression.callee.variant != "Identifier" { return null; }
+    let mut entry = find_value_symbol(ctx.bindings, expression.callee.name);
+    if entry == null {
+        entry = find_value_symbol(ctx.top_level, expression.callee.name);
+    }
+    if entry == null { return null; }
+    if is_function_kind(entry.kind) {
+        if index >= entry.function_parameter_types.length { return null; }
+        return TypeAnnotation {
+            text: entry.function_parameter_types[index]
+        };
+    }
+    if entry.declared_type.length == 0 { return null; }
+    let fn_type = parse_fn_type_text(entry.declared_type);
+    if !fn_type.ok { return null; }
+    if index >= fn_type.param_types.length { return null; }
+    return TypeAnnotation { text: fn_type.param_types[index] };
+}
+
+fn _assignment_expected_type(target: Expression, ctx: TypeckCtx) -> TypeAnnotation? {
+    if target.variant != "Identifier" { return null; }
+    let mut entry = find_value_symbol(ctx.bindings, target.name);
+    if entry == null {
+        entry = find_value_symbol(ctx.top_level, target.name);
+    }
+    if entry == null { return null; }
+    if entry.declared_type.length == 0 { return null; }
+    return TypeAnnotation { text: entry.declared_type };
+}
+
+fn _array_element_expected_type(expected: TypeAnnotation?) -> TypeAnnotation? {
+    if expected == null { return null; }
+    let text = trim_text(expected.text);
+    if !ends_with(text, "[]") { return null; }
+    let mut element = trim_text(substring(text, 0, text.length - 2));
+    if element.length >= 2 {
+        if substring(element, 0, 1) == "(" {
+            if substring(element, element.length - 1, element.length) == ")" {
+                element = trim_text(substring(element, 1, element.length - 1));
+            }
+        }
+    }
+    return TypeAnnotation { text: element };
+}

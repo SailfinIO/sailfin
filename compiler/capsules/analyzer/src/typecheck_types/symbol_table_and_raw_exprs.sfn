@@ -57,6 +57,12 @@ struct SymbolEntry {
     function_return_type: string;
     function_effects: string[];
     function_is_async: boolean;
+    // For an `extern function` entry declared with a trailing `...`: the
+    // number of fixed parameters before the marker. -1 for every other
+    // entry, including a fixed-arity extern. A call-site check reads this
+    // to find which arguments sit in variadic position, where C's default
+    // argument promotions apply (E0851). SFN-1291.
+    variadic_fixed_arity: int;
     is_top_level_function: boolean;
     // SFN-108: set only for a statement-position (nested / local) `fn`
     // block-hoisted by `_hoist_nested_fn_names`. Such an entry carries the
@@ -117,7 +123,7 @@ fn register_symbol(name: string, kind: string, span: SourceSpan?, existing: Symb
 fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: SourceSpan?, is_generic: boolean = false, is_c_abi: boolean = false, element_kind: string = "", declared_prim: string = "", declared_struct: string = "", declared_type: string = "") -> SymbolEntry[] {
     let mut updated: SymbolEntry[] = clone_bindings(symbols);
     updated.push(SymbolEntry {
-        name: name, kind: kind, span: span, is_generic: is_generic, is_c_abi: is_c_abi, element_kind: element_kind, declared_prim: declared_prim, declared_struct: declared_struct, declared_type: declared_type, function_parameter_types: [], function_return_type: "", function_effects: [], function_is_async: false, is_top_level_function: false, is_nested_function: false
+        name: name, kind: kind, span: span, is_generic: is_generic, is_c_abi: is_c_abi, element_kind: element_kind, declared_prim: declared_prim, declared_struct: declared_struct, declared_type: declared_type, function_parameter_types: [], function_return_type: "", function_effects: [], function_is_async: false, variadic_fixed_arity: -1, is_top_level_function: false, is_nested_function: false
     });
     return updated;
 }
@@ -126,7 +132,7 @@ fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: Sourc
 // created by the ordinary duplicate-aware registrars. Keeping this metadata on
 // the semantic symbol lets every expression walk resolve local calls without a
 // second AST scan. Unknown/compound types are recorded as "" and never reject.
-fn register_local_function_symbol(bindings: SymbolEntry[], signature: FunctionSignature, kind: string, scope_start: int) -> ScopeResult {
+fn register_local_function_symbol(bindings: SymbolEntry[], signature: FunctionSignature, kind: string, scope_start: int, variadic_fixed_arity: int = -1) -> ScopeResult {
     let registration = register_local_symbol(bindings, signature.name, kind, signature.name_span, scope_start, signature_is_generic(signature), signature_is_c_abi(signature));
     if registration.diagnostics.length > 0 { return registration; }
     let mut updated = registration.bindings;
@@ -136,13 +142,14 @@ fn register_local_function_symbol(bindings: SymbolEntry[], signature: FunctionSi
     updated[index].function_return_type = _function_return_type(signature);
     updated[index].function_effects = signature.effects;
     updated[index].function_is_async = signature.is_async;
+    updated[index].variadic_fixed_arity = variadic_fixed_arity;
     return ScopeResult {
         bindings: updated,
         diagnostics: registration.diagnostics
     };
 }
 
-fn register_function_symbol(signature: FunctionSignature, kind: string, existing: SymbolEntry[]) -> SymbolCollectionResult {
+fn register_function_symbol(signature: FunctionSignature, kind: string, existing: SymbolEntry[], variadic_fixed_arity: int = -1) -> SymbolCollectionResult {
     let registration = register_symbol(signature.name, kind, signature.name_span, existing, signature_is_generic(signature), signature_is_c_abi(signature));
     if registration.diagnostics.length > 0 { return registration; }
     let mut updated = registration.symbols;
@@ -152,6 +159,7 @@ fn register_function_symbol(signature: FunctionSignature, kind: string, existing
     updated[index].function_return_type = _function_return_type(signature);
     updated[index].function_effects = signature.effects;
     updated[index].function_is_async = signature.is_async;
+    updated[index].variadic_fixed_arity = variadic_fixed_arity;
     updated[index].is_top_level_function = true;
     return SymbolCollectionResult {
         symbols: updated,

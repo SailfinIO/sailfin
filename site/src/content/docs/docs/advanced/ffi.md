@@ -38,9 +38,10 @@ spelling of the boolean is **`bool`**, not `boolean`.
 and function addresses via `name as *u8` (guarded by `E0808`/`E0809`) all ship.
 `unsafe { }` is meaningful to the ownership checker — it carries the `E0906`
 extern boundary and suppresses ownership analysis of its interior — and to
-nothing else. Layout guarantees, pointer mutability enforcement, variadic externs,
-typed callback parameters, and effect-attested externs are designed in
-SFEP-0079 and are not shipped.
+nothing else. A trailing `...` marks an extern as C-variadic (`E0851`) and
+also ships. Layout guarantees, pointer mutability enforcement, typed callback
+parameters, and effect-attested externs are designed in SFEP-0079 and are not
+shipped.
 
 ## Overview
 
@@ -155,6 +156,42 @@ Sailfin `string` needs an explicit conversion. A string *literal* is
 NUL-terminated, so `literal as *u8` may be passed to a C `const char*`
 directly; anything else must be copied into a NUL-terminated buffer first,
 because slices are not NUL-terminated.
+
+### Variadic externs
+
+A trailing `...` marks an extern as C-variadic. It must be the declaration's
+last parameter, and there must be at least one fixed parameter before it —
+`...` alone is not valid, because C resolves a variadic call against the
+fixed prototype:
+
+```sfn
+extern fn ioctl(fd: i32, request: u64, ...) -> i32;
+
+fn set_flag(fd: i32, request: u64, value: i32) -> i32 {
+    return ioctl(fd, request, value);
+}
+```
+
+Misplacing `...` is `E0851`.
+
+**Cast narrow arguments explicitly.** C default-promotes every variadic
+argument — `i8`/`i16`/`u8`/`u16`/`bool` widen to `int`, `f32` widens to
+`f64` — and Sailfin never promotes implicitly. Passing an unpromoted value in
+variadic position is `E0851` too, but only when the compiler can see the
+argument's type stated outright (an `as` cast, or an identifier with an
+explicit type annotation):
+
+```sfn
+let x: u16 = 1;
+sum_va(1, x);          // E0851 — cast it
+sum_va(1, x as i32);   // fine
+sum_va(1, 10, 20);     // fine — untyped literals pass silently either way
+```
+
+That last case is the check's known gap: an integer literal, the result of a
+call, or any argument whose type the checker cannot see passes without
+comment, promoted or not. State the type at the call site if you want the
+check to catch a mistake there.
 
 ## `unsafe` Blocks
 
@@ -525,6 +562,7 @@ neither exists.
 | Concept | Quick reference |
 |---|---|
 | Declare a C function | `extern fn name(param: Type) -> ReturnType;` |
+| Declare a variadic C function | `extern fn name(param: Type, ...) -> ReturnType;` — `...` last, ≥1 fixed parameter (`E0851`) |
 | `unsafe` keyword on an extern | Accepted, inert — same meaning as plain `extern fn` |
 | `unsafe` block | Suppresses ownership analysis of its interior; carries the `E0906` extern boundary. Not required for any pointer operation |
 | `unsafe fn` | Skips ownership analysis of the **whole body** — a `Linear<T>` obligation is not enforced |

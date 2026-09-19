@@ -53,6 +53,7 @@ fn _fn(name: string, return_type: string, parameters: NativeParameter[]) -> Nati
         effects: [],
         decorators: [],
         is_extern: true,
+        is_variadic: false,
         instructions: []
     };
 }

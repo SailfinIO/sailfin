@@ -206,7 +206,8 @@ fn flatten_struct_methods(structs: NativeStruct[]) -> NativeFunction[] {
                 effects: method.effects,
                 decorators: method.decorators,
                 instructions: method.instructions,
-                is_extern: false
+                is_extern: false,
+                is_variadic: method.is_variadic
             };
             result = append_native_function(result, qualified);
             method_index += 1;

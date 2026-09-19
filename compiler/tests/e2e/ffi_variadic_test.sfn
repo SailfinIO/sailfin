@@ -1,0 +1,384 @@
+// compiler/tests/e2e/ffi_variadic_test.sfn
+//
+// End-to-end coverage for variadic `extern fn` (SFN-1291, SFEP-0079 3.3).
+//
+// `extern fn f(a: i32, ...) -> i32;` now parses, typechecks (E0851 guards
+// placement and C-promotion at the call site — see
+// `compiler/tests/unit/ffi_variadic_extern_test.sfn`), and LLVM lowering
+// emits `declare i32 @f(i32, ...)` plus the explicit-function-type call
+// form `call i32 (i32, ...) @f(...)`. This file pins the two halves that
+// unit coverage cannot reach:
+//
+//   1. IR shape — unconditional, no C compiler required. The declare's
+//      `...` tail and the call site's explicit-function-type form are
+//      asserted directly on `sfn emit llvm` output, so a regression to a
+//      fixed-arity declare/call fails even on a host with no C toolchain.
+//   2. Linked round trip — a C harness defines `sum_va(int n, ...)` (a
+//      fixed va_arg sequence: int, long long, double, int*) and calls back
+//      into two Sailfin-defined probes that make mixed i32/i64/f64/pointer
+//      variadic calls to `sum_va` and to `snprintf`. This is the load-bearing
+//      proof for SFN-1291: Apple arm64 passes variadic arguments on the
+//      stack, so a fixed-arity declaration is miscompiled there, and only an
+//      actual linked call observably catches that. It must run on macOS
+//      arm64 as well as Linux — no host gate skips it; the only legitimate
+//      skip is "no C compiler resolves" (`require_external_c_oracle`, via
+//      `run_external_c_oracle`'s internal resolution).
+//
+// NOTE on matchers: IR-output text is inspected with `sfn/strings`
+// (`find` / `split` / `contains`) rather than a matcher, since there is no
+// `expect_contains_*` shape for "some line of this text satisfies a
+// predicate". Scalar assertions use the `sfn/test` matchers
+// (`expect_eq_*`) — they are `![pure]`, but a pure helper call adds no
+// effect requirement of its own, so it is callable from this `![io]` test
+// the same way it is from the `![io]` tests in `ffi_variadic_extern_test.sfn`.
+import {
+    char_at_index,
+    contains,
+    find,
+    split
+} from "sfn/strings";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    expect_eq_bool,
+    expect_eq_int,
+    nested_runner_scratch,
+    report_child_failure,
+    run_external_c_oracle,
+    sfn_bin_abs_path
+} from "sfn/test";
+
+fn _is_word_char(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    let word = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    return find(word, ch, 0) >= 0;
+}
+
+// The module-mangled symbol (no leading `@`) for a Sailfin-defined
+// function's `define` line — a defined top-level fn's emitted name carries
+// a module-specific suffix, unlike an extern's bare symbol. Empty if not
+// found. Mirrors `_spawn_join_symbol` in `fn_reference_pthread_test.sfn`,
+// parameterized by the bare name so it serves both probes here.
+fn _mangled_symbol(ir: string, bare_name: string) -> string {
+    let needle = "@" + bare_name;
+    let pos = find(ir, needle, 0);
+    if pos < 0 { return ""; }
+    let mut end = pos + 1;  // skip the '@'
+    loop {
+        if end >= ir.length { break; }
+        let ch = char_at_index(ir, end);
+        if !_is_word_char(ch) { break; }
+        end = end + 1;
+    }
+    let mut sym = "";
+    let mut k = pos + 1;
+    loop {
+        if k >= end { break; }
+        sym = sym + char_at_index(ir, k);
+        k = k + 1;
+    }
+    return sym;
+}
+
+// A `declare` line for `@sum_va(` whose parameter list carries a literal
+// `...` tail after the symbol name — the variadic declare shape SFN-1291
+// requires, as opposed to a fixed-arity `declare i32 @sum_va(i32, i32, ...)`
+// with no ellipsis at all.
+// Cross-module, the symbol is mangled to `@sum_va__<provider>`, so these
+// matchers locate `@sum_va` and then accept either the bare `(` or the
+// `__` mangling suffix. Keying on `@sum_va(` alone silently passed the
+// single-module tests while never matching the imported declare at all.
+// SFN-1291.
+fn _sum_va_symbol_pos(line: string) -> int {
+    let bare = find(line, "@sum_va(", 0);
+    if bare >= 0 { return bare; }
+    return find(line, "@sum_va__", 0);
+}
+
+fn _line_is_variadic_declare(line: string) -> boolean {
+    if !contains(line, "declare") { return false; }
+    let name_pos = _sum_va_symbol_pos(line);
+    if name_pos < 0 { return false; }
+    let ellipsis_pos = find(line, "...)", name_pos);
+    return ellipsis_pos > name_pos;
+}
+
+// A `call` line using the explicit function-type form
+// `call <ret> (<params>, ...) @sum_va(...)` — the `...` here sits in the
+// TYPE signature, before `@sum_va(`, which is exactly what distinguishes it
+// from a fixed-arity `call i32 @sum_va(i32 4, ...)` (no ellipsis anywhere on
+// that line, since call arguments are concrete values, not a literal `...`).
+fn _line_is_variadic_call(line: string) -> boolean {
+    if !contains(line, "call") { return false; }
+    let mut type_close = find(line, ") @sum_va(", 0);
+    if type_close < 0 { type_close = find(line, ") @sum_va__", 0); }
+    if type_close < 0 { return false; }
+    let ellipsis_pos = find(line, "...", 0);
+    if ellipsis_pos < 0 { return false; }
+    return ellipsis_pos < type_close;
+}
+
+fn _ir_has_variadic_declare(ir: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if _line_is_variadic_declare(lines[i]) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn _ir_has_variadic_call(ir: string) -> boolean {
+    let lines = split(ir, "\n");
+    let mut i = 0;
+    loop {
+        if i >= lines.length { break; }
+        if _line_is_variadic_call(lines[i]) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    dir = dir + "/sfn-ffi-variadic";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// The fixture declares two C variadic externs and two Sailfin-defined
+// probes. `sfn_variadic_sum_probe` makes a mixed i32/i64/f64/pointer
+// variadic call to `sum_va`, whose C definition (written by the round-trip
+// test below) reads a fixed va_arg sequence of int, long long, double,
+// int* — this call's argument types must match that sequence exactly, or
+// the mismatch is undefined behaviour on the C side rather than a
+// debuggable failure here. `sfn_variadic_snprintf_probe` makes the same
+// shape of variadic call to `snprintf`, taking the format string as a `*u8`
+// parameter (owned by the C harness, not a Sailfin string literal — see the
+// note on that probe below) and handing the formatted buffer back to the C
+// harness for a byte-exact comparison.
+fn _write_fixture(dir: string) -> void ![io] {
+    fs.writeFile(dir + "/probe.sfn", "extern fn malloc(size: usize) -> *u8;\n"
+        + "extern fn free(ptr: *u8) -> void;\n"
+        + "\n"
+        + "extern fn sum_va(n: i32, ...) -> i32;\n"
+        + "extern fn snprintf(buf: *u8, size: usize, fmt: *u8, ...) -> i32;\n"
+        + "\n"
+        + "fn sfn_variadic_sum_probe() -> i32 {\n"
+        + "    let out_slot: *u8 = malloc(4 as usize);\n"
+        + "    if out_slot as i64 == 0 { return 1; }\n"
+        + "    let out_ptr: *i32 = out_slot as *i32;\n"
+        + "\n"
+        + "    let a: i32 = 7;\n"
+        + "    let b: i64 = 1000000000;\n"
+        + "    let c: f64 = 2.5;\n"
+        + "    let total: i32 = sum_va(4, a, b, c, out_ptr);\n"
+        + "\n"
+        + "    let written: i32 = sailfin_intrinsic_pointer_read_i32(out_slot);\n"
+        + "    free(out_slot);\n"
+        + "\n"
+        + "    if written != total { return 2; }\n"
+        + "    if total != 1000000009 { return 3; }\n"
+        + "    return 0;\n"
+        + "}\n"
+        + "\n"
+        + "fn sfn_variadic_snprintf_probe(buf: *u8, buf_size: i32, fmt: *u8) -> i32 {\n"
+        + "    let a: i32 = 7;\n"
+        + "    let b: i64 = 1000000000;\n"
+        + "    let c: f64 = 2.5;\n"
+        + "    // `fmt` is a C literal the harness passes in, not a Sailfin string\n"
+        + "    // literal: a Sailfin `string` value lowers through `sfn_alloc_struct`,\n"
+        + "    // which the round-trip link (probe object + C harness only, no\n"
+        + "    // runtime objects) does not resolve. Keeping the format string on the\n"
+        + "    // C side avoids pulling in the runtime for a focused ABI test.\n"
+        + "    return snprintf(buf, buf_size as usize, fmt, a, b, c);\n"
+        + "}\n");
+}
+
+fn _emit_fixture(dir: string, label: string) -> string ![io] {
+    let sfn = sfn_bin_abs_path();
+    let ll = dir + "/probe.ll";
+    let child_env = clean_runner_env(nested_runner_scratch(label));
+    let exit = process.run_capture_cwd([sfn, "emit", "--module-name", "probe", "-o", ll, "llvm", "probe.sfn"], child_env, dir);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic emit", exit, out, err);
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    return fs.readFile(ll);
+}
+
+// Cross-module regression fixture (SFN-1291 review defect #1): a variadic
+// extern declared and exported in module `a` must keep its `...` tail when
+// module `b` imports it and calls it. Pre-fix,
+// `render_imported_function_declarations` dropped the tail on the imported
+// declare while the call site (produced from `b`'s own signature knowledge)
+// kept the variadic call form -- a fixed-arity declare beside a variadic
+// call, which clang rejects and which is the wrong calling convention on
+// Apple arm64 stack-passed variadics. `sfn/strings` needs a `sum_va`-only
+// scan since `_line_is_variadic_declare`/`_line_is_variadic_call` above key
+// on the same literal symbol, so this fixture reuses the name `sum_va`
+// rather than inventing a second symbol.
+fn _xmod_scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    dir = dir + "/sfn-ffi-variadic-xmod";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+// Module `a`: declares and inline-exports the variadic extern.
+// Module `b`: imports it and calls it with variadic arguments.
+fn _write_xmod_fixture(dir: string) -> void ![io] {
+    fs.writeFile(dir + "/a.sfn", "export extern fn sum_va(n: i32, ...) -> i32;\n");
+    fs.writeFile(dir + "/b.sfn", "import { sum_va } from \"./a\";\n" + "\n"
+        + "fn call_sum_va() -> i32 {\n"
+        + "    return sum_va(2, 1, 2);\n"
+        + "}\n");
+}
+
+// Stages `a`'s native ASM into the import-context tree at
+// `<dir>/build/compiler/import-context/a.sfn-asm`, then emits `b`'s LLVM IR
+// against that root -- the same manual staging `sfn emit` requires outside a
+// full capsule build (mirrors `cross_module_int_signature_ir_test.sfn`).
+// Returns `b`'s emitted IR text, or "" on any failure.
+fn _emit_xmod_importer_ll(dir: string, label: string) -> string ![io] {
+    let sfn = sfn_bin_abs_path();
+    let root = dir + "/build/compiler/import-context";
+    fs.createDirectory(root, true);
+    let asm = root + "/a.sfn-asm";
+    let asm_env = clean_runner_env(nested_runner_scratch(label + "-a"));
+    let asm_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "a", "-o", asm, "native", "a.sfn"], asm_env, dir);
+    let asm_out = process.capture_take_stdout();
+    let asm_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic xmod emit a", asm_exit, asm_out, asm_err);
+    if asm_exit != 0 { return ""; }
+    if !fs.exists(asm) { return ""; }
+
+    let ll = dir + "/b.ll";
+    let ll_env = clean_runner_env(nested_runner_scratch(label + "-b"));
+    let ll_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "b", "--import-context", root, "-o", ll, "llvm", "b.sfn"], ll_env, dir);
+    let ll_out = process.capture_take_stdout();
+    let ll_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic xmod emit b", ll_exit, ll_out, ll_err);
+    if ll_exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    return fs.readFile(ll);
+}
+
+test "ffi variadic: sum_va's extern declare carries the ... tail in emitted IR" ![io] {
+    let dir = _scratch_dir();
+    _write_fixture(dir);
+    let ir = _emit_fixture(dir, "ffi-variadic-emit-declare");
+    assert expect_eq_bool(ir.length > 0, true).ok;
+    assert expect_eq_bool(_ir_has_variadic_declare(ir), true).ok;
+}
+
+test "ffi variadic: the sum_va call site uses the explicit function-type form" ![io] {
+    let dir = _scratch_dir();
+    _write_fixture(dir);
+    let ir = _emit_fixture(dir, "ffi-variadic-emit-call");
+    assert expect_eq_bool(ir.length > 0, true).ok;
+    assert expect_eq_bool(_ir_has_variadic_call(ir), true).ok;
+}
+
+// Cross-module regression (SFN-1291 review defect #1): an imported variadic
+// extern's declare must carry the `...` tail in the IMPORTING module's IR,
+// matching the variadic call form the same module emits for it. This is the
+// only path that reaches `render_imported_function_declarations` -- a
+// single-module fixture only ever exercises `emit_llvm_function`'s own
+// extern branch, which was never the buggy one.
+test "ffi variadic: an imported variadic extern's declare carries the ... tail in the importing module's IR" ![io] {
+    let dir = _xmod_scratch_dir();
+    _write_xmod_fixture(dir);
+    let ir = _emit_xmod_importer_ll(dir, "ffi-variadic-xmod");
+    assert expect_eq_bool(ir.length > 0, true).ok;
+    assert expect_eq_bool(_ir_has_variadic_declare(ir), true).ok;
+    assert expect_eq_bool(_ir_has_variadic_call(ir), true).ok;
+}
+
+// Linked round trip (SFN-1291's whole point): a real C variadic is called
+// with mixed i32/i64/f64/pointer arguments, and the value C computes must
+// match what Sailfin expects. This must pass on macOS arm64 (stack-passed
+// variadic args) as well as Linux (register-passed) — no host gate here.
+// Skips only when `run_external_c_oracle`'s internal resolution finds no C
+// compiler; a link or run failure after that resolution FAILS the test
+// rather than skipping it, since this is a required harness leg, not a
+// best-effort capability probe.
+test "ffi variadic: linked round trip matches C's mixed-argument sum and formatted snprintf output" ![io] {
+    let dir = _scratch_dir();
+    _write_fixture(dir);
+    let ir = _emit_fixture(dir, "ffi-variadic-emit-roundtrip");
+    assert expect_eq_bool(ir.length > 0, true).ok;
+
+    let sum_symbol = _mangled_symbol(ir, "sfn_variadic_sum_probe");
+    let snprintf_symbol = _mangled_symbol(ir, "sfn_variadic_snprintf_probe");
+    assert expect_eq_bool(sum_symbol.length > 0, true).ok;
+    assert expect_eq_bool(snprintf_symbol.length > 0, true).ok;
+
+    let ll = dir + "/probe.ll";
+    let harness = dir + "/harness.c";
+    fs.writeFile(harness, "#include <stdarg.h>\n" + "#include <stdint.h>\n"
+        + "#include <stdio.h>\n"
+        + "#include <string.h>\n"
+        + "\n"
+        + "// C variadic callee for the mixed i32/i64/f64/pointer round trip\n"
+        + "// (SFN-1291). The va_arg sequence here must exactly mirror the Sailfin\n"
+        + "// call site's argument types (int, long long, double, int*) -- a\n"
+        + "// mismatch is undefined behaviour, not a debuggable test failure.\n"
+        + "int sum_va(int n, ...) {\n"
+        + "    va_list ap;\n"
+        + "    va_start(ap, n);\n"
+        + "    int a = va_arg(ap, int);\n"
+        + "    long long b = va_arg(ap, long long);\n"
+        + "    double c = va_arg(ap, double);\n"
+        + "    int *out = va_arg(ap, int *);\n"
+        + "    int total = a + (int) b + (int) c;\n"
+        + "    *out = total;\n"
+        + "    va_end(ap);\n"
+        + "    return total;\n"
+        + "}\n"
+        + "\n"
+        + "extern int SFN_SUM_PROBE(void);\n"
+        + "extern int SFN_SNPRINTF_PROBE(char *buf, int buf_size, const char *fmt);\n"
+        + "\n"
+        + "int main(void) {\n"
+        + "    int rc = SFN_SUM_PROBE();\n"
+        + "    if (rc != 0) {\n"
+        + "        fprintf(stderr, \"sum_va probe failed: rc=%d\\n\", rc);\n"
+        + "        return 1;\n"
+        + "    }\n"
+        + "\n"
+        + "    char buf[64];\n"
+        + "    memset(buf, 0, sizeof(buf));\n"
+        + "    int written = SFN_SNPRINTF_PROBE(buf, (int) sizeof(buf), \"%d-%lld-%.2f\");\n"
+        + "    const char *expected = \"7-1000000000-2.50\";\n"
+        + "    if (strcmp(buf, expected) != 0) {\n"
+        + "        fprintf(stderr, \"snprintf mismatch: got \\\"%s\\\" expected \\\"%s\\\"\\n\", buf, expected);\n"
+        + "        return 2;\n"
+        + "    }\n"
+        + "    if (written != (int) strlen(expected)) {\n"
+        + "        fprintf(stderr, \"snprintf return mismatch: got %d expected %d\\n\", written, (int) strlen(expected));\n"
+        + "        return 3;\n"
+        + "    }\n"
+        + "    return 0;\n"
+        + "}\n");
+
+    let bin = dir + "/ffi-variadic-roundtrip";
+    let clang_argv: string[] = ["-Wno-override-module", "-DSFN_SUM_PROBE="
+        + sum_symbol, "-DSFN_SNPRINTF_PROBE="
+        + snprintf_symbol, harness, ll, "-o", bin];
+    let clang_exit = run_external_c_oracle(clang_argv);
+    let clang_out = process.capture_take_stdout();
+    let clang_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic link", clang_exit, clang_out, clang_err);
+    assert expect_eq_int(clang_exit, 0).ok;
+
+    let run_exit = process.run_capture([bin], []);
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic run", run_exit, run_out, run_err);
+    assert expect_eq_int(run_exit, 0).ok;
+}

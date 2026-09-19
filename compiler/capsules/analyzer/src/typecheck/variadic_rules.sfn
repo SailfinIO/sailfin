@@ -1,0 +1,76 @@
+// compiler/capsules/analyzer/src/typecheck/variadic_rules.sfn
+//
+// Call-site rule for C variadic externs (E0851, SFEP-0079 3.3 / SFN-1291).
+//
+// An argument that lands past an extern's last fixed parameter sits in
+// variadic position, where C would have applied its default argument
+// promotions. Sailfin does not promote implicitly (SFEP-0058), so a narrow
+// value passed there reaches the callee in a width it cannot read back.
+//
+// The rule is a narrow, fail-open bridge in the same spirit as
+// `primitive_rules.sfn`: it judges only arguments whose type the source
+// states outright — an explicit `as` cast, or an identifier bound with an
+// explicit annotation — and stays silent on every shape it cannot name. It
+// is silent across a module boundary too: imported symbol rows carry no
+// variadic arity, so a call to an *imported* variadic extern is not checked.
+import { strings_equal } from "sfn/strings";
+import { Expression } from "sfn/syntax";
+
+import { Diagnostic } from "../typecheck_types";
+import {
+    c_variadic_promotion_required,
+    make_extern_variadic_argument_diagnostic
+} from "../typecheck_types/extern_abi";
+import { SymbolEntry, find_value_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
+import { trim_text } from "../typecheck_types/text_utils";
+
+// The argument's type as the source states it, or "" when the source does
+// not state it. Never an inferred type: a wrong guess here would reject a
+// correct program.
+fn _stated_argument_type(expression: Expression?, bindings: SymbolEntry[]) -> string {
+    if expression == null { return ""; }
+    if expression.variant == "Cast" {
+        if expression.target_type == null { return ""; }
+        return trim_text(expression.target_type.text);
+    }
+    if expression.variant == "Identifier" {
+        let entry = find_value_symbol(bindings, expression.name);
+        if entry == null { return ""; }
+        return trim_text(entry.declared_type);
+    }
+    return "";
+}
+
+// E0851 for each argument in variadic position whose stated type C would
+// have promoted.
+fn variadic_argument_diagnostics(expression: Expression, bindings: SymbolEntry[]) -> Diagnostic[] {
+    if expression.variant != "Call" { return []; }
+    if expression.callee == null { return []; }
+    if expression.callee.variant != "Identifier" { return []; }
+
+    let name = expression.callee.name;
+    let entry = find_value_symbol(bindings, name);
+    if entry == null { return []; }
+    // Only an extern declaration ever records an arity below, but checking
+    // the kind keeps that a local invariant rather than one a reader has to
+    // re-confirm at every registration site.
+    if !strings_equal(entry.kind, "extern function") { return []; }
+    // Set only for an extern declared with a well-formed trailing `...`.
+    let fixed_arity = entry.variadic_fixed_arity;
+    if fixed_arity < 0 { return []; }
+
+    let mut diagnostics: Diagnostic[] = [];
+    let mut index: int = fixed_arity;
+    loop {
+        if index >= expression.arguments.length { break; }
+        let stated = _stated_argument_type(expression.arguments[index], bindings);
+        if stated.length > 0 {
+            if c_variadic_promotion_required(stated) {
+                diagnostics.push(make_extern_variadic_argument_diagnostic(name, index
+                    + 1, stated));
+            }
+        }
+        index += 1;
+    }
+    return diagnostics;
+}

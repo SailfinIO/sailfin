@@ -88,6 +88,11 @@ struct NativeFunction {
     effects: string[];
     decorators: string[];
     is_extern: boolean;
+    // True for an `extern fn f(a: T, ...)` C variadic. Carried through the
+    // `.sfn-asm` round-trip as a `.meta variadic` line so LLVM lowering can
+    // emit `declare R @f(T, ...)` and the explicit-function-type call form.
+    // SFN-1291.
+    is_variadic: boolean;
     instructions: NativeInstruction[];
 }
 

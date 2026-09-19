@@ -84,6 +84,7 @@ fn append_parameter(function: NativeFunction, parameter: NativeParameter) -> Nat
         effects: function.effects,
         decorators: function.decorators,
         is_extern: function.is_extern,
+        is_variadic: function.is_variadic,
         instructions: function.instructions
     };
 }
@@ -99,6 +100,7 @@ fn append_instruction(function: NativeFunction, instruction: NativeInstruction) 
         effects: function.effects,
         decorators: function.decorators,
         is_extern: function.is_extern,
+        is_variadic: function.is_variadic,
         instructions: instructions
     };
 }
@@ -114,6 +116,20 @@ fn apply_meta(function: NativeFunction, entry: string) -> NativeFunction {
             effects: function.effects,
             decorators: function.decorators,
             is_extern: true,
+            is_variadic: function.is_variadic,
+            instructions: function.instructions
+        };
+    }
+    if trimmed == "variadic" {
+        return NativeFunction {
+            name: function.name,
+            is_async: function.is_async,
+            parameters: function.parameters,
+            return_type: function.return_type,
+            effects: function.effects,
+            decorators: function.decorators,
+            is_extern: function.is_extern,
+            is_variadic: true,
             instructions: function.instructions
         };
     }
@@ -139,6 +155,7 @@ fn update_function_meta(function: NativeFunction, return_type: string, effects: 
         effects: effects,
         decorators: function.decorators,
         is_extern: function.is_extern,
+        is_variadic: function.is_variadic,
         instructions: function.instructions
     };
 }
@@ -486,6 +503,7 @@ fn parse_struct_definition(lines: string[], start_index: int, include_instructio
                 effects: [],
                 decorators: method_pending_decorators,
                 is_extern: false,
+                is_variadic: false,
                 instructions: []
             };
             method_pending_decorators = [];

@@ -80,7 +80,7 @@ fn parse_function(initial_parser: Parser, starts_with_async: boolean, decorators
 
     parser = skip_trivia(parser);
     parser = consume_symbol(parser, "(");
-    let parameter_result = parse_parameter_list(parser);
+    let parameter_result = parse_parameter_list(parser, false);
     parser = parameter_result.parser;
     let parameters = parameter_result.parameters;
 
@@ -190,9 +190,10 @@ fn parse_extern_function(initial_parser: Parser, starts_with_unsafe: boolean, de
 
     parser = skip_trivia(parser);
     parser = consume_symbol(parser, "(");
-    let parameter_result = parse_parameter_list(parser);
+    let parameter_result = parse_parameter_list(parser, true);
     parser = parameter_result.parser;
     let parameters = parameter_result.parameters;
+    let variadic_index = parameter_result.variadic_index;
 
     parser = skip_trivia(parser);
     let mut return_type: TypeAnnotation? = null;
@@ -243,7 +244,8 @@ fn parse_extern_function(initial_parser: Parser, starts_with_unsafe: boolean, de
     let statement = Statement.ExternFunctionDeclaration {
         signature: signature,
         unsafe: is_unsafe,
-        decorators: decorators
+        decorators: decorators,
+        variadic_index: variadic_index
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
