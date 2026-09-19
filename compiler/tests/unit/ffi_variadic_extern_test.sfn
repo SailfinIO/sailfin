@@ -1,0 +1,142 @@
+// Unit tests for variadic `extern fn` (SFN-1291, SFEP-0079 3.3).
+//
+// Covers the placement check (`check_extern_signature` in
+// `compiler/capsules/analyzer/src/typecheck_types/declaration_and_statement_checks.sfn`)
+// and the call-site promotion check (`variadic_argument_diagnostics` in
+// `compiler/capsules/analyzer/src/typecheck/variadic_rules.sfn`), both of
+// which surface as E0851. Follows the `parse_program` -> `typecheck_diagnostics`
+// -> `_has_code` shape of `typecheck_extern_test.sfn`.
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
+import { Diagnostic } from "sfn/analyzer/typecheck_types";
+import { parse_program } from "sfn/syntax";
+import { expect_contains_str } from "sfn/test";
+
+fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _first_message(source: string, code: string) -> string {
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    let mut i: int = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) {
+            return diagnostics[i].message;
+        }
+        i += 1;
+    }
+    return "";
+}
+
+// -------------------------------------------------------------------
+// Accepted — no E0851.
+// -------------------------------------------------------------------
+test "ffi variadic: a well-formed variadic extern declares cleanly" ![io] {
+    let source = "extern fn sum_va(n: i32, ...) -> i32;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0851");
+}
+
+test "ffi variadic: plain integer literal arguments raise no E0851" ![io] {
+    let source = "extern fn sum_va(n: i32, ...) -> i32;\n"
+        + "fn main() { let v = sum_va(2, 10, 20); }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0851");
+}
+
+test "ffi variadic: an explicitly cast narrow argument is accepted" ![io] {
+    let source = "extern fn sum_va(n: i32, ...) -> i32;\n"
+        + "fn main() { let x: u16 = 1; let v = sum_va(1, x as i32); }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0851");
+}
+
+// -------------------------------------------------------------------
+// Placement — E0851 fires.
+// -------------------------------------------------------------------
+test "ffi variadic: `...` with no fixed parameter is rejected" ![io] {
+    let source = "extern fn bad(...) -> i32;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0851");
+}
+
+test "ffi variadic: `...` not last is rejected" ![io] {
+    let source = "extern fn bad(a: i32, ..., b: i32) -> i32;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0851");
+}
+
+// -------------------------------------------------------------------
+// Promotion — E0851 fires at the call site.
+// -------------------------------------------------------------------
+test "ffi variadic: an f32-annotated local in variadic position is rejected" ![io] {
+    let source = "extern fn sum_va(n: i32, ...) -> i32;\n"
+        + "fn main() { let x: f32 = 1.0; let v = sum_va(1, x); }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0851");
+}
+
+test "ffi variadic: a u16-annotated local in variadic position is rejected" ![io] {
+    let source = "extern fn sum_va(n: i32, ...) -> i32;\n"
+        + "fn main() { let x: u16 = 1; let v = sum_va(1, x); }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0851");
+}
+
+test "ffi variadic: the f32 promotion message hints `as f64`" ![io] {
+    let source = "extern fn sum_va(n: i32, ...) -> i32;\n"
+        + "fn main() { let x: f32 = 1.0; let v = sum_va(1, x); }";
+    let message = _first_message(source, "E0851");
+    assert message.length > 0;
+    assert expect_contains_str(message, "as f64").ok;
+}
+
+test "ffi variadic: the u16 promotion message hints `as i32`" ![io] {
+    let source = "extern fn sum_va(n: i32, ...) -> i32;\n"
+        + "fn main() { let x: u16 = 1; let v = sum_va(1, x); }";
+    let message = _first_message(source, "E0851");
+    assert message.length > 0;
+    assert expect_contains_str(message, "as i32").ok;
+}
+
+// -------------------------------------------------------------------
+// Fail-open — the rule is deliberately narrow; these pin the silent cases.
+// -------------------------------------------------------------------
+test "ffi variadic: a narrow local in a fixed parameter position stays silent" ![io] {
+    let source = "extern fn sum_va(n: i32, ...) -> i32;\n"
+        + "fn main() { let x: u16 = 1; let v = sum_va(x, 10); }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0851");
+}
+
+test "ffi variadic: an unstated argument type stays silent" ![io] {
+    let source = "extern fn sum_va(n: i32, ...) -> i32;\n"
+        + "fn helper() -> f32 { return 1.0; }\n"
+        + "fn main() { let v = sum_va(1, helper()); }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0851");
+}
+
+test "ffi variadic: a narrow local passed to a non-variadic extern stays silent" ![io] {
+    let source = "extern fn plain(n: i32, x: i32) -> i32;\n"
+        + "fn main() { let x: u16 = 1; let v = plain(1, x); }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0851");
+}

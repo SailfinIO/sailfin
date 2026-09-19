@@ -9,9 +9,9 @@ sidebar:
 Sailfin reaches foreign code through `extern fn` declarations, raw pointers,
 and a validated `@repr(C)` struct layout. This chapter is normative for the
 surface that **ships today**. The broader interop contract — a read-only
-`*const T`, variadic externs, typed callback parameters, and effect-attested
-externs — is designed in [SFEP-0079](/sfep/0079-systems-c-interop/) and is
-called out as **designed, not shipped** wherever it appears below.
+`*const T`, typed callback parameters, and effect-attested externs — is
+designed in [SFEP-0079](/sfep/0079-systems-c-interop/) and is called out as
+**designed, not shipped** wherever it appears below.
 
 For the practical guide, see [Unsafe & FFI](/docs/advanced/ffi/).
 
@@ -45,6 +45,58 @@ is **not** an effect — see §13.6.
 
 An extern declaring effects is rejected with `E0804`; effects belong on the
 Sailfin wrapper that calls the extern, not on the extern itself.
+
+### Variadic externs
+
+A trailing `...` marks an extern as C-variadic. It is meaningful only as the
+declaration's last parameter, and only after at least one fixed parameter — a
+C variadic resolves a call against the fixed prototype, and LLVM has no
+function type spelled `...` alone:
+
+```sfn
+extern fn ioctl(fd: i32, request: u64, ...) -> i32;
+```
+
+Misplacing `...` — with no fixed parameter before it, or with a parameter
+after it — is `E0851`.
+
+Lowering emits both the variadic `declare` and, at each call site, the
+explicit function-type call form:
+
+```llvm
+declare i32 @ioctl(i32, i64, ...)
+
+%1 = call i32 (i32, i64, ...) @ioctl(i32 %fd, i64 %request, i32 %flag)
+```
+
+The explicit `(i32, i64, ...)` on the call is load-bearing, not cosmetic: it
+is what tells LLVM to apply the callee's declared variadic type rather than
+infer one from the argument list. That matters because the two governed
+targets disagree on where a variadic argument goes — registers on AAPCS64
+Linux, the stack on Apple arm64 — and only the declared function type carries
+that distinction through to codegen.
+
+**Call-site promotion check.** C applies its default argument promotions to
+everything in variadic position: `i8`/`i16`/`u8`/`u16` and `_Bool` widen to
+`int`, and `float` widens to `double`. Sailfin has no implicit promotion
+(SFEP-0058), so an unpromoted value passed there reaches the callee at a width
+it cannot read back. `E0851` also covers this: an argument in variadic
+position whose *stated* type — an explicit `as` cast, or an identifier bound
+with an explicit type annotation — is `i8`, `i16`, `u8`, `u16`, `f32`, or
+`bool`/`boolean` is rejected with a hint to cast explicitly (`as i32`,
+`as f64`).
+
+This check is deliberately narrow and **fails open**: it judges only an
+argument whose type the source states outright. An untyped integer literal
+(`sum_va(1, 10, 20)`), the result of a call, or an identifier whose declared
+type is out of view all pass silently whether or not they need promotion — the
+check does not infer a type in order to accuse it. State the argument's type
+explicitly at the call site if you want the check to see it.
+
+**Not shipped.** Variadic Sailfin function *definitions*, `va_list` access to
+a variadic extern's own arguments, and the `signext`/`zeroext` narrow-integer
+extension attributes are **designed, not shipped** (SFEP-0079 §3.3, remaining
+L4 leaf).
 
 ## 13.2 The C-ABI accept-list
 
@@ -96,6 +148,7 @@ address instead — §13.5.
 | `E0803` | The extern declares type parameters (`<...>`). Only concrete C-ABI types cross the boundary. |
 | `E0804` | The extern declares effects (`![...]`). Move the clause onto the calling wrapper. |
 | `E0805` | Any other inadmissible or missing type: a missing parameter or `extern var` annotation, bare `void` in parameter position, an unrecognized name such as `number` or `boolean`, and any `string`/array shape the two rules above do not reach (a nested `Foo<int[]>` lands here, not on `E0802`). |
+| `E0851` | A variadic extern's `...` is misplaced — no fixed parameter before it, or a parameter after it — or a call-site argument in variadic position has a stated type C would have promoted (`i8`, `i16`, `u8`, `u16`, `f32`, `bool`/`boolean`). See [Variadic externs](#variadic-externs). |
 
 ## 13.3 The `@repr(C)` layout contract
 

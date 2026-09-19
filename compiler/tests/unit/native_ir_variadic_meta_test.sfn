@@ -1,0 +1,49 @@
+// `.sfn-asm` round-trip coverage for the `NativeFunction.is_variadic` flag
+// (SFN-1291). `emit_extern_function` writes `.meta variadic` for a
+// well-formed variadic extern; the native-IR parser's `apply_meta` must set
+// `is_variadic` back from that directive so LLVM lowering can emit
+// `declare R @f(T, ...)` — a lost flag here would silently fall back to a
+// fixed-arity declare.
+import { parse_native_functions_from_text } from "sfn/ir";
+import { expect_eq_bool, expect_eq_int } from "sfn/test";
+
+test "native ir: .meta variadic sets is_variadic on parse" {
+    let text = ".fn log(fmt: *u8, ...) -> i32\n" + ".meta extern\n"
+        + ".meta variadic\n"
+        + ".meta return i32\n"
+        + ".meta effects none\n"
+        + ".param fmt: *u8\n"
+        + ".endfn\n";
+    let functions = parse_native_functions_from_text(text);
+    assert expect_eq_int(functions.length, 1).ok;
+    assert expect_eq_bool(functions[0].is_extern, true).ok;
+    assert expect_eq_bool(functions[0].is_variadic, true).ok;
+}
+
+test "native ir: a fixed-arity extern stays non-variadic on parse" {
+    let text = ".fn abort() -> void\n" + ".meta extern\n"
+        + ".meta return void\n"
+        + ".meta effects none\n"
+        + ".endfn\n";
+    let functions = parse_native_functions_from_text(text);
+    assert expect_eq_int(functions.length, 1).ok;
+    assert expect_eq_bool(functions[0].is_extern, true).ok;
+    assert expect_eq_bool(functions[0].is_variadic, false).ok;
+}
+
+// `.meta extern` and `.meta variadic` can appear in either order in the
+// emitted text; the parser must not let a later `.meta extern` clobber an
+// already-set `is_variadic` (the "extern" branch of `apply_meta` rebuilds
+// the struct field-by-field and must carry the flag through, not reset it).
+test "native ir: .meta extern preserves an already-set is_variadic" {
+    let text = ".fn log(fmt: *u8, ...) -> i32\n" + ".meta variadic\n"
+        + ".meta extern\n"
+        + ".meta return i32\n"
+        + ".meta effects none\n"
+        + ".param fmt: *u8\n"
+        + ".endfn\n";
+    let functions = parse_native_functions_from_text(text);
+    assert expect_eq_int(functions.length, 1).ok;
+    assert expect_eq_bool(functions[0].is_extern, true).ok;
+    assert expect_eq_bool(functions[0].is_variadic, true).ok;
+}
