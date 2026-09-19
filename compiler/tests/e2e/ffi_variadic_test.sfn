@@ -84,9 +84,20 @@ fn _mangled_symbol(ir: string, bare_name: string) -> string {
 // `...` tail after the symbol name — the variadic declare shape SFN-1291
 // requires, as opposed to a fixed-arity `declare i32 @sum_va(i32, i32, ...)`
 // with no ellipsis at all.
+// Cross-module, the symbol is mangled to `@sum_va__<provider>`, so these
+// matchers locate `@sum_va` and then accept either the bare `(` or the
+// `__` mangling suffix. Keying on `@sum_va(` alone silently passed the
+// single-module tests while never matching the imported declare at all.
+// SFN-1291.
+fn _sum_va_symbol_pos(line: string) -> int {
+    let bare = find(line, "@sum_va(", 0);
+    if bare >= 0 { return bare; }
+    return find(line, "@sum_va__", 0);
+}
+
 fn _line_is_variadic_declare(line: string) -> boolean {
     if !contains(line, "declare") { return false; }
-    let name_pos = find(line, "@sum_va(", 0);
+    let name_pos = _sum_va_symbol_pos(line);
     if name_pos < 0 { return false; }
     let ellipsis_pos = find(line, "...)", name_pos);
     return ellipsis_pos > name_pos;
@@ -99,7 +110,8 @@ fn _line_is_variadic_declare(line: string) -> boolean {
 // that line, since call arguments are concrete values, not a literal `...`).
 fn _line_is_variadic_call(line: string) -> boolean {
     if !contains(line, "call") { return false; }
-    let type_close = find(line, ") @sum_va(", 0);
+    let mut type_close = find(line, ") @sum_va(", 0);
+    if type_close < 0 { type_close = find(line, ") @sum_va__", 0); }
     if type_close < 0 { return false; }
     let ellipsis_pos = find(line, "...", 0);
     if ellipsis_pos < 0 { return false; }
