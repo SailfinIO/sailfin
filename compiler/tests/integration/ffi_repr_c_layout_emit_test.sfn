@@ -136,16 +136,28 @@ test "repr(C) layout: packed lowers to an LLVM packed struct type" ![io] {
     fs.deleteFile(source);
 }
 
-test "repr(C) layout: destructuring a packed struct carries align 1" ![io] {
-    // The struct-pattern reader in `lowering/instructions_match.sfn` loads
-    // fields through its own GEP, a path distinct from `.field` access
-    // (SFN-1289).
-    let body = _epoll_event_text() + "fn take(e: EpollEvent) -> u64 {\n"
-        + "    match e {\n        EpollEvent { data } => { return data; }\n    }\n}\n";
-    let source = _fixture(body);
-    let output = _emit(source, "llvm", "repr_c_llvm_destructure");
-    assert expect_contains_str(output, ", align 1").ok;
-    fs.deleteFile(source);
+test "repr(C) layout: union destructuring of a packed struct carries align 1" ![io] {
+    // The union struct-pattern reader in `lowering/instructions_match.sfn`
+    // loads fields through its own GEP, a path distinct from `.field` access
+    // (SFN-1289). A bare-struct `match` arm is parsed as a struct *literal*,
+    // so reaching this path needs a union-typed subject.
+    let body = "struct Tagged {\n    value: int;\n}\n"
+        + "fn show(v: EpollEvent | Tagged) ![io] {\n    match v {\n"
+        + "        EpollEvent { data } => print(\"e:\${data}\"),\n"
+        + "        Tagged { value } => print(\"t:\${value}\")\n    }\n}\n";
+    let packed_source = _fixture("@repr(C, packed)\nstruct EpollEvent {\n"
+        + "    data: u64;\n}\n"
+        + body);
+    let unpacked_source = _fixture("@repr(C)\nstruct EpollEvent {\n"
+        + "    data: u64;\n}\n"
+        + body);
+    let packed_ir = _emit(packed_source, "llvm", "repr_c_llvm_union_packed");
+    let unpacked_ir = _emit(unpacked_source, "llvm", "repr_c_llvm_union_unpacked");
+    assert expect_contains_str(packed_ir, "load i64, i64* %t3, align 1").ok;
+    assert expect_contains_str(unpacked_ir, "load i64, i64* %t3\n").ok;
+    assert expect_eq_bool(expect_contains_str(unpacked_ir, "load i64, i64* %t3, align 1").ok, false).ok;
+    fs.deleteFile(packed_source);
+    fs.deleteFile(unpacked_source);
 }
 
 test "repr(C) layout: packed field access carries align 1" ![io] {
