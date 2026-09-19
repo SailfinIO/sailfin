@@ -10,6 +10,7 @@
 // fails these tests.
 import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
 import { Diagnostic } from "sfn/analyzer/typecheck_types";
+import { contains } from "sfn/strings";
 import { parse_program } from "sfn/syntax";
 
 fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
@@ -37,7 +38,9 @@ fn _message_for(diagnostics: Diagnostic[], code: string) -> string {
     let mut i: int = 0;
     loop {
         if i >= diagnostics.length { break; }
-        if strings_equal(diagnostics[i].code, code) { return diagnostics[i].message; }
+        if strings_equal(diagnostics[i].code, code) {
+            return diagnostics[i].message;
+        }
         i += 1;
     }
     return "";
@@ -53,7 +56,6 @@ fn _input_event_source(decorator: string) -> string {
 // ── Accept path ──────────────────────────────────────────────────────
 // A correct contract is silent. These guard against a validator that
 // over-fires, which would break every existing struct in the tree.
-
 test "repr(C): accepts a valid struct with no assertions" ![io] {
     let program = parse_program(_input_event_source("@repr(C)"));
     let diagnostics = typecheck_diagnostics(program);
@@ -121,13 +123,12 @@ test "repr(C): an undecorated struct is untouched by the validator" ![io] {
     let source = "struct Plain {\n    name: string;\n    flags: bool;\n    items: i32[];\n}\n";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
-    assert !_has_code(diagnostics, "E0846");
-    assert !_has_code(diagnostics, "E0847");
-    assert !_has_code(diagnostics, "E0848");
+    assert ! _has_code(diagnostics, "E0846");
+    assert ! _has_code(diagnostics, "E0847");
+    assert ! _has_code(diagnostics, "E0848");
 }
 
 // ── E0846: decorator misuse ──────────────────────────────────────────
-
 test "repr(C): E0846 for a lowercase repr(c)" ![io] {
     let program = parse_program(_input_event_source("@repr(c)"));
     let diagnostics = typecheck_diagnostics(program);
@@ -161,7 +162,6 @@ test "repr(C): E0846 for a non-power-of-two align assertion" ![io] {
 }
 
 // ── E0847: inadmissible field types ──────────────────────────────────
-
 test "repr(C): E0847 for a string field" ![io] {
     let source = "@repr(C)\nstruct Bad {\n    name: string;\n}\n";
     let program = parse_program(source);
@@ -222,7 +222,6 @@ test "repr(C): E0847 reports every offending field, not just the first" ![io] {
 }
 
 // ── E0848: assertion mismatch ────────────────────────────────────────
-
 test "repr(C): E0848 for a size assertion that disagrees with the layout" ![io] {
     // `InputEvent` is 24 bytes; asserting 20 is the header-transcription
     // error the contract exists to catch.
@@ -267,5 +266,5 @@ test "repr(C): no E0848 when a field was already rejected" ![io] {
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     assert _has_code(diagnostics, "E0847");
-    assert !_has_code(diagnostics, "E0848");
+    assert ! _has_code(diagnostics, "E0848");
 }

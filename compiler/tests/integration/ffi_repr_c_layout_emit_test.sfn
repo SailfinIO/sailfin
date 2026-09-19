@@ -63,7 +63,6 @@ fn _emit(source: string, kind: string, label: string) -> string ![io] {
 }
 
 // ── `.layout` records for `@repr(C)` structs ─────────────────────────
-
 test "repr(C) layout: native .layout uses the C layout for narrow scalars" ![io] {
     let source = _fixture(_input_event_text());
     let output = _emit(source, "native", "repr_c_native");
@@ -100,7 +99,6 @@ test "repr(C) layout: f32 and f64 fields get their natural widths" ![io] {
 }
 
 // ── The legacy path is untouched ─────────────────────────────────────
-
 test "repr(C) layout: undecorated structs and enums keep the legacy .layout" ![io] {
     // SFEP-0079 §5 forbids moving these: enum aggregate offsets cross the
     // seed/fresh boundary, so the 8-byte fallback stays until SFN-1300.
@@ -117,7 +115,6 @@ test "repr(C) layout: undecorated structs and enums keep the legacy .layout" ![i
 }
 
 // ── LLVM agreement ───────────────────────────────────────────────────
-
 test "repr(C) layout: a valid unpacked struct changes no LLVM IR" ![io] {
     // The guarantee is the contract, not a codegen change — the type must
     // be the same one the undecorated struct already produced.
@@ -140,10 +137,20 @@ test "repr(C) layout: packed lowers to an LLVM packed struct type" ![io] {
 }
 
 test "repr(C) layout: packed field access carries align 1" ![io] {
-    let body = _epoll_event_text()
-        + "fn read_data(e: EpollEvent) -> u64 {\n    return e.data;\n}\n";
-    let source = _fixture(body);
-    let output = _emit(source, "llvm", "repr_c_llvm_align");
-    assert expect_contains_str(output, "align 1").ok;
-    fs.deleteFile(source);
+    // Differential against the same struct unpacked. Asserting only that
+    // `align 1` appears somewhere would pass vacuously — an unrelated
+    // `alloca [64 x i64], align 16` and friends are always in the output —
+    // so the unpacked leg pins that the bare load is what changes.
+    let reader = "fn read_data(e: EpollEvent) -> u64 {\n    return e.data;\n}\n";
+    let packed_source = _fixture(_epoll_event_text() + reader);
+    let unpacked_source = _fixture("@repr(C)\nstruct EpollEvent {\n"
+        + "    events: u32;\n    data: u64;\n}\n"
+        + reader);
+    let packed_ir = _emit(packed_source, "llvm", "repr_c_llvm_align_packed");
+    let unpacked_ir = _emit(unpacked_source, "llvm", "repr_c_llvm_align_unpacked");
+    assert expect_contains_str(packed_ir, "load i64, i64* %t0, align 1").ok;
+    assert expect_contains_str(unpacked_ir, "load i64, i64* %t0\n").ok;
+    assert expect_eq_bool(expect_contains_str(unpacked_ir, "load i64, i64* %t0, align 1").ok, false).ok;
+    fs.deleteFile(packed_source);
+    fs.deleteFile(unpacked_source);
 }
