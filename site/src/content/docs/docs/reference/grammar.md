@@ -110,6 +110,8 @@ unsafe extern fn free(ptr: *u8) -> void;
 Parameters         = Parameter { "," Parameter } ;
 Parameter          = [ "mut" ] Identifier [ TypeAnnotation ] [ "=" Expression ] ;
 
+ExternParameters   = Parameter { "," Parameter } [ "," "..." ] ;
+
 TypeParameters     = "<" TypeParameter { "," TypeParameter } ">" ;
 TypeParameter      = Identifier [ ":" Type ] ;
 
@@ -118,6 +120,12 @@ Decorator          = "@" QualifiedName [ "(" [ Arguments ] ")" ] ;
 EffectList         = "![" EffectIdentifier { "," EffectIdentifier } "]" ;
 EffectIdentifier   = Identifier ;
 ```
+
+A declaration carrying the `extern` modifier uses `ExternParameters` in place
+of `Parameters`. The trailing `...` marks a C variadic; it is admissible only
+there, only last, and only after at least one fixed parameter. Any other
+placement is `E0851`, and a `...` in an ordinary function's parameter list is
+a parse error. See [§13 Foreign Interface](/docs/reference/spec/13-foreign-interface/).
 
 Canonical effect identifiers: `io`, `net`, `model`, `gpu`, `rand`, `clock`,
 plus `unsafe`, `read`, `mut`.
