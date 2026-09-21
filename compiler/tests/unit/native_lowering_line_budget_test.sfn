@@ -106,7 +106,9 @@ fn _grandfathered_ceiling(name: string) -> int {
     // 858 -> 859: SFN-744 moves the native IR model behind the `sfn/ir`
     // capsule facade; no lowering logic grew. 859 -> 925: SFN-915, per the
     // note above.
-    if name == "core_cast_lowering.sfn" { return 826; }
+    // 826 -> 851: SFN-1305 routes both f16 widening casts through the
+    // bit-exact helper so Windows avoids LLVM's mismatched half libcall ABI.
+    if name == "core_cast_lowering.sfn" { return 851; }
     // 830 -> 826: SFN-670 folds the operator-match nest in
     // `find_top_level_operator` into `&&` conditions.
     if name == "core_operators.sfn" { return 826; }

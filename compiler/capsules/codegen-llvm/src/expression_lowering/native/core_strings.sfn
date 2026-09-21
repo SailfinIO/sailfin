@@ -15,6 +15,7 @@ import {
 } from "../../utils";
 import { array_pointer_element_type } from "../arrays";
 import { emit_bf16_widen_to_double } from "./core_bf16_lowering";
+import { emit_f16_widen_to_double } from "./core_f16_lowering";
 import { coerce_operand_to_type, harmonise_operands } from "./core_operands/dispatch";
 import {
     is_union_llvm_type,
@@ -549,15 +550,12 @@ fn coerce_operand_to_string(operand: LLVMOperand, temp_index: int, lines: string
     }
 
     if operand.llvm_type == "half" {
-        let widened = format_temp_name(temp_index);
-        let out_lines = append_string(lines, "  " + widened + " = fpext half "
-            + operand.value
-            + " to double");
+        let widened = emit_f16_widen_to_double(operand.value, temp_index, lines);
         let widened_operand = LLVMOperand {
             llvm_type: "double",
-            value: widened
+            value: widened.value
         };
-        return coerce_operand_to_string(widened_operand, temp_index + 1, out_lines);
+        return coerce_operand_to_string(widened_operand, widened.temp_index, widened.lines);
     }
 
     // `fpext bfloat` has no AArch64 selection pattern (SFN-609), so bf16 widens

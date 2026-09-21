@@ -128,7 +128,7 @@ test "lowering: bf16 interpolation widens without `fpext bfloat` (SFN-610)" ![io
     assert contains(ir, "fpext float");
 }
 
-// SFN-610: the three widen arms are new `format_temp_name` sites, so they carry
+// SFN-610 and SFN-1305: the widen arms allocate `format_temp_name` sites, so they carry
 // the same temp-accounting pin every emitter in this file does. Neither the
 // behavioural test nor the IR text-shape test above would notice a reused
 // `%tN`, which is the failure this file exists to catch (see the header).
@@ -144,8 +144,9 @@ test "lowering: interpolation widen arms allocate temps without reuse (SFN-610)"
     let as_f16 = coerce_operand_to_string(LLVMOperand {
         llvm_type: "half", value: "%x"
     }, 10, f16_seed);
-    assert contains(as_f16.lines[0], "%t10 = fpext half %x to double");
-    assert ! contains(as_f16.lines[1], "%t10 =");
+    assert contains(as_f16.lines[0], "%t10 = bitcast half %x to i16");
+    assert contains(as_f16.lines[21], "%t31 = fpext float");
+    assert ! contains(as_f16.lines[22], "%t31 =");
 
     // The bf16 widen consumes five temps (%t10..%t14), so whatever the `double`
     // arm emits next must start past them.
