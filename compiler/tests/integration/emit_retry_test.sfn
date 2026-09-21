@@ -23,9 +23,10 @@
 // `process.run_capture(argv, env)` REPLACES the child environment
 // (`runtime/sfn/process.sfn`: an empty array means the empty
 // environment), so a child seeded with only `SAILFIN_INJECT_FAULT`
-// loses PATH and cannot resolve the coherent LLVM family. Hand the child the
-// parent's real PATH, read straight from this process's environment. Effect knobs (`SAILFIN_EFFECT_*`)
-// stay unset, so the child still exercises shipped defaults.
+// loses PATH and the selected LLVM root, so it cannot resolve the coherent
+// LLVM family. Hand the child those two values straight from this process's
+// environment. Effect knobs (`SAILFIN_EFFECT_*`) stay unset, so the child
+// still exercises shipped defaults.
 import { sfn_bin_path } from "sfn/test";
 
 // SFN-1129: read PATH directly rather than capturing it through a
@@ -63,8 +64,8 @@ fn _emit_with_faults(src: string, out: string, attempts: string, validate: boole
     argv.push(out);
     argv.push("llvm");
     argv.push(src);
-    let rc = process.run_capture(argv, ["SAILFIN_INJECT_FAULT=" + faults, "PATH="
-        + _host_path()]);
+    let rc = process.run_capture(argv, ["SAILFIN_INJECT_FAULT=" + faults,
+        "SAILFIN_LLVM_ROOT=" + env.get("SAILFIN_LLVM_ROOT"), "PATH=" + _host_path()]);
     let _o = process.capture_take_stdout();
     let _e = process.capture_take_stderr();
     return rc;
