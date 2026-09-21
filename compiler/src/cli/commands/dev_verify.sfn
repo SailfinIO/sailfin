@@ -114,13 +114,13 @@ let _DV_SMOKE_DEADLINE_MS: int = 180000;
 
 // Per-test-file deadline for the two full-suite phases, in seconds. This is
 // `make check`'s `CHECK_TEST_TIMEOUT`, applied to both of its full-suite
-// legs, rather than the test runner's own
-// 900s default, and the difference is load-bearing: `work_dir_parity_test`
-// runs two cold `sfn build -p compiler` builds serially inside one pooled
-// child, which exceeds 900s under `--no-test-cache` plus pool CPU
-// contention on a small runner. Dropping it would make `sfn dev verify`
-// report a `test-failure` on a tree `make check` calls green — precisely
-// the misattribution SFN-724 existed to remove.
+// legs. Keep this explicit and aligned with the test runner's default:
+// `work_dir_parity_test` runs two cold `sfn build -p compiler` builds
+// serially inside one pooled child, and measured 738-912s on Windows 2025
+// runners before pool CPU contention and `--no-test-cache` overhead.
+// Shortening it would make `sfn dev verify` report a `test-failure` on a
+// tree `make check` calls green — precisely the misattribution SFN-724
+// existed to remove.
 let _DV_TEST_TIMEOUT_S: int = 1800;
 
 // The four test-suite roots `make test` drives, in its order.
@@ -312,10 +312,10 @@ fn _dv_child_env(cfg: VerifyConfig) -> string[] ![io] {
         e = _dv_env_without(e, "SAILFIN_TEST_TIMEOUT");
         e.push("SAILFIN_TEST_TIMEOUT=" + int_to_string(cfg.test_timeout_s));
     } else if !_dv_env_has_key(e, "SAILFIN_TEST_TIMEOUT") {
-        // No explicit `--test-timeout` and nothing inherited: apply
-        // `make check`'s value rather than letting the runner fall back to
-        // its own shorter default. An inherited binding always wins, so a
-        // caller can still tighten or loosen it from the environment.
+        // No explicit `--test-timeout` and nothing inherited: pin
+        // `make check`'s value instead of relying on the runner's implicit
+        // default. An inherited binding always wins, so a caller can still
+        // tighten or loosen it from the environment.
         e.push("SAILFIN_TEST_TIMEOUT=" + int_to_string(_DV_TEST_TIMEOUT_S));
     }
     return e;

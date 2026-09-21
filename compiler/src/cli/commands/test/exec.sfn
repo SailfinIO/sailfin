@@ -119,16 +119,19 @@ fn _emit_crash_diagnostic_neutral(basename: string, exit_code: int) -> void ![io
 // `handle_kill` deadline is the FIRST time the budget is enforced on
 // macOS. 300s is too tight there for a build-orchestrating test whose
 // body legitimately spawns nested full compiler builds — `work_dir_parity`
-// runs `sfn build -p compiler` twice (~300s+ of run on a slow macOS
-// runner), which the per-phase compile cap in `compiler/src/main.sfn`
-// does NOT bound because the time is in the nested RUN, not a single
-// compile phase. 900s gives that headroom while still tripping a genuine
-// infinite loop well within the CI job budget. An empty value falls back
-// to the default.
+// runs `sfn build -p compiler` twice. That took ~300s+ on the slow macOS
+// runner used to set the former 900s default, but measured 738-912s on
+// Windows 2025 runners in September 2026, including repeatable 910-912s
+// deadline kills. The per-phase compile cap in `compiler/src/main.sfn`
+// does NOT bound this because the time is in the nested RUN, not a single
+// compile phase. 1800s restores about 2x headroom at the measured Windows
+// high end, matches the cold full-suite allowance in `dev_verify.sfn`, and
+// still trips a genuine infinite loop within the CI job budget. An empty
+// value falls back to the default.
 fn _test_timeout_secs() -> string ![io] {
     let v = _get_env_cmd("SAILFIN_TEST_TIMEOUT");
     if v.length > 0 { return v; }
-    return "900";
+    return "1800";
 }
 
 // #1236: re-emit one pooled child's captured stream on the parent's
@@ -306,7 +309,7 @@ fn _ingest_child_stderr_line(line: string, all: TestResultRecord[]) -> void ![io
 }
 
 // Per-file wall-clock budget in milliseconds, from `_test_timeout_secs()`
-// (default 300s). `<= 0` means no deadline — `poll_any` blocks. The
+// (default 1800s). `<= 0` means no deadline — `poll_any` blocks. The
 // streamed transport enforces this handle-owned deadline via
 // `handle_kill`, retiring the outer `timeout(1)` wrapper.
 fn _test_deadline_ms() -> int ![io] {
