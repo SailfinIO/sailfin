@@ -127,6 +127,10 @@ fn _classify_role(token: Token, prev_lexeme: string, next_lexeme: string) -> str
         if strings_equal(lex, ",") { return "separator"; }
         if strings_equal(lex, ";") { return "semicolon"; }
         if strings_equal(lex, ".") { return "dot"; }
+        // Variadic marker in an extern fn parameter list (SFN-1291) sits where a
+        // parameter name would: space after the preceding `,`, no space before
+        // the closing `)`. That's "value" spacing, not "operator" spacing.
+        if strings_equal(lex, "...") { return "value"; }
         if strings_equal(lex, ":") { return "colon"; }
         if strings_equal(lex, "->") { return "arrow"; }
         if strings_equal(lex, "=>") { return "arrow"; }

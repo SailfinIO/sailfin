@@ -354,6 +354,14 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     if fn_is_extern {
         let mut signature: string = join_with_separator(preparation.signature, ", ");
         if signature.length == 0 { signature = ""; }
+        // The `...` tail is what makes LLVM apply the target's variadic
+        // convention — registers on AAPCS64 Linux, the stack on Apple arm64,
+        // where without it the callee reads its arguments from the wrong
+        // place. E0851 already rejects a `...` with no fixed parameter, so
+        // the degenerate `(...)` LLVM refuses cannot reach here. SFN-1291.
+        if function.is_variadic {
+            if signature.length > 0 { signature = signature + ", ..."; }
+        }
         let empty_constants = empty_string_constant_set();
         let lines: string[] = ["declare " + llvm_return + " @" + sanitized + "("
             + signature

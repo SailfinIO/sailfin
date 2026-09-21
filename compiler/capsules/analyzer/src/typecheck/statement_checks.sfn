@@ -248,9 +248,18 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         };
     }
     if statement.variant == "ExternFunctionDeclaration" {
-        let registration = register_local_function_symbol(bindings, statement.signature, "extern function", scope_start);
+        // See `register_top_level_symbol`: only a well-formed marker is
+        // recorded, so a misplaced `...` yields one E0851, not one per
+        // call site. SFN-1291.
+        let mut _extern_fixed_arity: int = -1;
+        if statement.variadic_index == statement.signature.parameters.length {
+            if statement.variadic_index > 0 {
+                _extern_fixed_arity = statement.variadic_index;
+            }
+        }
+        let registration = register_local_function_symbol(bindings, statement.signature, "extern function", scope_start, _extern_fixed_arity);
         let mut diagnostics = registration.diagnostics;
-        let _sig_diags = check_extern_signature(statement.signature);
+        let _sig_diags = check_extern_signature(statement.signature, statement.variadic_index);
         let mut _ci: int = 0;
         loop {
             if _ci >= _sig_diags.length { break; }

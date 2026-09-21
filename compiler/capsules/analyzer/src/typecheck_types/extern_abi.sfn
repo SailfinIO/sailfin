@@ -12,7 +12,8 @@ import {
     join_with_separator,
     slice_text,
     split_top_level_commas,
-    trim_text
+    trim_text,
+    typecheck_int_to_string
 } from "./text_utils";
 
 // Whether `text` is one of the v0 accepted C-ABI extern types when
@@ -412,6 +413,81 @@ fn make_extern_type_parameters_diagnostic(name: string) -> Diagnostic {
             + " only concrete C-ABI types are allowed across the extern boundary."
             + " Remove the `<...>` clause and write a separate Sailfin wrapper if"
             + " a generic surface is needed.",
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+// A `...` is only meaningful as the final parameter of an extern
+// declaration that already has at least one fixed parameter: C resolves a
+// variadic call against the fixed prototype, and LLVM cannot spell a
+// function type whose parameter list is `...` alone. SFEP-0079 3.3,
+// SFN-1291.
+fn make_extern_variadic_placement_diagnostic(name: string, variadic_index: int, fixed_count: int) -> Diagnostic {
+    let mut reason: string = "";
+    if variadic_index == 0 {
+        reason = " `...` needs at least one fixed parameter before it;"
+            + " a C variadic resolves its call against the fixed prototype.";
+    } else {
+        reason = " `...` must be the last parameter; " + typecheck_int_to_string(fixed_count - variadic_index)
+            + " parameter(s) follow it.";
+    }
+    return Diagnostic {
+        code: "E0851",
+        severity: "error",
+        message: "extern fn `" + name + "` places `...` incorrectly." + reason,
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
+// C applies its default argument promotions to everything in variadic
+// position: `i8`/`i16`/`u8`/`u16` and `_Bool` widen to `int`, and `float`
+// widens to `double`. Sailfin has no implicit promotion (SFEP-0058), so the
+// author writes the cast C would have inserted silently rather than passing
+// an unpromoted value the callee cannot read back.
+//
+// This is deliberately a reject-list, not the accept-list SFEP-0079 3.3
+// phrases the rule with: the call-site check can only name an argument's
+// type when the source states it outright, so anything it cannot name must
+// stay silent rather than be accused of needing a promotion it does not.
+// SFEP-0079 3.3, SFN-1291.
+fn c_variadic_promotion_required(type_text: string) -> boolean {
+    if strings_equal(type_text, "i8") { return true; }
+    if strings_equal(type_text, "i16") { return true; }
+    if strings_equal(type_text, "u8") { return true; }
+    if strings_equal(type_text, "u16") { return true; }
+    if strings_equal(type_text, "f32") { return true; }
+    // `bool` is the extern spelling and `boolean` the Sailfin one; an
+    // argument expression carries the latter.
+    if strings_equal(type_text, "bool") { return true; }
+    if strings_equal(type_text, "boolean") { return true; }
+    return false;
+}
+
+// The cast the author should have written, for the hint on E0851. Only the
+// types `c_variadic_promotion_required` accepts reach here.
+fn c_promotion_target(type_text: string) -> string {
+    if strings_equal(type_text, "f32") { return "f64"; }
+    return "i32";
+}
+
+fn make_extern_variadic_argument_diagnostic(name: string, position: int, type_text: string) -> Diagnostic {
+    let target = c_promotion_target(type_text);
+    return Diagnostic {
+        code: "E0851",
+        severity: "error",
+        message: "argument " + typecheck_int_to_string(position)
+            + " to extern fn `"
+            + name
+            + "` is in variadic position and has type `"
+            + type_text
+            + "`, which C promotes before the callee reads it. Sailfin does"
+            + " not promote implicitly — cast explicitly (`as "
+            + target
+            + "`).",
         file_path: "",
         primary: null,
         suggestion: null

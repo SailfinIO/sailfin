@@ -70,6 +70,7 @@ fn emit_async_function(function: NativeFunction, functions: NativeFunction[], ef
         effects: function.effects,
         decorators: function.decorators,
         is_extern: false,
+        is_variadic: function.is_variadic,
         instructions: function.instructions
     };
     let impl_lowered = emit_llvm_function(impl_function, functions, effects, context, module_name, entry_points, exported_symbols, imported_functions, module_globals, module_init_symbol, needs_module_init_call, imported_decorator_names);

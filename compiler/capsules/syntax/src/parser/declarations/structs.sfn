@@ -277,7 +277,7 @@ fn parse_struct_method(parser: Parser, decorators: Decorator[]) -> MethodParseRe
 
     current = skip_trivia(current);
     current = consume_symbol(current, "(");
-    let parameter_result = parse_parameter_list(current);
+    let parameter_result = parse_parameter_list(current, false);
     current = parameter_result.parser;
     let parameters = parameter_result.parameters;
 

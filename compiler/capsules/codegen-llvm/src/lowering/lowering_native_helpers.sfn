@@ -33,6 +33,7 @@ fn make_native_function_basic(name: string, is_async: boolean) -> NativeFunction
         effects: [],
         decorators: [],
         is_extern: false,
+        is_variadic: false,
         instructions: []
     };
 }
@@ -46,6 +47,7 @@ fn make_native_function_with_return(name: string, is_async: boolean, ret_type: s
         effects: [],
         decorators: [],
         is_extern: false,
+        is_variadic: false,
         instructions: []
     };
 }
@@ -66,6 +68,7 @@ fn make_native_function_method(name: string, self_type: string, ret_type: string
         effects: [],
         decorators: [],
         is_extern: false,
+        is_variadic: false,
         instructions: []
     };
 }
@@ -188,6 +191,7 @@ fn update_function_return_type(fn_val: NativeFunction, ret_type: string) -> Nati
         effects: fn_val.effects,
         decorators: fn_val.decorators,
         is_extern: fn_val.is_extern,
+        is_variadic: fn_val.is_variadic,
         instructions: fn_val.instructions
     };
 }
@@ -201,6 +205,7 @@ fn update_function_effects(fn_val: NativeFunction, effects: string[]) -> NativeF
         effects: effects,
         decorators: fn_val.decorators,
         is_extern: fn_val.is_extern,
+        is_variadic: fn_val.is_variadic,
         instructions: fn_val.instructions
     };
 }
@@ -214,6 +219,7 @@ fn update_function_params(fn_val: NativeFunction, params: NativeParameter[]) -> 
         effects: fn_val.effects,
         decorators: fn_val.decorators,
         is_extern: fn_val.is_extern,
+        is_variadic: fn_val.is_variadic,
         instructions: fn_val.instructions
     };
 }
@@ -227,6 +233,7 @@ fn update_function_instructions(fn_val: NativeFunction, instrs: NativeInstructio
         effects: fn_val.effects,
         decorators: fn_val.decorators,
         is_extern: fn_val.is_extern,
+        is_variadic: fn_val.is_variadic,
         instructions: instrs
     };
 }
@@ -378,6 +385,11 @@ fn get_function_is_async_at(functions: NativeFunction[], idx: int) -> boolean {
 fn get_function_is_extern_at(functions: NativeFunction[], idx: int) -> boolean {
     let f = functions[idx];
     return f.is_extern;
+}
+
+fn get_function_is_variadic_at(functions: NativeFunction[], idx: int) -> boolean {
+    let f = functions[idx];
+    return f.is_variadic;
 }
 
 fn get_function_parameters_at(functions: NativeFunction[], idx: int) -> NativeParameter[] {

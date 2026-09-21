@@ -59,7 +59,7 @@ fn _grandfathered_lowering_ceiling(path: string) -> int {
     // and Sailfin rejects a partial struct literal at lowering (`E1002`), so
     // the synthesized `Error` layout here must name it. One mandatory line
     // with no net-zero form.
-    if path == LOWERING_ROOT + "/lowering_helpers.sfn" { return 1513; }
+    if path == LOWERING_ROOT + "/lowering_helpers.sfn" { return 1519; }
     // 1056 -> 1062: SFN-1289. The light struct reader dropped the
     // `@repr(C, packed)` bit, rebuilding a packed struct unpacked and
     // re-rendering `{ ... }` for `<{ ... }>` — every field offset moved.
@@ -108,7 +108,19 @@ fn _grandfathered_lowering_ceiling(path: string) -> int {
     // shrink-only rule, called out rather than absorbed: the alternative is
     // an if-condition whose sub-expression failure is silently discarded.
     if path == LOWERING_ROOT + "/instructions_if.sfn" { return 785; }
-    if path == LOWERING_ROOT + "/emission.sfn" { return 776; }
+    // SFN-1291 raises `emission.sfn` 776 -> 783 and `lowering_helpers.sfn`
+    // 1513 -> 1519 for variadic externs. Both are guards, not features:
+    // `emission.sfn` appends the `...` tail to a variadic `declare`, which is
+    // what makes LLVM apply the target's variadic convention — dropping it
+    // miscompiles on Apple arm64, where variadic arguments go on the stack.
+    // `lowering_helpers.sfn` declines to record a call whose return-type
+    // slice is really a function type (`call i32 (i8*, ...) @printf`), which
+    // would otherwise render a declare LLVM rejects. Neither has a net-zero
+    // form — the code is three lines and one line respectively — and the
+    // comments state why removing either guard reintroduces a silent
+    // miscompile. A raise against the shrink-only rule, called out rather
+    // than absorbed.
+    if path == LOWERING_ROOT + "/emission.sfn" { return 783; }
     return 0;
 }
 

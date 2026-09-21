@@ -3,13 +3,7 @@
 // The expression walk: recursive type/scope checking of every expression
 // form, dispatching to the per-rule modules for the specific checks.
 import { parse_fn_type_text } from "sfn/ir";
-import { ends_with, substring } from "sfn/strings";
-import {
-    Expression,
-    SourceSpan,
-    Statement,
-    TypeAnnotation
-} from "sfn/syntax";
+import { Expression, SourceSpan, Statement } from "sfn/syntax";
 
 import { lookup_imported_function } from "../effect_imports";
 import { Diagnostic } from "../typecheck_types";
@@ -39,7 +33,6 @@ import {
     make_imported_fn_value_diagnostic,
     register_local_symbol
 } from "../typecheck_types/symbol_table_and_raw_exprs";
-import { trim_text } from "../typecheck_types/text_utils";
 import { check_intersection_value_type_annotation, check_object_literal_target } from "../typecheck_types/value_and_object_checks";
 import {
     _struct_arithmetic_diagnostics,
@@ -71,6 +64,11 @@ import {
     ctx_with_bindings,
     ctx_with_expected_type
 } from "./context";
+import {
+    _array_element_expected_type,
+    _assignment_expected_type,
+    _call_argument_expected_type
+} from "./expected_types";
 import { unknown_field_diagnostics } from "./field_access";
 import { _serve_resolves_to_user_fn } from "./patterns";
 import {
@@ -90,6 +88,7 @@ import {
 import { _declared_struct_annotation, _string_list_has } from "./symbols";
 import { _is_syscall_name, _syscall_call_diagnostics } from "./syscalls";
 import { _conditional_branch_type, check_conditional_types } from "./try_and_conditional";
+import { variadic_argument_diagnostics } from "./variadic_rules";
 
 fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
     let bindings = ctx.bindings;
@@ -177,6 +176,9 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // lowerer would fatal on ("callee signature is not known").
         diagnostics = diagnostics.concat(primitive_method_diagnostics(expression, ctx));
         diagnostics = diagnostics.concat(call_argument_type_diagnostics(expression, bindings));
+        // An argument past a variadic extern's last fixed parameter must
+        // already carry a C-promoted type -> E0851 (SFN-1291).
+        diagnostics = diagnostics.concat(variadic_argument_diagnostics(expression, bindings));
         return diagnostics;
     }
     if expression.variant == "Binary" {
@@ -683,53 +685,6 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         return check_unanalyzable_raw(expression.text, expression.span);
     }
     return [];
-}
-
-fn _call_argument_expected_type(expression: Expression, index: int, ctx: TypeckCtx) -> TypeAnnotation? {
-    if expression.callee == null { return null; }
-    if expression.callee.variant != "Identifier" { return null; }
-    let mut entry = find_value_symbol(ctx.bindings, expression.callee.name);
-    if entry == null {
-        entry = find_value_symbol(ctx.top_level, expression.callee.name);
-    }
-    if entry == null { return null; }
-    if is_function_kind(entry.kind) {
-        if index >= entry.function_parameter_types.length { return null; }
-        return TypeAnnotation {
-            text: entry.function_parameter_types[index]
-        };
-    }
-    if entry.declared_type.length == 0 { return null; }
-    let fn_type = parse_fn_type_text(entry.declared_type);
-    if !fn_type.ok { return null; }
-    if index >= fn_type.param_types.length { return null; }
-    return TypeAnnotation { text: fn_type.param_types[index] };
-}
-
-fn _assignment_expected_type(target: Expression, ctx: TypeckCtx) -> TypeAnnotation? {
-    if target.variant != "Identifier" { return null; }
-    let mut entry = find_value_symbol(ctx.bindings, target.name);
-    if entry == null {
-        entry = find_value_symbol(ctx.top_level, target.name);
-    }
-    if entry == null { return null; }
-    if entry.declared_type.length == 0 { return null; }
-    return TypeAnnotation { text: entry.declared_type };
-}
-
-fn _array_element_expected_type(expected: TypeAnnotation?) -> TypeAnnotation? {
-    if expected == null { return null; }
-    let text = trim_text(expected.text);
-    if !ends_with(text, "[]") { return null; }
-    let mut element = trim_text(substring(text, 0, text.length - 2));
-    if element.length >= 2 {
-        if substring(element, 0, 1) == "(" {
-            if substring(element, element.length - 1, element.length) == ")" {
-                element = trim_text(substring(element, 1, element.length - 1));
-            }
-        }
-    }
-    return TypeAnnotation { text: element };
 }
 
 // Walk a match-arm pattern for diagnostics, exempting the `Raw` shorthand

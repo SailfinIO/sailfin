@@ -1,0 +1,29 @@
+// Regression coverage for `sfn fmt` spacing of the `...` variadic marker in
+// an `extern fn` parameter list (SFN-1291).
+//
+// The lexer scans `...` as a single three-character `Symbol` lexeme.
+// `_classify_role` (compiler/src/tools/fmt/tokens.sfn) gives it "value"
+// spacing — the same role an identifier gets — so it reads like a trailing
+// parameter: a space after the preceding `,` and no space before the
+// closing `)`.
+import { index_of } from "../../src/string_utils";
+import { format_source } from "../../src/tools/fmt";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+// ── The canonical spelling is already a fixed point ──────────────────
+test "fmt variadic: canonical extern fn with ... is idempotent" ![io] {
+    let src = "extern fn ioctl(fd: i32, request: u64, ...) -> i32;\n";
+    let out = format_source(src);
+    assert out == src;
+}
+
+// ── Squashed spacing normalizes to the canonical spelling ────────────
+test "fmt variadic: squashed extern fn with ... normalizes spacing" ![io] {
+    let src = "extern fn ioctl(fd: i32,request: u64,...)->i32;\n";
+    let out = format_source(src);
+    assert _contains(out, "request: u64, ...) -> i32");
+    assert _contains(out, "u64,...") == false;
+}

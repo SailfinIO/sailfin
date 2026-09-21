@@ -168,7 +168,7 @@ fn _build_nested_fn_scope(signature: FunctionSignature, ctx: TypeckCtx) -> Scope
         if !has_symbol(ctx.top_level, entry.name) {
             if !is_function_kind(entry.kind) {
                 scope.push(SymbolEntry {
-                    name: entry.name, kind: "outer_local", span: entry.span, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: "", declared_type: entry.declared_type, function_parameter_types: [], function_return_type: "", function_effects: [], function_is_async: false, is_top_level_function: false, is_nested_function: false
+                    name: entry.name, kind: "outer_local", span: entry.span, is_generic: false, is_c_abi: false, element_kind: "", declared_prim: "", declared_struct: "", declared_type: entry.declared_type, function_parameter_types: [], function_return_type: "", function_effects: [], function_is_async: false, variadic_fixed_arity: -1, is_top_level_function: false, is_nested_function: false
                 });
             }
         }

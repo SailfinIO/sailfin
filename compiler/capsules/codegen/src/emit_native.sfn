@@ -273,7 +273,7 @@ fn emit_statement_declarations(state: NativeState, statement: Statement) -> Stat
     }
     if statement.variant == "ExternFunctionDeclaration" {
         return StatementDispatchResult {
-            state: emit_extern_function(state, statement.signature, statement.unsafe, statement.decorators),
+            state: emit_extern_function(state, statement.signature, statement.unsafe, statement.decorators, statement.variadic_index),
             handled: true
         };
     }
@@ -408,11 +408,20 @@ fn emit_statement_control_flow(state: NativeState, statement: Statement) -> Nati
 }
 
 // ── Statement emitters ───────────────────────────────────────────────
-fn emit_extern_function(state: NativeState, signature: FunctionSignature, unsafe_flag: boolean, decorators: Decorator[]) -> NativeState {
+fn emit_extern_function(state: NativeState, signature: FunctionSignature, unsafe_flag: boolean, decorators: Decorator[], variadic_index: int) -> NativeState {
     let mut current = emit_decorators(state, decorators);
     current = state_emit_line(current, ".fn " + format_function_signature(signature));
     if unsafe_flag { current = state_emit_line(current, ".meta unsafe"); }
     current = state_emit_line(current, ".meta extern");
+    // A malformed `variadic_index` (anything but "all fixed params, then
+    // `...`") is the analyzer's E0851 to report; emit only encodes the
+    // well-formed case so a rejected declaration never round-trips as
+    // variadic through `.sfn-asm`. SFN-1291.
+    if variadic_index == signature.parameters.length {
+        if variadic_index > 0 {
+            current = state_emit_line(current, ".meta variadic");
+        }
+    }
     current = emit_signature_metadata(current, signature);
     current = emit_parameter_metadata(current, signature.parameters);
     return state_emit_line(current, ".endfn");
