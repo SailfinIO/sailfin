@@ -42,12 +42,25 @@ use native `sfn.exe` and the Windows bootstrap/test commands; do not switch to
 WSL merely because a non-interactive shell lacks the user's `PATH` entries or
 this fresh worktree has no `build/bin/sfn`. Check the installed toolchain in
 the user's shell or local Sailfin version store first. Use WSL only when the
-issue explicitly needs a Linux-specific check. The pickup itself does not
-require a full triple-pass host check. Follow `sailfin-check`'s local-versus-CI
-gate split: native clean-tree self-hosting for structural changes and targeted
-tests locally; Sailfin's Linux, macOS, and Windows PR matrix runs the full
-sharded suite. Run a local full gate only when the issue explicitly requires it
-or CI does not provide an equivalent gate.
+issue explicitly needs a Linux-specific check.
+
+Use this default iteration ladder:
+
+1. Run `sfn check <touched files>` for the fast source loop.
+2. After a coherent compiler-source change, run `sfn dev bootstrap build` once
+   before test execution so targeted tests use the current compiler.
+3. Run the narrowest relevant `build/bin/sfn test <path>` / `-k <name>` checks.
+4. Format touched `.sfn` files before final verification, then repeat only the
+   checks invalidated by later edits.
+
+Do not run bare `sfn test`, `sfn dev verify`, or `sfn dev verify --strict` as
+part of normal pickup iteration or merely because a change is structural or
+high-risk. Those commands are full-suite gates and can take hours. Sailfin's
+Linux, macOS, and Windows PR matrix supplies the full sharded test coverage;
+use native self-hosting (`--clean-tree` only for structural changes) plus
+targeted local tests before publishing. Run a local full gate only when the
+issue explicitly requires one or when PR CI does not provide an equivalent
+gate, following `sailfin-check`'s local-versus-CI split.
 
 Use Codex subagents when a bounded slice can proceed independently, such as
 read-only surface mapping, a mechanical implementation slice, or first-pass
