@@ -39,6 +39,7 @@ import {
     emit_bf16_widen_to_float,
     emit_i64_round_to_odd
 } from "./core_bf16_lowering";
+import { emit_f16_widen_to_double, emit_f16_widen_to_float } from "./core_f16_lowering";
 import { pick_agg_cast_shim_target } from "./core_literals_lowering";
 import { emit_comparison_instruction } from "./core_operands/comparisons";
 import { coerce_operand_to_type } from "./core_operands/dispatch";
@@ -614,6 +615,34 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             };
         }
     }
+    if operand.llvm_type == "half" {
+        if target_type == "float" {
+            let widened = emit_f16_widen_to_float(operand.value, current_temp, current_lines);
+            return ExpressionResult {
+                lines: widened.lines,
+                temp_index: widened.temp_index,
+                operand: LLVMOperand {
+                    llvm_type: "float",
+                    value: widened.value
+                },
+                string_constants: lowered.string_constants,
+                diags: diags
+            };
+        }
+        if target_type == "double" {
+            let widened = emit_f16_widen_to_double(operand.value, current_temp, current_lines);
+            return ExpressionResult {
+                lines: widened.lines,
+                temp_index: widened.temp_index,
+                operand: LLVMOperand {
+                    llvm_type: "double",
+                    value: widened.value
+                },
+                string_constants: lowered.string_constants,
+                diags: diags
+            };
+        }
+    }
     if operand.llvm_type == "float" {
         if target_type == "bfloat" {
             let narrowed = emit_bf16_narrow_from_float(operand.value, current_temp, current_lines);
@@ -654,10 +683,6 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             if operand.llvm_type == "double" {
                 if target_type == "float" { numeric_op_name = "fptrunc"; }
                 if target_type == "half" { numeric_op_name = "fptrunc"; }
-            }
-            if operand.llvm_type == "half" {
-                if target_type == "float" { numeric_op_name = "fpext"; }
-                if target_type == "double" { numeric_op_name = "fpext"; }
             }
         }
     }
