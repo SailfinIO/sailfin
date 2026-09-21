@@ -128,11 +128,11 @@ import {
 } from "./lowering_helpers";
 import {
     _join_llvm_lines_linear,
-    append_native_function,
     apply_module_symbol_mangling,
     concat_native_functions
 } from "./lowering_helpers_mangling";
 import {
+    append_native_function,
     build_trait_metadata,
     empty_capability_manifest,
     flatten_struct_methods

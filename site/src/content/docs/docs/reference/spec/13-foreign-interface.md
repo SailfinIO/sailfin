@@ -76,6 +76,11 @@ targets disagree on where a variadic argument goes — registers on AAPCS64
 Linux, the stack on Apple arm64 — and only the declared function type carries
 that distinction through to codegen.
 
+When a module re-exports a variadic extern, downstream imports bind the
+original provider symbol directly. Sailfin does not emit the ordinary
+re-export wrapper for that symbol: a wrapper can name the fixed parameters but
+cannot name or forward the unknown variadic tail.
+
 **Call-site promotion check.** C applies its default argument promotions to
 everything in variadic position: `i8`/`i16`/`u8`/`u16` and `_Bool` widen to
 `int`, and `float` widens to `double`. Sailfin has no implicit promotion

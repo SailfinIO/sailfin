@@ -34,30 +34,37 @@ fn _import(name: string, alias: string?) -> NativeImport {
     };
 }
 
+fn _aliases(imports: NativeImport[], candidates: NativeFunction[]) -> NativeFunction[] {
+    return build_import_alias_signatures(imports, candidates, [], "consumer", []);
+}
+
 // ── Aliased specifier clones the provider signature under the local name ──
 test "alias signatures: aliased specifier clones export under local alias" {
-    let aliases = build_import_alias_signatures([_import("make", "make_a")], [_fn("make", "int")]);
+    let aliases = _aliases([_import("make", "make_a")], [_fn("make", "int")]);
     assert aliases.length == 1;
     assert aliases[0].name == "make_a";
     assert aliases[0].return_type == "int";
 }
 
-// ── Plain (non-aliased) specifiers need no clone (export name resolves) ──
-test "alias signatures: plain specifier produces no clone" {
-    let aliases = build_import_alias_signatures([_import("make", null)], [_fn("make", "int")]);
-    assert aliases.length == 0;
+// ── Plain specifiers are localized too, so their exact provider signature
+//    wins over unrelated same-named functions in the transitive pool. ─────
+test "alias signatures: plain specifier clones the provider signature" {
+    let aliases = _aliases([_import("make", null)], [_fn("make", "int")]);
+    assert aliases.length == 1;
+    assert aliases[0].name == "make";
+    assert aliases[0].return_type == "int";
 }
 
 // ── An alias of an unknown export is skipped (no spurious entry) ─────────
 test "alias signatures: alias of an unknown export is skipped" {
-    let aliases = build_import_alias_signatures([_import("ghost", "g")], [_fn("make", "int")]);
+    let aliases = _aliases([_import("ghost", "g")], [_fn("make", "int")]);
     assert aliases.length == 0;
 }
 
 // ── Provider resolved by mangled `name__<provider>` suffix (test-runner /
 //    cross-module case where imported defs carry the module suffix) ──────
 test "alias signatures: resolves provider by mangled suffix" {
-    let aliases = build_import_alias_signatures([_import("make", "make_a")], [_fn("make__provider", "string")]);
+    let aliases = _aliases([_import("make", "make_a")], [_fn("make__provider", "string")]);
     assert aliases.length == 1;
     assert aliases[0].name == "make_a";
     assert aliases[0].return_type == "string";

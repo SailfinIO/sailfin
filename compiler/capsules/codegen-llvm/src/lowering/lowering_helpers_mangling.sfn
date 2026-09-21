@@ -14,6 +14,7 @@ import {
     NativeParameter,
     NativeStruct
 } from "sfn/ir";
+import { parse_native_imports_for_import } from "sfn/ir";
 import { substring } from "sfn/strings";
 
 import { resolve_import_module_slug_for_module } from "../imports";
@@ -53,17 +54,38 @@ import {
     sanitize_module_suffix,
     should_keep_unmangled_abi_symbol
 } from "./lowering_helpers";
+import { append_native_function, collect_struct_method_symbols } from "./lowering_helpers_structs";
+
+// Variadic calls use LLVM's typed-call form (`call R (T, ...) @symbol(...)`).
+fn has_variadic_typed_call(lines: string[], symbol: string) -> boolean {
+    let needle = "@" + symbol + "(";
+    let mut index: int = 0;
+    loop {
+        if index >= lines.length { break; }
+        let line = lines[index];
+        index += 1;
+        let symbol_pos = index_of(line, needle);
+        if symbol_pos < 0 { continue; }
+        let call_pos = index_of(line, "call ");
+        if call_pos >= 0 && call_pos < symbol_pos {
+            if index_of(substring(line, call_pos, symbol_pos), "...") >= 0 {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
 fn resolve_import_provider_module_name(import_path: string, current_module_slug: string, available_module_names: string[], module_aliases: ImportModuleAlias[]) -> string {
     let base = resolve_import_module_slug_for_module(import_path, current_module_slug);
     if base.length == 0 { return base; }
-    let mut alias_index: int = 0;
+    let mut index: int = 0;
     loop {
-        if alias_index >= module_aliases.length { break; }
-        if module_aliases[alias_index].import_slug == base {
-            return module_aliases[alias_index].provider_slug;
+        if index >= module_aliases.length { break; }
+        if module_aliases[index].import_slug == base {
+            return module_aliases[index].provider_slug;
         }
-        alias_index += 1;
+        index += 1;
     }
     if string_array_contains(available_module_names, base) { return base; }
     let mod_slug = base + "/mod";
@@ -71,6 +93,67 @@ fn resolve_import_provider_module_name(import_path: string, current_module_slug:
         return mod_slug;
     }
     return base;
+}
+
+fn _native_text_for_module(native_texts: string[], module_name: string) -> string {
+    let mut index: int = 0;
+    loop {
+        if index >= native_texts.length { break; }
+        let text = native_texts[index];
+        index += 1;
+        if text == null || text.length == 0 { continue; }
+        if extract_module_name_from_native_text(text) == module_name {
+            return text;
+        }
+    }
+    return "";
+}
+
+// Follow an inline re-export chain to its defining `(module, symbol)` pair.
+fn resolve_reexport_provider(provider_module: string, symbol: string, native_texts: string[], available_modules: string[], module_aliases: ImportModuleAlias[]) -> string[] {
+    let mut current_provider = provider_module;
+    let mut current_symbol = symbol;
+    let mut seen: string[] = [];
+    loop {
+        let key = current_provider + "\n" + current_symbol;
+        if string_array_contains(seen, key) { break; }
+        seen.push(key);
+        let text = _native_text_for_module(native_texts, current_provider);
+        if text.length == 0 { break; }
+        let exports = parse_native_imports_for_import(text);
+        let mut next_provider: string = "";
+        let mut next_symbol = current_symbol;
+        let mut i: int = 0;
+        loop {
+            if i >= exports.length { break; }
+            let entry = exports[i];
+            i += 1;
+            if entry == null || entry.kind != "export" || entry.specifiers == null {
+                continue;
+            }
+            let mut j: int = 0;
+            loop {
+                if j >= entry.specifiers.length { break; }
+                let spec = entry.specifiers[j];
+                j += 1;
+                if spec == null { continue; }
+                let mut exported = spec.name;
+                if spec.alias != null { exported = spec.alias; }
+                if sanitize_symbol(exported) != current_symbol { continue; }
+                next_provider = resolve_import_provider_module_name(entry.module, current_provider, available_modules, module_aliases);
+                next_symbol = sanitize_symbol(spec.name);
+                break;
+            }
+            if next_provider.length > 0 { break; }
+        }
+        if next_provider.length == 0 { break; }
+        if next_provider == current_provider && next_symbol == current_symbol {
+            break;
+        }
+        current_provider = next_provider;
+        current_symbol = next_symbol;
+    }
+    return [current_provider, current_symbol];
 }
 
 // #960: scan a `.sfn-asm` native text for struct-method symbols.
@@ -81,74 +164,6 @@ fn resolve_import_provider_module_name(import_path: string, current_module_slug:
 // pass can't learn it from the import directives — it must be discovered by
 // walking the provider's native text. Returns the sanitized bare symbols
 // (e.g. `ProbeEget_actual`) defined by every `.struct`/`.method` pair.
-fn _collect_struct_method_symbols(native_text: string) -> string[] {
-    let mut result: string[] = [];
-    if native_text.length == 0 { return result; }
-    let mut current_struct: string = "";
-    let mut scan_pos: int = 0;
-    let len = native_text.length;
-    loop {
-        if scan_pos >= len { break; }
-        let mut line_end: int = scan_pos;
-        loop {
-            if line_end >= len { break; }
-            if native_text[line_end] == "\n" { break; }
-            line_end += 1;
-        }
-        let line = trim_text(substring(native_text, scan_pos, line_end));
-        scan_pos = line_end + 1;
-
-        if starts_with(line, ".struct ") {
-            let tail = trim_text(substring(line, 8, line.length));
-            // Stop at the first `<` (generic params) or space (`implements
-            // ...`). `flatten_struct_methods` builds the lowered symbol from
-            // the bare struct name, so `.struct Foo<T> implements Bar` must
-            // resolve to `Foo`, not `Foo<T>`.
-            let mut name_end: int = 0;
-            loop {
-                if name_end >= tail.length { break; }
-                let ch = tail[name_end];
-                if ch == " " { break; }
-                if ch == "<" { break; }
-                name_end += 1;
-            }
-            current_struct = substring(tail, 0, name_end);
-            continue;
-        }
-        if starts_with(line, ".endstruct") {
-            current_struct = "";
-            continue;
-        }
-        if current_struct.length == 0 { continue; }
-        if starts_with(line, ".method ") {
-            let mut tail = trim_text(substring(line, 8, line.length));
-            // The lowered symbol uses the bare method name, so drop an
-            // `async ` prefix and any `<...>` generic parameter list:
-            // `.method async foo<T>(...)` → `foo`.
-            if starts_with(tail, "async ") {
-                tail = trim_text(substring(tail, 6, tail.length));
-            }
-            let mut name_end: int = 0;
-            loop {
-                if name_end >= tail.length { break; }
-                let ch = tail[name_end];
-                if ch == "(" { break; }
-                if ch == "<" { break; }
-                name_end += 1;
-            }
-            if name_end >= tail.length { continue; }
-            let method_name = trim_text(substring(tail, 0, name_end));
-            if method_name.length == 0 { continue; }
-            let symbol = sanitize_symbol(current_struct + method_name);
-            if symbol.length == 0 { continue; }
-            if !string_array_contains(result, symbol) {
-                result.push(symbol);
-            }
-        }
-    }
-    return result;
-}
-
 fn _implicit_substitution_index(olds: string[], news: string[], symbol: string) -> int {
     let mut index: int = 0;
     loop {
@@ -306,9 +321,7 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
             let import_module = substring(after_q1, 0, q2);
             if import_module.length == 0 { continue; }
 
-            let provider_module = resolve_import_provider_module_name(import_module, current_module_slug, available_modules, module_aliases);
-            let provider_is_runtime = starts_with(provider_module, "runtime/");
-            let provider_suffix = sanitize_module_suffix(provider_module);
+            let base_provider_module = resolve_import_provider_module_name(import_module, current_module_slug, available_modules, module_aliases);
 
             // Extract specifiers between { and }.
             let brace_open = index_of(line, "{");
@@ -355,12 +368,37 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
                 }
                 // Don't rewrite if already qualified.
                 if index_of(local_symbol, "__") >= 0 { continue; }
+                let mut provider_module = base_provider_module;
+                let mut provider_symbol = original_symbol;
+                let local_signature = find_declare_signature(rewritten, local_symbol);
+                let mut local_signature_is_variadic = false;
+                if local_signature != null {
+                    local_signature_is_variadic = string_array_contains(local_signature.param_types, "...");
+                }
+                let is_variadic_import = local_signature_is_variadic
+                    || has_variadic_typed_call(rewritten, local_symbol);
+                if is_variadic_import {
+                    let resolved_provider = resolve_reexport_provider(provider_module, original_symbol, imported_native_texts, available_modules, module_aliases);
+                    provider_module = resolved_provider[0];
+                    provider_symbol = resolved_provider[1];
+                }
+                let provider_is_runtime = starts_with(provider_module, "runtime/");
+                let provider_suffix = sanitize_module_suffix(provider_module);
                 import_olds.push(local_symbol);
-                let mut target_symbol = original_symbol;
+                let mut target_symbol = provider_symbol;
                 if !provider_is_runtime {
-                    target_symbol = original_symbol + "__" + provider_suffix;
+                    target_symbol = provider_symbol + "__" + provider_suffix;
                 }
                 import_news.push(target_symbol);
+                // Typed variadic calls can outlive their local declaration.
+                // Restore it under the local spelling now; symbol substitution
+                // below carries it to the resolved provider automatically.
+                if is_variadic_import && !local_signature_is_variadic {
+                    let provider_signature = find_declare_signature(rewritten, provider_symbol);
+                    if provider_signature != null {
+                        rewritten = insert_before_llvm_footer(rewritten, [_render_declare_line(local_symbol, provider_signature)]);
+                    }
+                }
 
                 // Re-export shim: provide `local_symbol__<this_module>` as a thin
                 // wrapper forwarding to the provider's symbol. A runtime module
@@ -403,7 +441,7 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
         // Runtime modules keep stable, unmangled ABI symbols.
         if starts_with(provider_slug, "runtime/") { continue; }
         let provider_suffix = sanitize_module_suffix(provider_slug);
-        let method_symbols = _collect_struct_method_symbols(imm_text);
+        let method_symbols = collect_struct_method_symbols(imm_text);
         let mut ms_i: int = 0;
         loop {
             if ms_i >= method_symbols.length { break; }
@@ -578,13 +616,6 @@ fn _render_declare_line(symbol: string, signature: DeclareSignature) -> string {
     return "declare " + signature.return_type + " @" + symbol + "("
         + join_with_separator(param_types, ", ")
         + ")";
-}
-
-fn append_native_function(values: NativeFunction[], value: NativeFunction) -> NativeFunction[] {
-    let mut out = values;
-    if out == null { out = []; }
-    out = out.push(value);
-    return out;
 }
 
 fn concat_native_functions(first: NativeFunction[], second: NativeFunction[]) -> NativeFunction[] {
