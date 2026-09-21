@@ -149,6 +149,23 @@ test "link census: the resolver-free link entry points stay deleted" ![io] {
     assert expect_eq_bool(contains(source, "fn _clang_link_with_opt("), false).ok;
 }
 
+// A pooled suite has hundreds of link calls with a mostly common dependency
+// closure. The content-addressed object directory must therefore stay shared,
+// while publication must never replace a winner another Windows linker may
+// already have open. These two halves are one contract: isolating the whole
+// directory avoids LNK1104 but turns the full suite into hundreds of repeated
+// dep-object compilations; sharing it with replace-on-publish restores the
+// race. Pin both wiring points together.
+test "link object cache: pooled tests share immutable no-replace entries" ![io] {
+    let test_link = fs.readFile("compiler/src/cli/commands/test/link.sfn");
+    assert expect_eq_bool(contains(test_link, "link_obj_dir: rt_cache_dir + \"/link-obj\""), true).ok;
+    assert expect_eq_bool(contains(test_link, "link_obj_dir: cache_dir + \"/link-obj\""), false).ok;
+
+    let assembly = fs.readFile("compiler/src/build/clang_argv.sfn");
+    assert expect_eq_bool(contains(assembly, "_rename_noreplace_preserving_source_on_failure(item.staged_path, item.object_path)"), true).ok;
+    assert expect_eq_bool(contains(assembly, "_atomic_rename_into_place(item.staged_path, item.object_path)"), false).ok;
+}
+
 // ---- Source-to-object census (SFN-950, SFEP-0066 §3.3) ----
 //
 // The link census above guards the Link role; these guard the Assemble

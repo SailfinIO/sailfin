@@ -42,9 +42,9 @@ import {
     run_llvm_artifact_with_provider
 } from "./artifact_compile";
 import {
-    _atomic_rename_into_place,
     _ensure_dir_cmd,
     _mktemp_sibling_cmd,
+    _rename_noreplace_preserving_source_on_failure,
     _sha256_of_file
 } from "./fs";
 import { sha256_hex_of_string } from "./hash";
@@ -175,9 +175,20 @@ fn assemble_link_inputs_with_provider(ll_paths: string[], object_dir: string, op
         if pi >= pending.length { break; }
         let item = pending[pi];
         if item.staged_path.length > 0 {
-            if _atomic_rename_into_place(item.staged_path, item.object_path) {
+            // Object-cache entries are immutable and content-addressed. A
+            // concurrent compiler may have published this exact key while
+            // our pipeline was running, so never replace the destination:
+            // on Windows that can displace an object while lld-link has it
+            // open (LNK1104), and on every host it does needless filesystem
+            // work. First writer wins; a complete destination after a lost
+            // race is the successful result for this request.
+            if _rename_noreplace_preserving_source_on_failure(item.staged_path, item.object_path) {
+                objects[item.object_index] = item.object_path;
+            } else if fs.exists(item.object_path) {
+                fs.deleteFile(item.staged_path);
                 objects[item.object_index] = item.object_path;
             } else {
+                fs.deleteFile(item.staged_path);
                 if run_llvm_artifact_with_provider(LlvmArtifactRequest {
                     ir_path: item.ll_path, object_path: item.fallback_path, opt_flag: opt_flag
                 }, provider) != 0 {
