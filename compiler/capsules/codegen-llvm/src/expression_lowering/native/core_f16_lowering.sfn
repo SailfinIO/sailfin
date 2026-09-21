@@ -1,0 +1,125 @@
+// f16 widening without LLVM's half conversion libcall on Windows (SFN-1305).
+// LLVM 18 passes a half argument in xmm0 to __extendhfsf2 on the MSVC target,
+// while compiler-rt's helper reads ecx. Reconstruct the exact f32 bit pattern
+// from the half bits, then use the supported f32 -> f64 extension.
+import { format_temp_name } from "../../expressions_helpers";
+
+struct F16Emission {
+    lines: string[];
+    temp_index: int;
+    value: string;
+}
+
+fn emit_f16_widen_to_float(value: string, temp_index: int, lines: string[]) -> F16Emission {
+    let mut current_lines = lines;
+    let mut next = temp_index;
+    let bits = format_temp_name(next);
+    next += 1;
+    let wide = format_temp_name(next);
+    next += 1;
+    let sign = format_temp_name(next);
+    next += 1;
+    let signed_bit = format_temp_name(next);
+    next += 1;
+    let exponent_bits = format_temp_name(next);
+    next += 1;
+    let exponent = format_temp_name(next);
+    next += 1;
+    let fraction = format_temp_name(next);
+    next += 1;
+    let fraction_bits = format_temp_name(next);
+    next += 1;
+    let is_subnormal = format_temp_name(next);
+    next += 1;
+    let is_special = format_temp_name(next);
+    next += 1;
+    let biased_exponent = format_temp_name(next);
+    next += 1;
+    let final_exponent = format_temp_name(next);
+    next += 1;
+    let normal_exponent_bits = format_temp_name(next);
+    next += 1;
+    let normal_bits = format_temp_name(next);
+    next += 1;
+    let subnormal_plus_base_bits = format_temp_name(next);
+    next += 1;
+    let subnormal_plus_base = format_temp_name(next);
+    next += 1;
+    let subnormal_value = format_temp_name(next);
+    next += 1;
+    let subnormal_bits = format_temp_name(next);
+    next += 1;
+    let magnitude = format_temp_name(next);
+    next += 1;
+    let signed_bits = format_temp_name(next);
+    next += 1;
+    let as_float = format_temp_name(next);
+    next += 1;
+
+    current_lines.push("  " + bits + " = bitcast half " + value + " to i16");
+    current_lines.push("  " + wide + " = zext i16 " + bits + " to i32");
+    current_lines.push("  " + sign + " = and i32 " + wide + ", 32768");
+    current_lines.push("  " + signed_bit + " = shl i32 " + sign + ", 16");
+    current_lines.push("  " + exponent_bits + " = and i32 " + wide + ", 31744");
+    current_lines.push("  " + exponent + " = lshr i32 " + exponent_bits + ", 10");
+    current_lines.push("  " + fraction + " = and i32 " + wide + ", 1023");
+    current_lines.push("  " + fraction_bits + " = shl i32 " + fraction + ", 13");
+    current_lines.push("  " + is_subnormal + " = icmp eq i32 " + exponent
+        + ", 0");
+    current_lines.push("  " + is_special + " = icmp eq i32 " + exponent + ", 31");
+    current_lines.push("  " + biased_exponent + " = add i32 " + exponent
+        + ", 112");
+    current_lines.push("  " + final_exponent + " = select i1 " + is_special
+        + ", i32 255, i32 "
+        + biased_exponent);
+    current_lines.push("  " + normal_exponent_bits + " = shl i32 "
+        + final_exponent
+        + ", 23");
+    current_lines.push("  " + normal_bits + " = or i32 " + normal_exponent_bits
+        + ", "
+        + fraction_bits);
+
+    // 0x38800000 is f32 2^-14. Adding the shifted fraction, then subtracting
+    // the base, gives every half subnormal exactly (fraction * 2^-24).
+    current_lines.push("  " + subnormal_plus_base_bits + " = or i32 "
+        + fraction_bits
+        + ", 947912704");
+    current_lines.push("  " + subnormal_plus_base + " = bitcast i32 "
+        + subnormal_plus_base_bits
+        + " to float");
+    current_lines.push("  " + subnormal_value + " = fsub float "
+        + subnormal_plus_base
+        + ", 0x3F10000000000000");
+    current_lines.push("  " + subnormal_bits + " = bitcast float "
+        + subnormal_value
+        + " to i32");
+    current_lines.push("  " + magnitude + " = select i1 " + is_subnormal
+        + ", i32 "
+        + subnormal_bits
+        + ", i32 "
+        + normal_bits);
+    current_lines.push("  " + signed_bits + " = or i32 " + magnitude + ", "
+        + signed_bit);
+    current_lines.push("  " + as_float + " = bitcast i32 " + signed_bits
+        + " to float");
+    return F16Emission {
+        lines: current_lines,
+        temp_index: next,
+        value: as_float
+    };
+}
+
+fn emit_f16_widen_to_double(value: string, temp_index: int, lines: string[]) -> F16Emission {
+    let widened = emit_f16_widen_to_float(value, temp_index, lines);
+    let as_double = format_temp_name(widened.temp_index);
+    let mut current_lines = widened.lines;
+    current_lines.push("  " + as_double + " = fpext float " + widened.value
+        + " to double");
+    return F16Emission {
+        lines: current_lines,
+        temp_index: widened.temp_index + 1,
+        value: as_double
+    };
+}
+
+export { F16Emission, emit_f16_widen_to_double, emit_f16_widen_to_float };

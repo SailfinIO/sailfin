@@ -5,9 +5,9 @@
 //
 // Verifies two contracts:
 //   A. When a nested `sfn test` run uses a shared
-//      SAILFIN_TEST_RUNTIME_OBJDIR, the link-object cache for the test source
-//      and dependency LLVM modules remains under the per-invocation scratch.
-//      Only runtime objects may occupy the cross-child shared directory.
+//      SAILFIN_TEST_RUNTIME_OBJDIR, the content-addressed link-object cache is
+//      shared too. Its publish is no-replace, so concurrent children reuse a
+//      complete winner instead of displacing an object another link has open.
 //   B. When `link-obj` is unwritable (chmod 555), the nested `sfn test` run
 //      still exits 0 by assembling ephemeral objects beside the `.ll` inputs;
 //      raw IR never crosses the final-link boundary.
@@ -51,7 +51,7 @@ fn _scratch_base() -> string ![io] {
     return base;
 }
 
-test "test link: dep objects stay isolated from the shared runtime objdir" ![io] {
+test "test link: dep objects reuse the shared runtime objdir" ![io] {
     let base = _scratch_base();
     let scratch = fs.mkdtemp(base + "/sfn-dep-obj-cache-a-scratch-");
     let runtime_objdir = fs.mkdtemp(base + "/sfn-dep-obj-cache-a-runtime-");
@@ -64,8 +64,10 @@ test "test link: dep objects stay isolated from the shared runtime objdir" ![io]
     let _out = process.capture_take_stdout();
     let _err = process.capture_take_stderr();
     assert exit == 0;
-    // Verify link-obj was created and contains at least one cached object.
-    let objects = fs.listDirectory(scratch + "/link-obj");
+    // Verify link-obj was created in the shared directory and contains at
+    // least one cached object. The per-child scratch must not grow a second
+    // copy of the same dependency-object cache.
+    let objects = fs.listDirectory(runtime_objdir + "/link-obj");
     let mut has_object = false;
     let mut i = 0;
     loop {
@@ -74,10 +76,7 @@ test "test link: dep objects stay isolated from the shared runtime objdir" ![io]
         i += 1;
     }
     assert has_object;
-    // Before the fix, primary/dependency objects were staged here beside the
-    // shared runtime objects. Concurrent pool children could then displace a
-    // file while another lld-link process was opening it (LNK1104).
-    assert ! fs.exists(runtime_objdir + "/link-obj");
+    assert ! fs.exists(scratch + "/link-obj");
 }
 
 test "test link: unwritable link-obj dir uses ephemeral objects" ![io] {

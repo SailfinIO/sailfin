@@ -10,6 +10,7 @@ import { format_temp_name } from "../../../expressions_helpers";
 import { CoercionResult, LLVMOperand } from "../../../types";
 import { extend_diag_array } from "../../../utils";
 import { emit_bf16_widen_to_double } from "../core_bf16_lowering";
+import { emit_f16_widen_to_double } from "../core_f16_lowering";
 import { emit_runtime_call, empty_runtime_call_overrides } from "../runtime_call";
 import { _coerce_pointer_tail } from "./pointer_tail";
 
@@ -306,20 +307,12 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             }
         }
         if operand_type == "half" {
-            // SFN-552: low-precision values widen only as the first step of
-            // the existing display chain. Recursing with a `double` operand
-            // sends the value directly through `number.to_string`; the
-            // widened carrier never reaches arithmetic harmonisation.
-            let widened = format_temp_name(temp_index);
-            current_lines.push("  " + widened + " = fpext " + operand_type + " "
-                + operand.value
-                + " to double");
+            let widened = emit_f16_widen_to_double(operand.value, temp_index, current_lines);
             let widened_operand = LLVMOperand {
                 llvm_type: "double",
-                value: widened
+                value: widened.value
             };
-            let rec = coerce_pointer_or_struct(widened_operand, "double", target, temp_index
-                + 1, current_lines);
+            let rec = coerce_pointer_or_struct(widened_operand, "double", target, widened.temp_index, widened.lines);
             if rec != null {
                 diags = extend_diag_array(diags, rec.diags);
                 return CoercionResult {
