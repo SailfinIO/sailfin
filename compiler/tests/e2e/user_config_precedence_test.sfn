@@ -24,6 +24,7 @@
 import { find } from "sfn/strings";
 import {
     clean_runner_env_without,
+    host_is_windows,
     nested_runner_scratch,
     report_child_failure,
     scratch_root,
@@ -44,6 +45,18 @@ fn _home(tag: string) -> string ![io] {
 }
 
 fn _bin(tag: string) -> string ![io] { return _dir(tag) + "/main.bin"; }
+
+fn _linker_value() -> string ![io] {
+    if host_is_windows() { return "lld-link"; }
+    return "ld";
+}
+
+fn _linker_trace(origin: string) -> string ![io] {
+    if host_is_windows() {
+        return "[link] linker: lld-link (" + origin + " override)";
+    }
+    return "[link] linker: system default (" + origin + "=ld)";
+}
 
 // A trivial program with a known, exact stdout.
 fn _src() -> string { return "fn main() ![io] {\n    print(\"UC_OK\");\n}\n"; }
@@ -122,14 +135,13 @@ fn _build(tag: string, home: string, extra_env: string[]) -> int ![io] {
 test "user_config: config supplies the linker when SAILFIN_LINKER is unset" ![io] {
     let triple = build_target_triple();
     let home = _home("config-only");
-    _write_config(home, "[target." + triple + "]\nlinker = \"ld\"\n");
+    _write_config(home, "[target." + triple + "]\nlinker = \"" + _linker_value()
+        + "\"\n");
     let rc = _build("config-only", home, []);
     assert rc == 0;
     let err = fs.readFile(_dir("config-only") + "/build.err");
-    assert find(err, "[link] linker: system default (" + home
-        + "/.sfn/config.toml target."
-        + triple
-        + ".linker=ld)", 0) >= 0;
+    assert find(err, _linker_trace(home + "/.sfn/config.toml target." + triple
+        + ".linker"), 0) >= 0;
     let run_rc = process.run_capture([_bin("config-only")], []);
     let run_out = process.capture_take_stdout();
     let run_err = process.capture_take_stderr();
@@ -141,11 +153,11 @@ test "user_config: config supplies the linker when SAILFIN_LINKER is unset" ![io
 test "user_config: SAILFIN_LINKER beats a persisted config default" ![io] {
     let triple = build_target_triple();
     let home = _home("env-wins");
-    _write_config(home, "[target." + triple + "]\nlinker = \"lld\"\n");
-    let rc = _build("env-wins", home, ["SAILFIN_LINKER=ld"]);
+    _write_config(home, "[target." + triple + "]\nlinker = \"mold\"\n");
+    let rc = _build("env-wins", home, ["SAILFIN_LINKER=" + _linker_value()]);
     assert rc == 0;
     let err = fs.readFile(_dir("env-wins") + "/build.err");
-    assert find(err, "[link] linker: system default (SAILFIN_LINKER=ld)", 0) >= 0;
+    assert find(err, _linker_trace("SAILFIN_LINKER"), 0) >= 0;
     assert find(err, home + "/.sfn/config.toml", 0) < 0;
     let run_rc = process.run_capture([_bin("env-wins")], []);
     let run_out = process.capture_take_stdout();
@@ -174,7 +186,9 @@ test "user_config: an unadmitted key warns to stderr without failing the build" 
     let triple = build_target_triple();
     let home = _home("unadmitted-key");
     _write_config(home, "[target." + triple
-        + "]\nsysroot = \"/nope\"\nlinker = \"ld\"\n");
+        + "]\nsysroot = \"/nope\"\nlinker = \""
+        + _linker_value()
+        + "\"\n");
     let rc = _build("unadmitted-key", home, []);
     assert rc == 0;
     let out = fs.readFile(_dir("unadmitted-key") + "/build.out");
@@ -190,16 +204,16 @@ test "user_config: relocated config provenance names the file actually read" ![i
     let config_dir = _dir(tag) + "/relocated";
     fs.createDirectory(config_dir, true);
     fs.writeFile(config_dir + "/config.toml", "[target." + triple
-        + "]\nsysroot = \"/nope\"\nlinker = \"ld\"\n");
+        + "]\nsysroot = \"/nope\"\nlinker = \""
+        + _linker_value()
+        + "\"\n");
     let rc = _build(tag, home, ["SAILFIN_CONFIG_DIR=" + config_dir]);
     assert rc == 0;
     let err = fs.readFile(_dir(tag) + "/build.err");
     assert find(err, config_dir + "/config.toml [target." + triple
         + "] sysroot is not a recognised key; ignoring", 0) >= 0;
-    assert find(err, "[link] linker: system default (" + config_dir
-        + "/config.toml target."
-        + triple
-        + ".linker=ld)", 0) >= 0;
+    assert find(err, _linker_trace(config_dir + "/config.toml target." + triple
+        + ".linker"), 0) >= 0;
     assert find(err, "~/.sfn/config.toml", 0) < 0;
 }
 

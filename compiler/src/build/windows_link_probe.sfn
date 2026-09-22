@@ -1,0 +1,238 @@
+// compiler/src/build/windows_link_probe.sfn
+//
+// Native, shell-free proof helpers for the Windows direct-link contract.
+// They keep external-tool inspection out of the pure argv builder: one
+// compiler-rt link probe proves the required half-conversion symbols, and one
+// llvm-nm pass derives `/INCLUDE:` roots from the actual runtime objects.
+import { _get_env_cmd } from "../build_flags";
+import { contains_string, index_of, substring } from "../string_utils";
+import { _mktemp_from_template_cmd, _sha256_of_file } from "./fs";
+import { sha256_hex_of_string } from "./hash";
+import { LlvmFamily, LlvmTool, resolve_llvm_toolchain } from "./llvm_toolchain_resolver";
+import { _dirname, _path_join } from "./paths";
+
+struct WindowsBuiltinsProof {
+    ok: boolean;
+    reason: string;
+    digest: string;
+}
+
+struct WindowsRetainRoots {
+    ok: boolean;
+    reason: string;
+    flags: string[];
+}
+
+fn _probe_tool_path(tools: LlvmTool[], role: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= tools.length { break; }
+        if tools[i].role == role { return tools[i].path; }
+        i += 1;
+    }
+    return "";
+}
+
+fn _probe_llvm_root(family: LlvmFamily, linker: string) -> string {
+    if family.root.length > 0 { return family.root; }
+    return _dirname(_dirname(linker));
+}
+
+fn _cleanup_builtins_probe(base: string) ![io] {
+    fs.deleteFile(base);
+    fs.deleteFile(base + ".obj");
+    fs.deleteFile(base + ".exe");
+}
+
+// Link the four half-conversion OPERATIONS Sailfin may emit. On x86-64 MSVC,
+// LLVM 18 lowers signed-int-to-half through cvtsi2ss + __truncsfhf2; the
+// generic __floatsihf symbol is not present in the official Windows archive.
+// Probing real IR keeps the proof aligned with this target's actual llc ABI
+// while still exercising every conversion, archive extraction, `_fltused`,
+// and the exact llc/lld-link + CRT family selected for production.
+fn prove_windows_builtins(llc_path: string, linker_path: string, builtins_path: string, msvc_lib_dir: string, ucrt_lib_dir: string) -> WindowsBuiltinsProof ![io] {
+    let digest = _sha256_of_file(builtins_path);
+    if digest.length == 0 {
+        return WindowsBuiltinsProof {
+            ok: false,
+            reason: "compiler-rt builtins archive is unreadable: "
+                + builtins_path,
+            digest: ""
+        };
+    }
+    let mut scratch = _get_env_cmd("TEMP");
+    if scratch.length == 0 || !fs.exists(scratch) { scratch = "build"; }
+    let base = _mktemp_from_template_cmd(_path_join(scratch, "sfn-lld-builtins-XXXXXX"));
+    if base.length == 0 {
+        return WindowsBuiltinsProof {
+            ok: false,
+            reason: "could not create the compiler-rt capability probe input",
+            digest: digest
+        };
+    }
+    let ir = "target triple = \"x86_64-pc-windows-msvc\"\n"
+        + "define i32 @sfn_builtins_probe(half %h, float %f, double %d, i32 %i) {\n"
+        + "entry:\n"
+        + "  %a = fpext half %h to float\n"
+        + "  %b = fptrunc float %f to half\n"
+        + "  %c = fptrunc double %d to half\n"
+        + "  %e = sitofp i32 %i to half\n"
+        + "  %abits = bitcast float %a to i32\n"
+        + "  %bbits16 = bitcast half %b to i16\n"
+        + "  %cbits16 = bitcast half %c to i16\n"
+        + "  %ebits16 = bitcast half %e to i16\n"
+        + "  %bbits = zext i16 %bbits16 to i32\n"
+        + "  %cbits = zext i16 %cbits16 to i32\n"
+        + "  %ebits = zext i16 %ebits16 to i32\n"
+        + "  %ab = add i32 %abits, %bbits\n"
+        + "  %cd = add i32 %cbits, %ebits\n"
+        + "  %sum = add i32 %ab, %cd\n"
+        + "  ret i32 %sum\n"
+        + "}\n";
+    fs.writeFile(base, ir);
+    let obj = base + ".obj";
+    let exe = base + ".exe";
+    let llc_rc = process.run_capture([llc_path, "-mtriple=x86_64-pc-windows-msvc", "-filetype=obj", base, "-o", obj], process.environ());
+    let _llc_out = process.capture_take_stdout();
+    let llc_err = process.capture_take_stderr();
+    if llc_rc != 0 || !fs.exists(obj) {
+        _cleanup_builtins_probe(base);
+        return WindowsBuiltinsProof {
+            ok: false,
+            reason: "compiler-rt capability probe object emission failed: "
+                + llc_err,
+            digest: digest
+        };
+    }
+    let link_rc = process.run_capture([linker_path, "/nologo", "/machine:x64", "/subsystem:console", "/entry:sfn_builtins_probe", "/nodefaultlib", "/out:"
+        + exe, obj, builtins_path, _path_join(msvc_lib_dir, "libcmt.lib"), _path_join(msvc_lib_dir, "libvcruntime.lib"), _path_join(ucrt_lib_dir, "libucrt.lib"), _path_join(msvc_lib_dir, "oldnames.lib")], process.environ());
+    let _link_out = process.capture_take_stdout();
+    let link_err = process.capture_take_stderr();
+    let linked = link_rc == 0 && fs.exists(exe);
+    _cleanup_builtins_probe(base);
+    if !linked {
+        return WindowsBuiltinsProof {
+            ok: false,
+            reason: "compiler-rt builtins probe could not link half widen, float/double narrow, and signed-int-to-half operations: "
+                + link_err,
+            digest: digest
+        };
+    }
+    return WindowsBuiltinsProof { ok: true, reason: "", digest: digest };
+}
+
+fn windows_link_input_identity(seed: string, paths: string[]) -> string ![io] {
+    let mut text = seed + "\n";
+    let mut i: int = 0;
+    loop {
+        if i >= paths.length { break; }
+        let digest = _sha256_of_file(paths[i]);
+        if digest.length == 0 { return ""; }
+        text = text + paths[i] + "\t" + digest + "\n";
+        i += 1;
+    }
+    return sha256_hex_of_string(text);
+}
+
+fn _last_symbol_token(line: string) -> string {
+    let mut end = line.length;
+    loop {
+        if end <= 0 { return ""; }
+        let ch = substring(line, end - 1, end);
+        if ch != " " && ch != "\t" && ch != "\r" { break; }
+        end -= 1;
+    }
+    let mut start = end;
+    loop {
+        if start <= 0 { break; }
+        let ch = substring(line, start - 1, start);
+        if ch == " " || ch == "\t" { break; }
+        start -= 1;
+    }
+    return substring(line, start, end);
+}
+
+fn windows_retain_flags_from_nm(output: string) -> string[] {
+    let mut flags: string[] = [];
+    let mut pos: int = 0;
+    loop {
+        if pos > output.length { break; }
+        let rest = substring(output, pos, output.length);
+        let nl = index_of(rest, "\n");
+        let mut line = rest;
+        if nl >= 0 { line = substring(rest, 0, nl); }
+        let symbol = _last_symbol_token(line);
+        let is_object_header = symbol.length > 0 && substring(symbol, symbol.length - 1, symbol.length) == ":";
+        if symbol.length > 0 && !is_object_header && index_of(symbol, "sfn") >= 0 {
+            let flag = "-Wl,-u," + symbol;
+            if !contains_string(flags, flag) { flags.push(flag); }
+        }
+        if nl < 0 { break; }
+        pos = pos + nl + 1;
+    }
+    return flags;
+}
+
+// Enumerate the provider roots from the actual COFF runtime objects with the
+// selected LLVM family's llvm-nm. One multi-object invocation avoids both
+// POSIX pipelines and a process per object.
+fn windows_runtime_retain_root_flags(runtime_objects: string[]) -> WindowsRetainRoots ![io] {
+    if runtime_objects.length == 0 {
+        return WindowsRetainRoots { ok: true, reason: "", flags: [] };
+    }
+    let family = resolve_llvm_toolchain("x86_64-pc-windows-msvc");
+    if !family.ok {
+        return WindowsRetainRoots {
+            ok: false,
+            reason: "coherent LLVM family could not be resolved for runtime retain-root enumeration",
+            flags: []
+        };
+    }
+    let linker = _probe_tool_path(family.tools, "lld-link");
+    let root = _probe_llvm_root(family, linker);
+    let nm = _path_join(_path_join(root, "bin"), "llvm-nm.exe");
+    if !fs.exists(nm) || fs.is_directory(nm) {
+        return WindowsRetainRoots {
+            ok: false,
+            reason: "llvm-nm.exe from the selected LLVM family is missing: "
+                + nm,
+            flags: []
+        };
+    }
+    let mut argv: string[] = [nm, "--defined-only", "--extern-only"];
+    let mut i: int = 0;
+    loop {
+        if i >= runtime_objects.length { break; }
+        argv.push(runtime_objects[i]);
+        i += 1;
+    }
+    let rc = process.run_capture(argv, process.environ());
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    if rc != 0 {
+        return WindowsRetainRoots {
+            ok: false,
+            reason: "llvm-nm.exe failed while enumerating Windows runtime retain roots: "
+                + err,
+            flags: []
+        };
+    }
+    let flags = windows_retain_flags_from_nm(out);
+    if flags.length == 0 {
+        return WindowsRetainRoots {
+            ok: false,
+            reason: "llvm-nm.exe found no sfn runtime provider symbols to retain",
+            flags: []
+        };
+    }
+    return WindowsRetainRoots { ok: true, reason: "", flags: flags };
+}
+
+export {
+    WindowsBuiltinsProof,
+    WindowsRetainRoots,
+    prove_windows_builtins,
+    windows_link_input_identity,
+    windows_retain_flags_from_nm,
+    windows_runtime_retain_root_flags
+};

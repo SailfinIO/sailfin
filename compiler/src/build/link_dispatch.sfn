@@ -42,6 +42,7 @@ import {
 } from "./target";
 import { direct_link_prerequisites_diagnostic, static_prerequisites_diagnostic } from "./target_diagnostics";
 import { active_static_link } from "./target_state";
+import { windows_runtime_retain_root_flags } from "./windows_link_probe";
 
 // Layout policy. Program and test links differ through DATA on this
 // struct, never through separate selection logic (SFEP-0066 section 3.6).
@@ -408,14 +409,7 @@ fn dispatch_link(request: LinkRequest) -> LinkOutcome ![io] {
         // and emit a diagnostic so the lost optimization isn't invisible.
         // With runtime objects present the enumeration always finds the
         // `sfn_*` family, so the happy path is unaffected.
-        // The dead-strip + retain-root flags are GNU/Mach-O linker inputs
-        // (`-Wl,--gc-sections` / `-Wl,-dead_strip` / `-Wl,-u,<sym>`); the msvc
-        // ABI links with `lld-link`, which rejects them (it uses `/OPT:REF` /
-        // `/INCLUDE:`). Skip them for an msvc target — a clean lld-link
-        // invocation, at the cost of an unstripped binary until the
-        // MSVC-native GC flags are tuned against a real link (SFEP-0021 M7).
-        // Every other target (incl. windows-gnu, whose mingw linker accepts
-        // the GNU flags) runs this block exactly as before (SFN-52 / SFN-774).
+        // GNU/Mach-O providers retain roots through `-Wl,-u,<sym>`.
         let gc_triple = build_target_triple();
         if target_uses_gnu_link_gc(gc_triple) {
             let retain_flags = _runtime_retain_root_flags(runtime_objs);
@@ -432,6 +426,36 @@ fn dispatch_link(request: LinkRequest) -> LinkOutcome ![io] {
                 link_flags.push(retain_flags[rfi]);
                 rfi += 1;
             }
+        }
+    }
+
+    // The native Windows direct provider always enables `/OPT:REF`, for both
+    // program and test layouts, so both must root the runtime surface. Resolve
+    // provider ownership before probing llvm-nm: an explicit clang oracle or
+    // an unowned cross-host MSVC pair must not acquire direct-provider
+    // prerequisites merely because its target triple names the MSVC ABI.
+    let retain_triple = build_target_triple();
+    let retain_contract = resolve_link_contract(build_target_os(), active_static_link());
+    if retain_contract.ok && retain_contract.provider == "windows-lld-link" {
+        let windows_retains = windows_runtime_retain_root_flags(runtime_objs);
+        if !windows_retains.ok {
+            let retain_lines: string[] = [];
+            print.err(render_terminal_diagnostic(diagnostic_to_diag(direct_link_prerequisites_diagnostic(retain_triple, windows_retains.reason), "build"), retain_lines, "build"));
+            return LinkOutcome {
+                rc: 2,
+                ran_backend: false,
+                failure: LinkFailure {
+                    stage: "direct-link-prerequisites",
+                    reason: windows_retains.reason
+                },
+                runtime_stats: inputs.stats
+            };
+        }
+        let mut wri: int = 0;
+        loop {
+            if wri >= windows_retains.flags.length { break; }
+            link_flags.push(windows_retains.flags[wri]);
+            wri += 1;
         }
     }
 

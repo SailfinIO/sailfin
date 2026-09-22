@@ -227,10 +227,15 @@ jobs:
           New-Item -ItemType Directory -Force build/bin | Out-Null
           Copy-Item -LiteralPath $env:NATIVE_SFN -Destination build/bin/sfn.exe
           New-Item -ItemType Directory -Force build/llvm/bin | Out-Null
-          foreach ($tool in @('llvm-as.exe', 'opt.exe', 'llc.exe', 'ld.lld.exe', 'lld-link.exe')) {
+          foreach ($tool in @('llvm-as.exe', 'opt.exe', 'llc.exe', 'ld.lld.exe', 'lld-link.exe', 'llvm-nm.exe')) {
             Copy-Item -LiteralPath (Join-Path $env:SAILFIN_LLVM_ROOT "bin\$tool") `
               -Destination (Join-Path 'build/llvm/bin' $tool)
           }
+          $builtinsRelative = 'lib\clang\18\lib\windows\clang_rt.builtins-x86_64.lib'
+          $builtinsDestination = Join-Path 'build/llvm' $builtinsRelative
+          New-Item -ItemType Directory -Force (Split-Path -Parent $builtinsDestination) | Out-Null
+          Copy-Item -LiteralPath (Join-Path $env:SAILFIN_LLVM_ROOT $builtinsRelative) `
+            -Destination $builtinsDestination
 
       - name: Upload compiler build tree
         uses: actions/upload-artifact@v7
@@ -239,6 +244,7 @@ jobs:
           path: |
             build/bin/sfn.exe
             build/llvm/bin/*.exe
+            build/llvm/lib/clang/18/lib/windows/clang_rt.builtins-x86_64.lib
           if-no-files-found: error
           retention-days: 1
 

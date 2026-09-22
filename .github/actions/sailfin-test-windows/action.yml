@@ -35,11 +35,15 @@ runs:
           throw "shared artifact did not contain build/bin/sfn.exe"
         }
         $llvmRoot = (Resolve-Path -LiteralPath build/llvm).Path
-        foreach ($tool in @('llvm-as.exe', 'opt.exe', 'llc.exe', 'ld.lld.exe', 'lld-link.exe')) {
+        foreach ($tool in @('llvm-as.exe', 'opt.exe', 'llc.exe', 'ld.lld.exe', 'lld-link.exe', 'llvm-nm.exe')) {
           $toolPath = Join-Path $llvmRoot "bin\$tool"
           if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) {
             throw "shared artifact did not contain $toolPath"
           }
+        }
+        $builtins = Join-Path $llvmRoot 'lib\clang\18\lib\windows\clang_rt.builtins-x86_64.lib'
+        if (-not (Test-Path -LiteralPath $builtins -PathType Leaf)) {
+          throw "shared artifact did not contain $builtins"
         }
         "SAILFIN_LLVM_ROOT=$llvmRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
         (Join-Path $llvmRoot 'bin') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append

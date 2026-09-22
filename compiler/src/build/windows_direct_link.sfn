@@ -1,0 +1,448 @@
+// compiler/src/build/windows_direct_link.sfn
+//
+// SFN-955 / SFEP-0066 section 3.6: the native Windows x86-64 MSVC
+// final-link contract. Sailfin resolves one coherent LLVM family, one MSVC
+// toolset, and one Windows SDK/UCRT version, validates every library the
+// default link names, and invokes that family's lld-link.exe directly.
+// Discovery is native filesystem/process work: no cmd.exe, PowerShell,
+// vswhere, developer-prompt batch script, or POSIX utility participates.
+import { int_to_string } from "sfn/strings";
+
+import { _get_env_cmd } from "../build_flags";
+import { char_code_at_text, starts_with, substring } from "../string_utils";
+import { list_child_dirs } from "./fs_tree";
+import { LlvmFamily, LlvmTool, resolve_llvm_toolchain } from "./llvm_toolchain_resolver";
+import { _dirname, _path_basename, _path_join } from "./paths";
+import { prove_windows_builtins, windows_link_input_identity } from "./windows_link_probe";
+
+struct WindowsLinkContract {
+    ok: boolean;
+    reason: string;
+    linker_path: string;
+    llvm_root: string;
+    llvm_major: int;
+    msvc_root: string;
+    msvc_version: string;
+    sdk_root: string;
+    sdk_version: string;
+    msvc_lib_dir: string;
+    ucrt_lib_dir: string;
+    sdk_um_lib_dir: string;
+    builtins_lib: string;
+    builtins_digest: string;
+    builtins_probe_ok: boolean;
+    identity: string;
+}
+
+fn empty_windows_link_contract() -> WindowsLinkContract {
+    return WindowsLinkContract {
+        ok: false,
+        reason: "",
+        linker_path: "",
+        llvm_root: "",
+        llvm_major: 0,
+        msvc_root: "",
+        msvc_version: "",
+        sdk_root: "",
+        sdk_version: "",
+        msvc_lib_dir: "",
+        ucrt_lib_dir: "",
+        sdk_um_lib_dir: "",
+        builtins_lib: "",
+        builtins_digest: "",
+        builtins_probe_ok: false,
+        identity: ""
+    };
+}
+
+fn _windows_link_failure(reason: string) -> WindowsLinkContract {
+    let mut result = empty_windows_link_contract();
+    result.reason = reason;
+    return result;
+}
+
+fn _strip_windows_trailing_separators(path: string) -> string {
+    let mut result = path;
+    loop {
+        if result.length <= 3 { break; }
+        let last = substring(result, result.length - 1, result.length);
+        if last != "/" && last != "\\" { break; }
+        result = substring(result, 0, result.length - 1);
+    }
+    return result;
+}
+
+fn _tool_path(tools: LlvmTool[], role: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= tools.length { break; }
+        if tools[i].role == role { return tools[i].path; }
+        i += 1;
+    }
+    return "";
+}
+
+fn _all_files_exist(dir: string, names: string[]) -> boolean ![io] {
+    if dir.length == 0 || !fs.exists(dir) || !fs.is_directory(dir) {
+        return false;
+    }
+    let mut i: int = 0;
+    loop {
+        if i >= names.length { break; }
+        if !fs.exists(_path_join(dir, names[i])) { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+fn _msvc_lib_dir(toolset_root: string) -> string {
+    return _path_join(_path_join(toolset_root, "lib"), "x64");
+}
+
+fn _msvc_root_is_complete(toolset_root: string) -> boolean ![io] {
+    return _all_files_exist(_msvc_lib_dir(toolset_root), ["libcmt.lib", "libvcruntime.lib", "oldnames.lib"]);
+}
+
+// Version comparison local to Windows discovery. Numeric runs compare by
+// magnitude, so 10.0.26100.0 sorts after 10.0.22621.0 and 14.10 after 14.9.
+fn _windows_version_greater(a: string, b: string) -> boolean {
+    let mut ia: int = 0;
+    let mut ib: int = 0;
+    loop {
+        if ia >= a.length && ib >= b.length { return false; }
+        if ia >= a.length { return false; }
+        if ib >= b.length { return true; }
+        let ca = char_code_at_text(a, ia);
+        let cb = char_code_at_text(b, ib);
+        let a_digit = ca >= 48 && ca <= 57;
+        let b_digit = cb >= 48 && cb <= 57;
+        if a_digit && b_digit {
+            let mut ea = ia;
+            loop {
+                if ea >= a.length { break; }
+                let c = char_code_at_text(a, ea);
+                if c < 48 || c > 57 { break; }
+                ea += 1;
+            }
+            let mut eb = ib;
+            loop {
+                if eb >= b.length { break; }
+                let c = char_code_at_text(b, eb);
+                if c < 48 || c > 57 { break; }
+                eb += 1;
+            }
+            let mut sa = ia;
+            loop {
+                if sa >= ea - 1 || char_code_at_text(a, sa) != 48 { break; }
+                sa += 1;
+            }
+            let mut sb = ib;
+            loop {
+                if sb >= eb - 1 || char_code_at_text(b, sb) != 48 { break; }
+                sb += 1;
+            }
+            let la = ea - sa;
+            let lb = eb - sb;
+            if la != lb { return la > lb; }
+            let mut da = sa;
+            let mut db = sb;
+            loop {
+                if da >= ea { break; }
+                let ac = char_code_at_text(a, da);
+                let bc = char_code_at_text(b, db);
+                if ac != bc { return ac > bc; }
+                da += 1;
+                db += 1;
+            }
+            ia = ea;
+            ib = eb;
+            continue;
+        }
+        if ca != cb { return ca > cb; }
+        ia += 1;
+        ib += 1;
+    }
+}
+
+// Search every installed VS edition rather than hardcoding Community versus
+// BuildTools. The filesystem wrapper sorts directory entries; a toolset
+// version tie therefore keeps the first deterministic installation.
+fn _discover_msvc_root(program_files_x86: string) -> string ![io] {
+    let vs_root = _path_join(program_files_x86, "Microsoft Visual Studio");
+    let years = list_child_dirs(vs_root);
+    let mut best: string = "";
+    let mut best_version: string = "";
+    let mut yi: int = 0;
+    loop {
+        if yi >= years.length { break; }
+        let editions = list_child_dirs(years[yi]);
+        let mut ei: int = 0;
+        loop {
+            if ei >= editions.length { break; }
+            let toolsets = list_child_dirs(_path_join(editions[ei], "VC/Tools/MSVC"));
+            let mut ti: int = 0;
+            loop {
+                if ti >= toolsets.length { break; }
+                let candidate = toolsets[ti];
+                let version = _path_basename(candidate);
+                if _msvc_root_is_complete(candidate) && (best.length == 0
+                    || _windows_version_greater(version, best_version)) {
+                    best = candidate;
+                    best_version = version;
+                }
+                ti += 1;
+            }
+            ei += 1;
+        }
+        yi += 1;
+    }
+    return best;
+}
+
+fn _sdk_ucrt_dir(sdk_root: string, version: string) -> string {
+    return _path_join(_path_join(_path_join(sdk_root, "Lib"), version), "ucrt/x64");
+}
+
+fn _sdk_um_dir(sdk_root: string, version: string) -> string {
+    return _path_join(_path_join(_path_join(sdk_root, "Lib"), version), "um/x64");
+}
+
+fn _sdk_version_is_complete(sdk_root: string, version: string) -> boolean ![io] {
+    if !_all_files_exist(_sdk_ucrt_dir(sdk_root, version), ["libucrt.lib"]) {
+        return false;
+    }
+    return _all_files_exist(_sdk_um_dir(sdk_root, version), ["advapi32.lib", "bcrypt.lib", "crypt32.lib", "kernel32.lib", "ws2_32.lib"]);
+}
+
+fn _discover_sdk_version(sdk_root: string) -> string ![io] {
+    let versions = list_child_dirs(_path_join(sdk_root, "Lib"));
+    let mut best: string = "";
+    let mut i: int = 0;
+    loop {
+        if i >= versions.length { break; }
+        let version = _path_basename(versions[i]);
+        if _sdk_version_is_complete(sdk_root, version) && (best.length == 0
+            || _windows_version_greater(version, best)) { best = version; }
+        i += 1;
+    }
+    return best;
+}
+
+fn _resolve_builtins_lib(llvm_root: string, major: int) -> string ![io] {
+    let clang_root = _path_join(_path_join(_path_join(llvm_root, "lib"), "clang"), int_to_string(major));
+    let windows_lib = _path_join(clang_root, "lib/windows/clang_rt.builtins-x86_64.lib");
+    if fs.exists(windows_lib) { return windows_lib; }
+    let target_lib = _path_join(clang_root, "lib/x86_64-pc-windows-msvc/clang_rt.builtins-x86_64.lib");
+    if fs.exists(target_lib) { return target_lib; }
+    return "";
+}
+
+fn resolve_windows_lld_link() -> WindowsLinkContract ![io] {
+    let family: LlvmFamily = resolve_llvm_toolchain("x86_64-pc-windows-msvc");
+    if !family.ok {
+        return _windows_link_failure("coherent LLVM 18 family with lld-link.exe could not be resolved");
+    }
+    let linker = _tool_path(family.tools, "lld-link");
+    if linker.length == 0 {
+        return _windows_link_failure("coherent LLVM family has no resolved lld-link.exe");
+    }
+    let llc = _tool_path(family.tools, "llc");
+    if llc.length == 0 {
+        return _windows_link_failure("coherent LLVM family has no resolved llc.exe");
+    }
+    let mut llvm_root = _strip_windows_trailing_separators(family.root);
+    if llvm_root.length == 0 { llvm_root = _dirname(_dirname(linker)); }
+    let builtins = _resolve_builtins_lib(llvm_root, family.major);
+    if builtins.length == 0 {
+        return _windows_link_failure("clang_rt.builtins-x86_64.lib not found beneath LLVM root "
+            + llvm_root);
+    }
+
+    let mut program_files_x86 = _get_env_cmd("ProgramFiles(x86)");
+    if program_files_x86.length == 0 {
+        program_files_x86 = _get_env_cmd("ProgramFiles");
+    }
+    if program_files_x86.length == 0 {
+        return _windows_link_failure("ProgramFiles(x86) is unset; cannot discover MSVC or Windows SDK roots");
+    }
+    program_files_x86 = _strip_windows_trailing_separators(program_files_x86);
+
+    let configured_msvc = _strip_windows_trailing_separators(_get_env_cmd("VCToolsInstallDir"));
+    let mut msvc_root = configured_msvc;
+    if msvc_root.length > 0 {
+        if !_msvc_root_is_complete(msvc_root) {
+            return _windows_link_failure("VCToolsInstallDir is incomplete or not x64-capable: "
+                + msvc_root);
+        }
+    } else {
+        msvc_root = _discover_msvc_root(program_files_x86);
+        if msvc_root.length == 0 {
+            return _windows_link_failure("no complete x64 MSVC toolset found under "
+                + _path_join(program_files_x86, "Microsoft Visual Studio"));
+        }
+    }
+
+    let mut sdk_root = _strip_windows_trailing_separators(_get_env_cmd("WindowsSdkDir"));
+    if sdk_root.length == 0 {
+        sdk_root = _strip_windows_trailing_separators(_get_env_cmd("UniversalCRTSdkDir"));
+    }
+    if sdk_root.length == 0 {
+        sdk_root = _path_join(program_files_x86, "Windows Kits/10");
+    }
+    if !fs.exists(_path_join(sdk_root, "Lib")) {
+        return _windows_link_failure("Windows SDK Lib root not found: "
+            + _path_join(sdk_root, "Lib"));
+    }
+
+    let sdk_env_version = _strip_windows_trailing_separators(_get_env_cmd("WindowsSDKVersion"));
+    let ucrt_env_version = _strip_windows_trailing_separators(_get_env_cmd("UCRTVersion"));
+    if sdk_env_version.length > 0 && ucrt_env_version.length > 0
+        && sdk_env_version != ucrt_env_version {
+        return _windows_link_failure("mixed Windows SDK/UCRT versions: WindowsSDKVersion="
+            + sdk_env_version
+            + ", UCRTVersion="
+            + ucrt_env_version);
+    }
+    let mut sdk_version = sdk_env_version;
+    if sdk_version.length == 0 { sdk_version = ucrt_env_version; }
+    if sdk_version.length > 0 {
+        if !_sdk_version_is_complete(sdk_root, sdk_version) {
+            return _windows_link_failure("Windows SDK/UCRT version is incomplete for x64: "
+                + _path_join(_path_join(sdk_root, "Lib"), sdk_version));
+        }
+    } else {
+        sdk_version = _discover_sdk_version(sdk_root);
+        if sdk_version.length == 0 {
+            return _windows_link_failure("no complete matching x64 Windows SDK/UCRT version found under "
+                + _path_join(sdk_root, "Lib"));
+        }
+    }
+
+    let msvc_lib_dir = _msvc_lib_dir(msvc_root);
+    let ucrt_lib_dir = _sdk_ucrt_dir(sdk_root, sdk_version);
+    let sdk_um_lib_dir = _sdk_um_dir(sdk_root, sdk_version);
+    let builtins_proof = prove_windows_builtins(llc, linker, builtins, msvc_lib_dir, ucrt_lib_dir);
+    if !builtins_proof.ok {
+        return _windows_link_failure(builtins_proof.reason);
+    }
+    let identity = windows_link_input_identity("windows-lld-link-v1\n" + family.fingerprint
+        + "\n"
+        + _path_basename(msvc_root)
+        + "\n"
+        + sdk_version, [linker, builtins, _path_join(msvc_lib_dir, "libcmt.lib"), _path_join(msvc_lib_dir, "libvcruntime.lib"), _path_join(msvc_lib_dir, "oldnames.lib"), _path_join(ucrt_lib_dir, "libucrt.lib"), _path_join(sdk_um_lib_dir, "advapi32.lib"), _path_join(sdk_um_lib_dir, "bcrypt.lib"), _path_join(sdk_um_lib_dir, "crypt32.lib"), _path_join(sdk_um_lib_dir, "kernel32.lib"), _path_join(sdk_um_lib_dir, "ws2_32.lib")]);
+    if identity.length == 0 {
+        return _windows_link_failure("could not hash every selected Windows linker input");
+    }
+
+    return WindowsLinkContract {
+        ok: true,
+        reason: "",
+        linker_path: linker,
+        llvm_root: llvm_root,
+        llvm_major: family.major,
+        msvc_root: msvc_root,
+        msvc_version: _path_basename(msvc_root),
+        sdk_root: sdk_root,
+        sdk_version: sdk_version,
+        msvc_lib_dir: msvc_lib_dir,
+        ucrt_lib_dir: ucrt_lib_dir,
+        sdk_um_lib_dir: sdk_um_lib_dir,
+        builtins_lib: builtins,
+        builtins_digest: builtins_proof.digest,
+        builtins_probe_ok: true,
+        identity: identity
+    };
+}
+
+fn _windows_translate_lib(lib: string) -> string {
+    if starts_with(lib, "-L") {
+        return "/libpath:" + substring(lib, 2, lib.length);
+    }
+    if starts_with(lib, "-l") {
+        return substring(lib, 2, lib.length) + ".lib";
+    }
+    return lib;
+}
+
+fn _windows_push_link_flags(args: string[], link_flags: string[]) -> string[] {
+    let mut result = args;
+    let mut i: int = 0;
+    loop {
+        if i >= link_flags.length { break; }
+        let flag = link_flags[i];
+        if flag == "-Wl,/Brepro" || flag == "/Brepro" {
+            // Already supplied unconditionally by the owned contract.
+        } else if flag == "-Wl,--gc-sections" || flag == "/OPT:REF" {
+            result.push("/OPT:REF");
+        } else if starts_with(flag, "-Wl,-u,") {
+            result.push("/INCLUDE:" + substring(flag, 7, flag.length));
+        } else if starts_with(flag, "/INCLUDE:") || starts_with(flag, "/OPT:") {
+            result.push(flag);
+        }
+        i += 1;
+    }
+    return result;
+}
+
+// Explicitly names the console startup contract and disables ambient default
+// library directives. The ordered tail is the direct equivalent of clang's
+// `/defaultlib:libcmt /defaultlib:oldnames` plus compiler-rt selection, with
+// every archive resolved from the validated roots above.
+fn windows_lld_link_argv(contract: WindowsLinkContract, objects: string[], out_path: string, libs: string[], link_flags: string[]) -> string[] {
+    let mut args: string[] = [contract.linker_path, "/nologo", "/machine:x64", "/subsystem:console", "/entry:mainCRTStartup", "/Brepro", "/OPT:REF", "/OPT:ICF", "/nodefaultlib", "/out:"
+        + out_path, "/libpath:"
+        + contract.msvc_lib_dir, "/libpath:"
+        + contract.ucrt_lib_dir, "/libpath:"
+        + contract.sdk_um_lib_dir];
+    args = _windows_push_link_flags(args, link_flags);
+    let mut oi: int = 0;
+    loop {
+        if oi >= objects.length { break; }
+        args.push(objects[oi]);
+        oi += 1;
+    }
+    let mut li: int = 0;
+    loop {
+        if li >= libs.length { break; }
+        args.push(_windows_translate_lib(libs[li]));
+        li += 1;
+    }
+    // SFEP-0066 requires compiler-rt after Sailfin/user objects and before
+    // the CRT/default-library tail. These are paths, not `/defaultlib`
+    // directives, so a developer-prompt LIB setting cannot redirect them.
+    args.push(contract.builtins_lib);
+    args.push(_path_join(contract.msvc_lib_dir, "libcmt.lib"));
+    args.push(_path_join(contract.msvc_lib_dir, "libvcruntime.lib"));
+    args.push(_path_join(contract.ucrt_lib_dir, "libucrt.lib"));
+    args.push(_path_join(contract.msvc_lib_dir, "oldnames.lib"));
+    args.push(_path_join(contract.sdk_um_lib_dir, "kernel32.lib"));
+    return args;
+}
+
+fn trace_windows_link_contract(contract: WindowsLinkContract) ![io] {
+    let trace = _get_env_cmd("SAILFIN_TRACE_LINK");
+    if trace.length == 0 || trace == "0" || trace == "false" { return; }
+    print.err("[trace-link] Windows contract: LLVM " + int_to_string(contract.llvm_major)
+        + " root="
+        + contract.llvm_root
+        + "; MSVC "
+        + contract.msvc_version
+        + " root="
+        + contract.msvc_root
+        + "; SDK/UCRT "
+        + contract.sdk_version
+        + " root="
+        + contract.sdk_root
+        + "; builtins="
+        + contract.builtins_digest
+        + "; identity="
+        + contract.identity);
+}
+
+export {
+    WindowsLinkContract,
+    empty_windows_link_contract,
+    resolve_windows_lld_link,
+    trace_windows_link_contract,
+    windows_lld_link_argv
+};

@@ -1,0 +1,108 @@
+// compiler/src/build/windows_link_response.sfn
+//
+// lld-link response-file rendering and publication. Windows direct links
+// always use this path, including small programs, so self-host-sized argv and
+// stale-file failures exercise one fail-closed contract.
+import { substring } from "../string_utils";
+
+struct WindowsLinkSpawn {
+    ok: boolean;
+    reason: string;
+    argv: string[];
+}
+
+fn _msvc_rsp_needs_quotes(arg: string) -> boolean {
+    if arg.length == 0 { return true; }
+    let mut i: int = 0;
+    loop {
+        if i >= arg.length { break; }
+        let ch = substring(arg, i, i + 1);
+        if ch == " " || ch == "\t" || ch == "\n" || ch == "\"" { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn windows_link_response_arg(arg: string) -> string {
+    if !_msvc_rsp_needs_quotes(arg) { return arg; }
+    let mut out = "\"";
+    let mut slashes: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= arg.length { break; }
+        let ch = substring(arg, i, i + 1);
+        if ch == "\\" {
+            slashes += 1;
+            i += 1;
+            continue;
+        }
+        let mut si: int = 0;
+        if ch == "\"" { slashes = slashes * 2 + 1; }
+        loop {
+            if si >= slashes { break; }
+            out = out + "\\";
+            si += 1;
+        }
+        out = out + ch;
+        slashes = 0;
+        i += 1;
+    }
+    let mut tail: int = 0;
+    loop {
+        if tail >= slashes * 2 { break; }
+        out = out + "\\";
+        tail += 1;
+    }
+    return out + "\"";
+}
+
+fn windows_link_response_body(argv: string[]) -> string {
+    let mut body = "";
+    let mut i: int = 1;
+    loop {
+        if i >= argv.length { break; }
+        body = body + windows_link_response_arg(argv[i]) + "\n";
+        i += 1;
+    }
+    return body;
+}
+
+fn windows_link_argv_with_response_file(argv: string[], out_path: string) -> WindowsLinkSpawn ![io] {
+    if argv.length < 2 {
+        return WindowsLinkSpawn {
+            ok: false,
+            reason: "lld-link argv has no arguments to publish",
+            argv: []
+        };
+    }
+    let rsp_path = out_path + ".rsp";
+    if fs.exists(rsp_path) { fs.deleteFile(rsp_path); }
+    if fs.exists(rsp_path) {
+        return WindowsLinkSpawn {
+            ok: false,
+            reason: "could not replace stale lld-link response file: "
+                + rsp_path,
+            argv: []
+        };
+    }
+    fs.writeFile(rsp_path, windows_link_response_body(argv));
+    if !fs.exists(rsp_path) {
+        return WindowsLinkSpawn {
+            ok: false,
+            reason: "could not write lld-link response file: " + rsp_path,
+            argv: []
+        };
+    }
+    return WindowsLinkSpawn {
+        ok: true,
+        reason: "",
+        argv: [argv[0], "@" + rsp_path]
+    };
+}
+
+export {
+    WindowsLinkSpawn,
+    windows_link_response_arg,
+    windows_link_response_body,
+    windows_link_argv_with_response_file
+};

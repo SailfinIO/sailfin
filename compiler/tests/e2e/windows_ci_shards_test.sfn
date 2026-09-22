@@ -42,6 +42,20 @@ test "Windows CI: PR and main seeder share the cache and shard action" ![io] {
     assert contains(seeder, "uses: ./.github/actions/sailfin-test-windows");
 }
 
+test "Windows CI: shard artifacts preserve the direct-link LLVM family" ![io] {
+    let workflow = fs.readFile(".github/workflows/ci.yml");
+    let seeder = fs.readFile(".github/workflows/seed-test-bin.yml");
+    let action = fs.readFile(".github/actions/sailfin-test-windows/action.yml");
+    let builtins = "build/llvm/lib/clang/18/lib/windows/clang_rt.builtins-x86_64.lib";
+
+    assert contains(workflow, "'lld-link.exe', 'llvm-nm.exe'");
+    assert contains(workflow, builtins);
+    assert contains(seeder, "'lld-link.exe', 'llvm-nm.exe'");
+    assert contains(seeder, builtins);
+    assert contains(action, "'lld-link.exe', 'llvm-nm.exe'");
+    assert contains(action, "lib\\clang\\18\\lib\\windows\\clang_rt.builtins-x86_64.lib");
+}
+
 test "Windows CI: full native self-host runs nightly, not after each merge" ![io] {
     let workflow = fs.readFile(".github/workflows/windows-native-selfhost.yml");
     assert contains(workflow, "  schedule:\n    - cron: \"0 8 * * *\"");

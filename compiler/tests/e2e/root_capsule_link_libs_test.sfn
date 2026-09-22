@@ -143,7 +143,13 @@ test "root capsule link-libs: reach the final link argv without duplicating the 
     // Windows resolves math through the CRT and filters -lm; exercise dedup
     // with a library its runtime actually links (SFN-1269).
     let mut runtime_lib = "-lm";
-    if contains(trace_baseline, "windows-msvc") { runtime_lib = "-ladvapi32"; }
+    let mut trace_lib = runtime_lib;
+    let mut libpath_prefix = "-L";
+    if contains(trace_baseline, "windows-msvc") {
+        runtime_lib = "-ladvapi32";
+        trace_lib = "advapi32.lib";
+        libpath_prefix = "/libpath:";
+    }
     let with_lib_root = _scratch_dir() + "/root-app-with_lib";
     let with_lib_bin = _bin_path("root-with_lib");
     let trace_with_lib = _build_and_trace(with_lib_root, "\"" + runtime_lib
@@ -152,8 +158,8 @@ test "root capsule link-libs: reach the final link argv without duplicating the 
     print.err("[test:link-libs] baseline trace: " + trace_baseline);
     print.err("[test:link-libs] with_lib trace: " + trace_with_lib);
 
-    let baseline_count = _count_token_occurrences(trace_baseline, runtime_lib);
-    let with_lib_count = _count_token_occurrences(trace_with_lib, runtime_lib);
+    let baseline_count = _count_token_occurrences(trace_baseline, trace_lib);
+    let with_lib_count = _count_token_occurrences(trace_with_lib, trace_lib);
     // Guard against a vacuous pass: if the baseline itself has no selected library, the
     // equality below would compare two zeros and this stops measuring
     // anything about dedup at all.
@@ -166,8 +172,10 @@ test "root capsule link-libs: reach the final link argv without duplicating the 
     // assertions above actually exercise the root `link-libs` path rather
     // than passing vacuously off the runtime's own library, and it is the
     // assertion that must fail if root `link-libs` were disabled entirely.
-    assert _count_token_occurrences(trace_baseline, "-L" + baseline_root) == 1;
-    assert _count_token_occurrences(trace_with_lib, "-L" + with_lib_root) == 1;
+    assert _count_token_occurrences(trace_baseline, libpath_prefix
+        + baseline_root) == 1;
+    assert _count_token_occurrences(trace_with_lib, libpath_prefix
+        + with_lib_root) == 1;
 }
 
 // Own nested workspace (like `capsule_reachability_filter_test.sfn`):

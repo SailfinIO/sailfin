@@ -1,6 +1,6 @@
 # Toolchain independence — architecture tracker
 
-Updated: 2026-08-23.
+Updated: 2026-09-22.
 
 This document is the **living tracker** for Sailfin's long arc away from a
 borrowed toolchain: which parts of the path from source text to a running
@@ -70,21 +70,24 @@ each role." Measured against the tree on 2026-08-05:
 | Mid-level IR | **Split.** `.sfn-asm` is the live artifact; typed SSA exists but is off the build path | `native_ir.sfn` (342); `typed_ssa.sfn` (1160) + `_verify` (993) + `_render` (366) + `_produce` (284) |
 | Instruction selection, register allocation, optimization | **LLVM CLI selected by Sailfin** | `compiler/src/build/artifact_compile.sfn` |
 | Assemble (`.ll` → `.o`) | **LLVM MC through `llc -filetype=obj`** | `compiler/src/build/artifact_compile.sfn` |
-| Link | **Sailfin direct route with clang fallback on Linux x86-64/aarch64; clang elsewhere** | `compiler/src/build/direct_link.sfn` (339) |
+| Link | **Sailfin direct, fail-closed route on native Linux x86-64/aarch64 and Windows x86-64 MSVC; clang migration oracle and unowned-target driver elsewhere** | `compiler/src/build/direct_link.sfn`; `compiler/src/build/windows_direct_link.sfn` |
 | Raw syscall emission | **Sailfin primitive, no consumer** | `compiler/capsules/codegen-llvm/src/syscall.sfn` (156) |
 | Platform access | **libc/POSIX via `extern fn`** | 528 `extern fn` under `runtime/` |
 | TLS / crypto | **Sailfin (native TLS 1.3, SFEP-0036/SFEP-0048, SFN-341)** | `runtime/sfn/platform/tls_record.sfn` |
 
 Three entries in that table are routinely misread, so they are stated plainly:
 
-**Linux already has a Sailfin-authored direct-link route.**
+**Linux and Windows MSVC have Sailfin-authored direct-link routes.**
 `resolve_direct_ld_lld` builds a bare
 `ld.lld` invocation — CRT objects, `-dynamic-linker`, search dirs, libc tail — with
-no clang in the argv, and `LlvmTextBackend.link` tries it *first*. It is gated on
-target OS, arch, `SAILFIN_LINKER`, `ld.lld` on `PATH`, and every CRT object being
-present on disk; any miss falls back to clang with a traced reason, never
-silently. This means many Linux invocations link without clang, but the fallback
-prevents the required-owned claim until SFEP-0066's fail-closed gate lands.
+no clang in the argv and fails closed when an owned prerequisite is absent.
+On native Windows x86-64 MSVC, `resolve_windows_lld_link` selects the coherent
+LLVM family's `lld-link.exe`, one complete MSVC toolset, and one matching
+Windows SDK/UCRT version. It validates the explicit CRT/import-library roots,
+compiler-rt builtins, console startup, response-file, dead-strip, and `/Brepro`
+inputs before the backend spawns the linker. MinGW and cross-host Windows builds
+remain outside this native ownership contract; `clang-oracle` remains an
+explicit migration selection rather than a fallback.
 
 **LLVM validation and object emission now invoke the coherent family's selected
 `llvm-as` → `opt` → `llc -filetype=obj` pipeline; the remaining first-party
@@ -205,7 +208,7 @@ So the accurate accounting is:
 
 | Conquest | Buys the seal | Buys otherwise |
 |---|---|---|
-| Sailfin-authored direct link (available on Linux; required-owned only after fallback removal) | the admission rule has somewhere to live | hermeticity, determinism |
+| Sailfin-authored direct link (required on native Linux x86-64/aarch64 and Windows x86-64 MSVC) | the admission rule has somewhere to live | hermeticity, determinism |
 | Owned syscall layer (Axis 3) | **the enforcement chokepoint** | static binaries |
 | `-nostdlib` static link | the *fully sealed* claim | true hermeticity |
 | Native backend, seal-sufficient | metadata survives lowering — **auditability** | independence from `llc` |
@@ -223,9 +226,10 @@ as a blocker for something it does not block.
 Each is independently valuable and none needs a flag day. This is a dependency
 sketch, not a schedule; Linear owns sequencing.
 
-- **Require the direct link** — Linux x86-64/aarch64 have a direct `ld.lld`
-  route but still fall back to clang. Make it fail closed, and add direct Apple
-  `ld` and `lld-link` contracts for macOS arm64 and Windows x86-64.
+- **Complete direct-link ownership** — Linux x86-64/aarch64 and Windows
+  x86-64 MSVC now use required, fail-closed `ld.lld` / `lld-link` routes.
+  Add the direct Apple `ld` contract for macOS arm64; keep clang only as the
+  explicit migration oracle and unowned-target driver until the seed ratchet.
 - **Make typed SSA load-bearing** — the model, verifier, and renderer exist; the
   producer emits signatures only and nothing consumes it. SFEP-0059 owns this,
   including the normative contract (§10 there). Worth doing even if a native

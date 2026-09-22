@@ -19,11 +19,12 @@
 // degrades to clang cannot support the claim that Sailfin owns Link on
 // this target, because the provider that executed is not the one claimed.
 //
-// Scope is deliberately glibc Linux x86-64 and aarch64. macOS (SFN-954),
-// Windows (SFN-955), musl, and other arches resolve `ok=false` with
-// `requires_direct_link=false` and keep the clang link path, as does an
-// explicit `SAILFIN_LINKER` or `SAILFIN_LINK_PROVIDER=clang-oracle`
-// selection. Note that musl and non-governed arches are separated by the
+// The owned scope is glibc Linux x86-64/aarch64 plus native Windows x86-64
+// MSVC (implemented in `windows_direct_link.sfn`). macOS (SFN-954), musl,
+// MinGW, cross-host pairs, and other arches resolve `ok=false` with
+// `requires_direct_link=false` and keep the clang/target-driver route. An
+// explicit `SAILFIN_LINK_PROVIDER=clang-oracle` selects the migration oracle.
+// Note that musl and non-governed Linux arches are separated by the
 // LOADER probe, not by `arch`: the host-arch resolver defaults to
 // "x86_64" rather than reporting "unknown", so they reach this module
 // labelled as a governed target (see `_non_glibc_linux_userland`).
@@ -41,6 +42,11 @@ import { user_config_linker, user_config_linker_origin } from "../user_config";
 import { list_child_dirs } from "./fs_tree";
 import { _resolve_on_path } from "./llvm_toolchain_resolver";
 import { build_target_triple, native_host_os, triple_target_arch } from "./target";
+import {
+    WindowsLinkContract,
+    empty_windows_link_contract,
+    resolve_windows_lld_link
+} from "./windows_direct_link";
 
 // The resolved Linux link contract. `ok` gates the direct path;
 // when false, `reason` names why the driver falls back to clang. Every
@@ -48,6 +54,10 @@ import { build_target_triple, native_host_os, triple_target_arch } from "./targe
 struct DirectLinkContract {
     ok: boolean;
     reason: string;
+    // "linux-ld.lld" | "windows-lld-link" on success. Keeping the
+    // platform choice in the resolved contract lets Backend.link dispatch
+    // argv construction without re-probing the host or target.
+    provider: string;
     // GNU/LLD linker emulation (`elf_x86_64` or `aarch64linux`).
     linker_emulation: string;
     // The architecture's glibc ELF interpreter for -pie. Empty under
@@ -72,6 +82,8 @@ struct DirectLinkContract {
     // -L search directories (gcc dir first, then the multiarch/system dirs)
     // that resolve libc/libgcc/-l runtime libraries.
     search_dirs: string[];
+    // Populated only when provider == "windows-lld-link".
+    windows: WindowsLinkContract;
     // Meaningful only when `ok` is false, and the whole point of SFN-953:
     // it splits the two incompatible things `ok=false` used to mean.
     //
@@ -98,6 +110,7 @@ fn _direct_fail(reason: string) -> DirectLinkContract {
     return DirectLinkContract {
         ok: false,
         reason: reason,
+        provider: "",
         linker_emulation: "",
         dynamic_linker: "",
         static_link: false,
@@ -107,6 +120,7 @@ fn _direct_fail(reason: string) -> DirectLinkContract {
         crtbegin: "",
         crtend: "",
         search_dirs: [],
+        windows: empty_windows_link_contract(),
         requires_direct_link: false
     };
 }
@@ -118,6 +132,7 @@ fn _direct_unmet(reason: string) -> DirectLinkContract {
     return DirectLinkContract {
         ok: false,
         reason: reason,
+        provider: "",
         linker_emulation: "",
         dynamic_linker: "",
         static_link: false,
@@ -127,6 +142,7 @@ fn _direct_unmet(reason: string) -> DirectLinkContract {
         crtbegin: "",
         crtend: "",
         search_dirs: [],
+        windows: empty_windows_link_contract(),
         requires_direct_link: true
     };
 }
@@ -401,11 +417,9 @@ fn _link_provider_override() -> string ![io] {
 }
 
 // Target-profile selection for the Link role (SFEP-0066 section 3.6): one
-// entry point picks the platform's direct linker. Darwin and Windows
-// MSVC/COFF resolve to a structured not-yet-owned reason until SFN-954 and
-// SFN-955 implement their argv; both carry `requires_direct_link=false` so
-// they keep deferring to the clang driver rather than failing the build the
-// way an owned Linux target now does (SFN-953).
+// entry point picks the platform's direct linker. Native Windows x86-64 MSVC
+// is owned by SFN-955 and therefore fails closed on a missing prerequisite;
+// MinGW and cross-host Windows builds remain outside that native contract.
 fn resolve_link_contract(target_os: string, static_link: boolean) -> DirectLinkContract ![io] {
     // Provider selection outranks the OS dispatch, not just the host
     // probing below it. Nested inside the Linux arm it would leave an
@@ -433,8 +447,46 @@ fn resolve_link_contract(target_os: string, static_link: boolean) -> DirectLinkC
             + ") has no owned direct linker yet (SFN-954)");
     }
     if target_os == "Windows" {
-        return _direct_fail("target os (" + target_os
-            + ") has no owned direct linker yet (SFN-955)");
+        let triple = build_target_triple();
+        if triple != "x86_64-pc-windows-msvc" {
+            return _direct_fail("Windows target (" + triple
+                + ") is outside the native x86-64 MSVC direct-link contract");
+        }
+        let host_os = native_host_os();
+        if host_os != "Windows" {
+            return _direct_fail("cross-building to Windows MSVC from a "
+                + host_os
+                + " host is not a governed native pair");
+        }
+        if static_link {
+            return _direct_unmet("--static is supported only for native glibc Linux targets");
+        }
+        // `SAILFIN_LINKER` historically selected a linker behind clang's
+        // driver. On an owned Windows route, silently dropping a non-LLD
+        // override would be as misleading as falling back to clang. Accept
+        // the spellings that still describe this direct provider; reject
+        // every other linker before object/link spawn. The migration oracle
+        // has its own explicit SAILFIN_LINK_PROVIDER=clang-oracle switch.
+        let mut requested_linker = _get_env_cmd("SAILFIN_LINKER");
+        if requested_linker.length == 0 {
+            requested_linker = user_config_linker(triple);
+        }
+        if requested_linker.length > 0 && requested_linker != "default"
+            && requested_linker != "system"
+            && requested_linker != "lld"
+            && requested_linker != "lld-link" {
+            return _direct_unmet("Windows direct linking requires lld-link; requested linker is "
+                + requested_linker);
+        }
+        let windows = resolve_windows_lld_link();
+        if !windows.ok { return _direct_unmet(windows.reason); }
+        let mut contract = _direct_fail("");
+        contract.ok = true;
+        contract.provider = "windows-lld-link";
+        contract.static_link = static_link;
+        contract.windows = windows;
+        contract.requires_direct_link = false;
+        return contract;
     }
     return _direct_fail("target os (" + target_os
         + ") has no direct-link target profile");
@@ -572,6 +624,7 @@ fn resolve_direct_ld_lld(target_os: string, static_link: boolean) -> DirectLinkC
     return DirectLinkContract {
         ok: true,
         reason: "",
+        provider: "linux-ld.lld",
         linker_emulation: emulation,
         dynamic_linker: dyn,
         static_link: false,
@@ -581,6 +634,7 @@ fn resolve_direct_ld_lld(target_os: string, static_link: boolean) -> DirectLinkC
         crtbegin: gccdir + "/crtbeginS.o",
         crtend: gccdir + "/crtendS.o",
         search_dirs: _link_search_dirs(arch, gccdir, libdir, ""),
+        windows: empty_windows_link_contract(),
         requires_direct_link: false
     };
 }
@@ -662,6 +716,7 @@ fn _resolve_static_contract(arch: string, emulation: string) -> DirectLinkContra
     return DirectLinkContract {
         ok: true,
         reason: "",
+        provider: "linux-ld.lld",
         linker_emulation: emulation,
         dynamic_linker: "",
         static_link: true,
@@ -671,6 +726,7 @@ fn _resolve_static_contract(arch: string, emulation: string) -> DirectLinkContra
         crtbegin: gccdir + "/crtbeginT.o",
         crtend: gccdir + "/crtend.o",
         search_dirs: _link_search_dirs(arch, gccdir, libdir, libc_dir),
+        windows: empty_windows_link_contract(),
         requires_direct_link: false
     };
 }

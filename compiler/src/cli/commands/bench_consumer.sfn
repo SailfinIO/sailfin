@@ -150,6 +150,19 @@ fn _bc_child_env(cache_root: string, scratch: string) -> string[] ![io] {
     // a platform branch.
     let program_data = env.get("ProgramData");
     if program_data.length > 0 { e.push("ProgramData=" + program_data); }
+    let llvm_root = env.get("SAILFIN_LLVM_ROOT");
+    if llvm_root.length > 0 { e.push("SAILFIN_LLVM_ROOT=" + llvm_root); }
+    // The owned Windows link resolves a coherent MSVC/SDK family rather
+    // than asking clang to discover one. Preserve the selected roots across
+    // this benchmark's deliberately curated nested-build environment.
+    let windows_keys = ["ProgramFiles(x86)", "ProgramFiles", "VCToolsInstallDir", "WindowsSdkDir", "UniversalCRTSdkDir", "WindowsSDKVersion", "UCRTVersion"];
+    let mut wi: int = 0;
+    loop {
+        if wi >= windows_keys.length { break; }
+        let value = env.get(windows_keys[wi]);
+        if value.length > 0 { e.push(windows_keys[wi] + "=" + value); }
+        wi += 1;
+    }
     e.push("SAILFIN_BUILD_CACHE_DIR=" + cache_root);
     e.push("SAILFIN_TEST_SCRATCH=" + scratch + "/sfn");
     return e;
@@ -385,17 +398,23 @@ fn _bc_run_fixture(self_bin: string, name: string, fixture_dir: string, scratch:
 
     let cold_exit = process.run_capture_metered(argv, child_env);
     let cold_out = process.capture_take_stdout();
-    let _cold_e = process.capture_take_stderr();
+    let cold_err = process.capture_take_stderr();
     let cold_ms = process.capture_take_wall_ms();
     let _cold_rss = process.capture_take_peak_rss_kb();
-    if cold_exit != 0 { status = _bc_append_status(status, "FAIL"); }
+    if cold_exit != 0 {
+        print.err("[bench-consumer] " + name + " cold build failed: " + cold_err);
+        status = _bc_append_status(status, "FAIL");
+    }
 
     let warm_exit = process.run_capture_metered(argv, child_env);
     let warm_out = process.capture_take_stdout();
-    let _warm_e = process.capture_take_stderr();
+    let warm_err = process.capture_take_stderr();
     let warm_ms = process.capture_take_wall_ms();
     let _warm_rss = process.capture_take_peak_rss_kb();
-    if warm_exit != 0 { status = _bc_append_status(status, "FAIL"); }
+    if warm_exit != 0 {
+        print.err("[bench-consumer] " + name + " warm build failed: " + warm_err);
+        status = _bc_append_status(status, "FAIL");
+    }
 
     let modules_staged = _bc_json_int(cold_out, "count");
     // Cold-cache misses span BOTH cache layers the build populates — the

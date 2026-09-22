@@ -31,6 +31,13 @@ fn _write_fixture(dir: string) -> void ![io] {
     fs.writeFile(dir + "/main.sfn", "fn main() -> int {\n    return 0;\n}\n");
 }
 
+fn _assert_msvc_target_trace(stderr: string) -> void {
+    // A non-Windows host reaches the explicit clang oracle and prints its
+    // `-target`; a native Windows host takes SFN-955's owned lld-link route
+    // and prints the resolved direct-link contract instead.
+    assert contains(stderr, "-target x86_64-pc-windows-msvc") || contains(stderr, "[trace-link] Windows contract: LLVM");
+}
+
 // E0614 rejects an unsupported `--target` triple before any compilation
 // happens, so this needs no `--work-dir` and is fast.
 test "target flag: an unsupported --target triple is rejected with E0614" ![io] {
@@ -56,10 +63,9 @@ test "target flag: an unsupported --target triple is rejected with E0614" ![io] 
 // The legacy `SAILFIN_TARGET_OS` alias must keep resolving to the msvc
 // triple — this is the seam `windows_socket_ops_test.sfn`,
 // `windows_runtime_siblings_test.sfn`, and `runtime_adapter_http_test.sfn`
-// depend on. The cross-target link fails on a Linux host (no MSVC import
-// libs), but `SAILFIN_TRACE_LINK=1` traces the resolved argv before the
-// link subprocess actually runs, so this asserts on stderr, never on the
-// exit code.
+// depend on. `SAILFIN_TRACE_LINK=1` exposes either the cross-host clang
+// oracle's target flag or the native Windows direct-link contract, so this
+// asserts on stderr, never on the exit code.
 test "target flag: the legacy SAILFIN_TARGET_OS alias still resolves to the msvc triple" ![io] {
     let sfn = sfn_bin_abs_path();
     let outcome = with_tmp_dir(fn (dir: string) -> int {
@@ -71,7 +77,7 @@ test "target flag: the legacy SAILFIN_TARGET_OS alias still resolves to the msvc
         let _out = process.capture_take_stdout();
         let err = process.capture_take_stderr();
         assert contains(err, "[trace-link]");
-        assert contains(err, "-target x86_64-pc-windows-msvc");
+        _assert_msvc_target_trace(err);
         return 0;
     });
     assert outcome == 0;
@@ -92,8 +98,9 @@ test "target flag: the legacy SAILFIN_TARGET_OS alias still resolves to the msvc
 // identity at all regardless
 // of which triple resolver would otherwise win. Pinning `Windows` keeps
 // both spawns on the target-driver path, isolating the assertion to the triple
-// resolver's precedence — the thing this test exists to pin. MinGW now selects
-// its GCC driver directly, while MSVC remains a clang `-target` invocation.
+// resolver's precedence — the thing this test exists to pin. MinGW selects
+// its GCC driver directly; MSVC uses the native lld-link contract on Windows
+// and the explicit clang oracle on other hosts.
 test "target flag: --target beats SAILFIN_TARGET_TRIPLE beats SAILFIN_TARGET_OS" ![io] {
     let sfn = sfn_bin_abs_path();
     let outcome = with_tmp_dir(fn (dir: string) -> int {
@@ -119,7 +126,7 @@ test "target flag: --target beats SAILFIN_TARGET_TRIPLE beats SAILFIN_TARGET_OS"
         let _exit_b = process.run_capture_cwd([sfn, "build", "--target=x86_64-pc-windows-msvc", "main.sfn"], env_b, dir);
         let _out_b = process.capture_take_stdout();
         let err_b = process.capture_take_stderr();
-        assert contains(err_b, "-target x86_64-pc-windows-msvc");
+        _assert_msvc_target_trace(err_b);
         assert ! contains(err_b, "x86_64-w64-mingw32-gcc");
 
         return 0;
@@ -133,10 +140,9 @@ test "target flag: --target beats SAILFIN_TARGET_TRIPLE beats SAILFIN_TARGET_OS"
 // such override to check and falls through to the host probe instead. The
 // two resolvers agree on every RECOGNIZED value but diverge on a typo. This
 // is written as a contrast pair, not a single assertion, because the
-// contrast — not either half alone — is what pins the divergence: asserting
-// only the unrecognized half would also pass if the OS resolver had simply
-// stopped tracing anything, and asserting a specific host-probed triple for
-// the unrecognized case would make the test host-dependent.
+// contrast — not either half alone — is what pins the divergence. The
+// recognized leg accepts either governed native provider trace, while the
+// typo leg must still expose the verbatim unrecognized OS.
 test "target flag: an unrecognized SAILFIN_TARGET_OS diverges from the triple resolver" ![io] {
     let sfn = sfn_bin_abs_path();
     let outcome = with_tmp_dir(fn (dir: string) -> int {
@@ -149,8 +155,7 @@ test "target flag: an unrecognized SAILFIN_TARGET_OS diverges from the triple re
         let _exit_r = process.run_capture_cwd([sfn, "build", "main.sfn"], env_recognized, dir);
         let _out_r = process.capture_take_stdout();
         let err_r = process.capture_take_stderr();
-        assert contains(err_r, "target os (Windows)");
-        assert contains(err_r, "-target x86_64-pc-windows-msvc");
+        _assert_msvc_target_trace(err_r);
 
         // Unrecognized: the OS resolver echoes the typo verbatim, but the
         // triple resolver ignores it and falls through to the host probe,
