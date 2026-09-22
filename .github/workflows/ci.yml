@@ -350,6 +350,10 @@ jobs:
         shell: bash
         run: build/bin/sfn dev shard cover
 
+      - name: Check cross-platform shard timing aggregation
+        shell: bash
+        run: bash scripts/test-aggregate-shard-weights.sh
+
   # Fast static-analysis pre-flight: run `sfn check` over the whole
   # compiler tree using the *pinned seed* binary (no self-host build
   # needed), so parse / typecheck / effect-check errors surface in
@@ -1327,6 +1331,14 @@ jobs:
             exit 2
           fi
           "$BIN" test "${roots[@]}" --no-test-cache
+
+      - name: Exhaustive compiler work-directory parity
+        shell: bash
+        timeout-minutes: 40
+        env:
+          SAILFIN_CC: /usr/bin/clang-18
+          SAILFIN_TEST_TIMEOUT: "1800"
+        run: build/bin/sfn test compiler/tests/soak --no-test-cache
 
   # The PR test suite is ~90% of CI wall time and runs serially, so we
   # fan it across per-OS shard legs that run concurrently (Phase 1 of

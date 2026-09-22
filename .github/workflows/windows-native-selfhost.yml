@@ -286,6 +286,17 @@ jobs:
           "wall_ms=$elapsed" >> $env:GITHUB_OUTPUT
           exit $rc
 
+      - name: Exhaustive compiler work-directory parity
+        shell: pwsh
+        timeout-minutes: 40
+        env:
+          SAILFIN_BOOTSTRAP: "off"
+          SAILFIN_RUNTIME_ROOT: ${{ github.workspace }}/runtime
+          SAILFIN_TEST_TIMEOUT: "1800"
+        run: |
+          & build/selfhost/fp1/sfn.exe test compiler/tests/soak --no-test-cache
+          exit $LASTEXITCODE
+
       - name: Summarize native Windows tests
         if: always()
         shell: pwsh

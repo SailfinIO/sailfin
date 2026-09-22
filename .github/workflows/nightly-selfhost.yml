@@ -207,6 +207,14 @@ jobs:
           if [ "${SELFHOST_STRICT:-0}" = "1" ]; then args+=(--strict); fi
           build/bin/sfn "${args[@]}"
 
+      - name: Exhaustive compiler work-directory parity
+        shell: bash
+        timeout-minutes: 40
+        env:
+          SAILFIN_TEST_TIMEOUT: "1800"
+          SAILFIN_BUILD_CACHE_DIR: ${{ github.workspace }}/build/cache
+        run: build/bin/sfn test compiler/tests/soak --no-test-cache
+
       # `find`, not `**`: macOS runners ship bash 3.2, which has no
       # `globstar`, so `shopt -s globstar` errored out and the recursive
       # glob silently matched nothing — on the one leg whose failures we

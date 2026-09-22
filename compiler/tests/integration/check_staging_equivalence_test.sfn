@@ -117,7 +117,7 @@ fn _sorted(items: string[]) -> string[] {
 // `.claude/rules/no-bash-e2e.md`). `fs.listDirectory` is not recursive;
 // import-context never stages an empty directory, so a zero-entry listing
 // unambiguously means a leaf file (same probe as `_collect_files` in
-// `compiler/tests/e2e/work_dir_parity_test.sfn`, which walks this same
+// `compiler/tests/soak/work_dir_parity_test.sfn`, which walks this same
 // staging tree).
 fn _collect_files(root: string, rel: string, acc: string[]) -> string[] ![io] {
     let dir = root + "/" + rel;

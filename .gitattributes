@@ -99,6 +99,10 @@ install.sh linguist-vendored
 # the per-line comparison fails), the same shape the `.stderr`/`.snap`
 # fixtures above already describe.
 *.txt text eol=lf
+# The shard-weight parser accepts decimal weights terminated by LF. CRLF
+# makes every row invalid and silently switches Windows to alphabetical
+# sharding, defeating the timing-based balance used on the other hosts.
+*.tsv text eol=lf
 
 # Group 2 — key and digest material, where a translated byte is not a
 # cosmetic difference but a verification failure. `bootstrap.toml [verify]`

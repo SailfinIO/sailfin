@@ -4,7 +4,8 @@
 #
 # Input is the directory `actions/download-artifact` unpacks the
 # `ci-test-timing-<target>-<shard>` artifacts into: one subdirectory per
-# artifact, each holding `agent-test.shard-<shard>.jsonl`.
+# artifact, holding `agent-test.shard-<shard>.jsonl` on Unix or
+# `windows-<shard>.jsonl` on Windows.
 #
 # The weight is a SHARE, not a duration:
 #
@@ -55,7 +56,7 @@ fi
 # Targets are matched against a fixed list rather than split on "-", because
 # both halves of `ci-test-timing-linux-arm64-e2e-a` contain dashes and a
 # positional split silently mis-attributes every row.
-known_targets="linux-x86_64 linux-arm64 macos-arm64"
+known_targets="linux-x86_64 linux-arm64 macos-arm64 windows-x86_64"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -78,12 +79,21 @@ for d in "$art_dir"/ci-test-timing-*; do
         echo "warn: skipping artifact with unrecognized target: $base" >&2
         continue
     fi
-    for f in "$d"/agent-test.shard-*.jsonl; do
+    # Native Windows publishes windows-<shard>.jsonl; Unix runners use
+    # agent-test.shard-<shard>.jsonl. Both carry the same per-file schema.
+    for f in "$d"/agent-test.shard-*.jsonl "$d"/windows-*.jsonl; do
         [ -f "$f" ] || continue
         found_any=1
         # One (target, path, file_elapsed_ms) row per test row; deduped below.
         sed -n 's/.*"file":"\([^"]*\)".*"file_elapsed_ms":\([0-9][0-9]*\).*/\1\t\2/p' \
-            "$f" | awk -v t="$target" -F'\t' '{print t"\t"$1"\t"$2}' >> "$pairs"
+            "$f" | awk -v t="$target" -F'\t' '
+                # Captured nested runners can leak absolute scratch-file
+                # rows into the sidecar. Their time is already included in
+                # the enclosing file and they are not shardable repo paths.
+                $1 !~ /^\// && $1 !~ /^[A-Za-z]:/ && $1 !~ /^\\/ {
+                    print t"\t"$1"\t"$2
+                }
+            ' >> "$pairs"
     done
 done
 
@@ -133,7 +143,7 @@ END {
 
     printf("# Per-file shard weights for the time-weighted CI shard map (SFN-863).\n")
     printf("# weight = round(1e6 * max over targets of (file_elapsed / suite_total)).\n")
-    printf("# A share, not a duration, so one table serves macos-arm64 and linux-arm64\n")
+    printf("# A share, not a duration, so one table serves Unix and Windows targets\n")
     printf("# at different absolute speeds -- see the measured suite totals below.\n")
     printf("# NOT target-invariant per file: a given file can score differently on\n")
     printf("# each target (SFN-1223), and max-over-targets takes the larger own-suite\n")
