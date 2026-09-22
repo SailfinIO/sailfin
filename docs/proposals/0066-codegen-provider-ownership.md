@@ -392,12 +392,17 @@ may reference. For MSVC x86-64 the resolver must locate the matching
 equivalent) beneath that family's Clang resource directory, prove that its
 version/target match `llc`, and place it after Sailfin objects and before the
 UCRT/VCRuntime/default-library tail in the `lld-link` response file. The
-capability probe links a COFF object that requires `__extendhfsf2`,
-`__truncsfhf2`, `__truncdfhf2`, and `__floatsihf`; a missing library or
-symbol fails the resolved-link contract before normal builds. Its canonical
-path, content digest, resource version, ordered position, and probe result enter
-link/cache/provenance identity. This is the direct-link replacement for the
-current clang `--rtlib=compiler-rt` responsibility, not an MSVC/UCRT library.
+capability probe lowers and links COFF IR that exercises half-to-float,
+float-to-half, double-to-half, and signed-int-to-half conversions; a missing
+library or emitted helper symbol fails the resolved-link contract before
+normal builds. Probing operations rather than a generic helper-name list is
+required because LLVM 18's x86-64 MSVC backend lowers signed-int-to-half as a
+native int-to-float conversion followed by `__truncsfhf2`; the official
+Windows compiler-rt archive therefore does not export `__floatsihf`. Its
+canonical path, content digest, resource version, ordered position, and probe
+result enter link/cache/provenance identity. This is the direct-link replacement
+for the current clang `--rtlib=compiler-rt` responsibility, not an MSVC/UCRT
+library.
 
 ### 3.7 Fail-closed diagnostics and reporting
 

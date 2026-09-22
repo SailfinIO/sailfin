@@ -1,0 +1,119 @@
+// compiler/tests/unit/windows_direct_link_argv_test.sfn
+//
+// SFN-955: exact native MSVC/COFF argv and response-file contract. These
+// tests are pure so every host covers the Windows linker surface; native
+// Windows acceptance additionally executes the resulting path end to end.
+import { expect_eq_bool, expect_eq_str, expect_eq_str_array } from "sfn/test";
+
+import { WindowsLinkContract, windows_lld_link_argv } from "../../src/build/windows_direct_link";
+import { windows_retain_flags_from_nm } from "../../src/build/windows_link_probe";
+import {
+    WindowsLinkSpawn,
+    windows_link_argv_with_response_file,
+    windows_link_response_arg,
+    windows_link_response_body
+} from "../../src/build/windows_link_response";
+
+fn _contract() -> WindowsLinkContract {
+    return WindowsLinkContract {
+        ok: true,
+        reason: "",
+        linker_path: "C:/LLVM/bin/lld-link.exe",
+        llvm_root: "C:/LLVM",
+        llvm_major: 18,
+        msvc_root: "C:/VS/VC/Tools/MSVC/14.40.33807",
+        msvc_version: "14.40.33807",
+        sdk_root: "C:/Windows Kits/10",
+        sdk_version: "10.0.26100.0",
+        msvc_lib_dir: "C:/VS/VC/Tools/MSVC/14.40.33807/lib/x64",
+        ucrt_lib_dir: "C:/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64",
+        sdk_um_lib_dir: "C:/Windows Kits/10/Lib/10.0.26100.0/um/x64",
+        builtins_lib: "C:/LLVM/lib/clang/18/lib/windows/clang_rt.builtins-x86_64.lib",
+        builtins_digest: "builtins-digest",
+        builtins_probe_ok: true,
+        identity: "contract-identity"
+    };
+}
+
+fn _index_of(values: string[], needle: string) -> int {
+    let mut i: int = 0;
+    loop {
+        if i >= values.length { break; }
+        if values[i] == needle { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _argv() -> string[] {
+    return windows_lld_link_argv(_contract(), ["runtime.obj", "main.obj"], "build/app.exe", ["-ladvapi32", "-lbcrypt", "C:/vendor/custom.lib"], ["-Wl,/Brepro", "-Wl,--gc-sections", "-Wl,-u,sfn_provider_init"]);
+}
+
+test "windows direct link: invokes lld-link with explicit PE identity" ![pure] {
+    let argv = _argv();
+    assert expect_eq_str(argv[0], "C:/LLVM/bin/lld-link.exe").ok;
+    assert expect_eq_bool(_index_of(argv, "/machine:x64") >= 0, true).ok;
+    assert expect_eq_bool(_index_of(argv, "/subsystem:console") >= 0, true).ok;
+    assert expect_eq_bool(_index_of(argv, "/entry:mainCRTStartup") >= 0, true).ok;
+    assert expect_eq_bool(_index_of(argv, "/Brepro") >= 0, true).ok;
+    assert expect_eq_bool(_index_of(argv, "/nodefaultlib") >= 0, true).ok;
+    assert expect_eq_bool(_index_of(argv, "clang") >= 0, false).ok;
+}
+
+test "windows direct link: translates retain roots, dead strip, and libraries" ![pure] {
+    let argv = _argv();
+    assert expect_eq_bool(_index_of(argv, "/OPT:REF") >= 0, true).ok;
+    assert expect_eq_bool(_index_of(argv, "/OPT:ICF") >= 0, true).ok;
+    assert expect_eq_bool(_index_of(argv, "/INCLUDE:sfn_provider_init") >= 0, true).ok;
+    assert expect_eq_bool(_index_of(argv, "advapi32.lib") >= 0, true).ok;
+    assert expect_eq_bool(_index_of(argv, "bcrypt.lib") >= 0, true).ok;
+    assert expect_eq_bool(_index_of(argv, "C:/vendor/custom.lib") >= 0, true).ok;
+    assert expect_eq_bool(_index_of(argv, "-ladvapi32") >= 0, false).ok;
+}
+
+test "windows direct link: compiler-rt precedes the explicit CRT and SDK tail" ![pure] {
+    let argv = _argv();
+    let object = _index_of(argv, "main.obj");
+    let builtins = _index_of(argv, _contract().builtins_lib);
+    let libcmt = _index_of(argv, _contract().msvc_lib_dir + "/libcmt.lib");
+    let ucrt = _index_of(argv, _contract().ucrt_lib_dir + "/libucrt.lib");
+    let kernel = _index_of(argv, _contract().sdk_um_lib_dir + "/kernel32.lib");
+    assert expect_eq_bool(object < builtins, true).ok;
+    assert expect_eq_bool(builtins < libcmt, true).ok;
+    assert expect_eq_bool(libcmt < ucrt, true).ok;
+    assert expect_eq_bool(ucrt < kernel, true).ok;
+}
+
+test "windows direct link: complete argv is stable token for token" ![pure] {
+    let argv = windows_lld_link_argv(_contract(), ["main.obj"], "app.exe", [], []);
+    let expected: string[] = ["C:/LLVM/bin/lld-link.exe", "/nologo", "/machine:x64", "/subsystem:console", "/entry:mainCRTStartup", "/Brepro", "/OPT:REF", "/OPT:ICF", "/nodefaultlib", "/out:app.exe", "/libpath:C:/VS/VC/Tools/MSVC/14.40.33807/lib/x64", "/libpath:C:/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64", "/libpath:C:/Windows Kits/10/Lib/10.0.26100.0/um/x64", "main.obj", "C:/LLVM/lib/clang/18/lib/windows/clang_rt.builtins-x86_64.lib", "C:/VS/VC/Tools/MSVC/14.40.33807/lib/x64/libcmt.lib", "C:/VS/VC/Tools/MSVC/14.40.33807/lib/x64/libvcruntime.lib", "C:/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64/libucrt.lib", "C:/VS/VC/Tools/MSVC/14.40.33807/lib/x64/oldnames.lib", "C:/Windows Kits/10/Lib/10.0.26100.0/um/x64/kernel32.lib"];
+    assert expect_eq_str_array(argv, expected).ok;
+}
+
+test "windows direct link: response entries use lld-link quoting" ![pure] {
+    assert expect_eq_str(windows_link_response_arg("plain.obj"), "plain.obj").ok;
+    assert expect_eq_str(windows_link_response_arg("C:\\Program Files\\x.obj"), "\"C:\\Program Files\\x.obj\"").ok;
+    assert expect_eq_str(windows_link_response_arg(""), "\"\"").ok;
+}
+
+test "windows direct link: response body omits the executable" ![pure] {
+    let body = windows_link_response_body(["lld-link.exe", "/out:app.exe", "C:\\Program Files\\x.obj"]);
+    assert expect_eq_str(body, "/out:app.exe\n\"C:\\Program Files\\x.obj\"\n").ok;
+}
+
+test "windows direct link: response publication fails closed on stale directory" ![io] {
+    let stale = "build/sailfin/windows-rsp-stale-test.rsp";
+    if fs.exists(stale) { fs.removeDirectory(stale); }
+    fs.createDirectory(stale, true);
+    let result: WindowsLinkSpawn = windows_link_argv_with_response_file(["lld-link.exe", "/out:app.exe"], "build/sailfin/windows-rsp-stale-test");
+    let result_ok = result.ok;
+    let result_argv_length = result.argv.length;
+    assert expect_eq_bool(result_ok, false).ok;
+    assert expect_eq_bool(result_argv_length == 0, true).ok;
+    fs.removeDirectory(stale);
+}
+
+test "windows direct link: retain parser excludes llvm-nm object headers" ![pure] {
+    let flags = windows_retain_flags_from_nm("build/sailfin/sfn_runtime.obj:\n00000000 T sfn_provider_init\n00000000 D __sfn_type_desc.Value\n");
+    assert expect_eq_str_array(flags, ["-Wl,-u,sfn_provider_init", "-Wl,-u,__sfn_type_desc.Value"]).ok;
+}

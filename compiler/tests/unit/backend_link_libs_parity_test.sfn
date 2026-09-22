@@ -21,6 +21,7 @@ import { expect_eq_bool } from "sfn/test";
 
 import { LinkPlan, _llvm_text_link_program_argv, _llvm_text_link_test_argv } from "../../src/backend";
 import { DirectLinkContract, direct_ld_lld_argv } from "../../src/build/direct_link";
+import { empty_windows_link_contract } from "../../src/build/windows_direct_link";
 
 // Membership check over an emitted argv (`string[]`).
 fn _argv_contains(argv: string[], needle: string) -> boolean ![pure] {
@@ -104,6 +105,7 @@ test "backend: static argv reproduces every plan.libs entry" ![pure] {
     let contract = DirectLinkContract {
         ok: true,
         reason: "",
+        provider: "linux-ld.lld",
         linker_emulation: "elf_x86_64",
         dynamic_linker: "",
         static_link: true,
@@ -113,6 +115,7 @@ test "backend: static argv reproduces every plan.libs entry" ![pure] {
         crtbegin: "/usr/lib/gcc/x86_64-linux-gnu/13/crtbeginT.o",
         crtend: "/usr/lib/gcc/x86_64-linux-gnu/13/crtend.o",
         search_dirs: ["/usr/lib/gcc/x86_64-linux-gnu/13", "/usr/lib/x86_64-linux-gnu"],
+        windows: empty_windows_link_contract(),
         requires_direct_link: false
     };
     let argv = direct_ld_lld_argv(contract, plan.objects, plan.out_path, plan.libs, plan.link_flags);

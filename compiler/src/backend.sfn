@@ -4,9 +4,10 @@
 // interface that hides the driver's external object/link tool calls behind a
 // single seam. `LlvmTextBackend` assembles textual LLVM IR through the
 // coherent llvm-as/opt/llc family; clang remains only as an explicit object
-// migration oracle and as a final-link fallback/driver where native linking
-// is not yet governed. Darwin link argv uses Apple's `/usr/bin/clang` (or the
-// explicit `SAILFIN_CC` override) and supplies its SDK/deployment inputs.
+// migration oracle and as a final-link driver where native linking is not yet
+// governed. Native Linux and Windows links invoke ld.lld/lld-link directly;
+// Darwin link argv uses Apple's `/usr/bin/clang` (or the explicit
+// `SAILFIN_CC` override) and supplies its SDK/deployment inputs.
 //
 // Later codegen/link work plugs in here instead of re-hardcoding LLVM
 // assumptions across the driver: the LLVM C-API binding (#347) lands as
@@ -73,6 +74,8 @@ import {
 // is reached ambiently here, so the flag has to travel via this cell rather
 // than a parameter.
 import { active_static_link } from "./build/target_state";
+import { trace_windows_link_contract, windows_lld_link_argv } from "./build/windows_direct_link";
+import { windows_link_argv_with_response_file } from "./build/windows_link_response";
 // `_env_flag` gives `SAILFIN_TRACE_LINK` the same toggle semantics ("",
 // "0", "false" are off) as the other `SAILFIN_TRACE_*` knobs;
 // `_get_env_cmd` reads a single env var (the macOS SDK probe below).
@@ -455,6 +458,18 @@ struct LlvmTextBackend {
         let static_link = active_static_link();
         let direct = resolve_link_contract(target_os, static_link);
         if direct.ok {
+            if direct.provider == "windows-lld-link" {
+                let windows_argv = windows_lld_link_argv(direct.windows, eff_plan.objects, eff_plan.out_path, eff_plan.libs, eff_plan.link_flags);
+                let windows_spawn = windows_link_argv_with_response_file(windows_argv, eff_plan.out_path);
+                trace_windows_link_contract(direct.windows);
+                _llvm_text_trace_link(windows_argv);
+                if !windows_spawn.ok {
+                    print.err("sfn: Windows direct link prerequisite failed: "
+                        + windows_spawn.reason);
+                    return 2;
+                }
+                return process.run(windows_spawn.argv);
+            }
             let direct_argv = direct_ld_lld_argv(direct, eff_plan.objects, eff_plan.out_path, eff_plan.libs, eff_plan.link_flags);
             // The trace keeps receiving the ORIGINAL argv so
             // `SAILFIN_TRACE_LINK` still prints the full command

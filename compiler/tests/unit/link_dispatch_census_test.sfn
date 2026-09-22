@@ -139,6 +139,14 @@ test "link census: every link dispatcher consults the runtime-dep contract" ![io
     }
 }
 
+test "link census: native Windows roots the production runtime provider surface" ![io] {
+    let dispatcher = fs.readFile("compiler/src/build/link_dispatch.sfn");
+    assert expect_eq_bool(contains(dispatcher, "windows_runtime_retain_root_flags(runtime_objs)"), true).ok;
+    assert expect_eq_bool(contains(dispatcher, "retain_contract.ok && retain_contract.provider == \"windows-lld-link\""), true).ok;
+    let builder = fs.readFile("compiler/src/build/windows_direct_link.sfn");
+    assert expect_eq_bool(contains(builder, "result.push(\"/INCLUDE:\""), true).ok;
+}
+
 // The resolver-free entry points were the exact footgun the contract closes:
 // a link path with no caller-supplied resolver, so nothing could populate a
 // runtime dependency spec for `missing_runtime_dep_specs` to check. They were

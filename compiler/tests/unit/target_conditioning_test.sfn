@@ -1,17 +1,14 @@
 // compiler/tests/unit/target_conditioning_test.sfn
 //
 // Regression guard for the M6 build-target conditioning (SFN-52,
-// SFEP-0021 §4.2(A)): the driver must invoke clang/linker for the MSVC
-// Windows target (triple `x86_64-pc-windows-msvc`, `-fuse-ld=lld`, no
-// POSIX/OpenSSL link libs) while leaving the Linux/macOS clang argv and
-// link inputs byte-identical (#1112 zero-behaviour gate).
+// SFEP-0021 §4.2(A)): the MSVC Windows target uses the
+// `x86_64-pc-windows-msvc` triple and no POSIX/OpenSSL link libs while the
+// migration-oracle builders retain their target-conditioned clang argv.
 //
 // These are pure assertions over the target-conditioning helpers
-// (`build/target.sfn`) plus the clang-argv builders that consume them, so
-// the Windows leg is exercised on any host without a real Windows link —
-// the same override-driven pattern the emit-time locator tests use
-// (`errno_locator_test.sfn`), and the argv-shape pattern of
-// `backend_link_libs_parity_test.sfn`.
+// (`build/target.sfn`) plus both migration-oracle argv builders and the
+// owned-link resolver classification. Pure target helpers remain covered on
+// every host; the resolver assertion exercises the direct path natively.
 import { lower_to_llvm_ir_from_text_with_provider_context } from "sfn/codegen-llvm/lowering/entrypoints";
 import {
     LLVMProviderContext,
@@ -313,9 +310,9 @@ test "target: msvc requests /Brepro, host targets and windows-gnu do not" ![pure
 }
 
 test "target: GNU section-GC flags are skipped only for msvc" ![pure] {
-    // lld-link rejects `-Wl,--gc-sections` / `-Wl,-u,<sym>`; the driver
-    // must skip them for the msvc ABI and keep them everywhere else,
-    // including windows-gnu (mingw's GNU-family linker accepts them).
+    // lld-link rejects `--gc-sections` / `-u`; the shared driver skips the
+    // GNU spellings for msvc and the Windows direct builder owns
+    // `/OPT:REF` / `/INCLUDE:` instead. MinGW keeps the GNU spellings.
     assert expect_eq_bool(target_uses_gnu_link_gc("x86_64-unknown-linux-gnu"), true).ok;
     assert expect_eq_bool(target_uses_gnu_link_gc("x86_64-apple-darwin"), true).ok;
     assert expect_eq_bool(target_uses_gnu_link_gc("x86_64-w64-mingw32"), true).ok;
@@ -877,10 +874,16 @@ test "direct-link: resolve_link_contract(Darwin) keeps the clang route (unowned 
     }
 }
 
-test "direct-link: resolve_link_contract(Windows) keeps the clang route (unowned target)" ![io] {
+test "direct-link: native Windows MSVC resolves the owned direct route" ![io] {
     let contract = resolve_link_contract("Windows", false);
-    assert expect_eq_bool(contract.ok, false).ok;
-    if _link_provider_is_neutral(env.get("SAILFIN_LINK_PROVIDER")) {
+    let provider = env.get("SAILFIN_LINK_PROVIDER");
+    if build_host_os() == "Windows" && build_target_triple() == "x86_64-pc-windows-msvc"
+        && (provider.length == 0
+        || provider == "direct") {
+        assert expect_eq_bool(contract.ok, true).ok;
+        assert expect_eq_str(contract.provider, "windows-lld-link").ok;
+    } else { assert expect_eq_bool(contract.ok, false).ok; }
+    if build_host_os() != "Windows" && _link_provider_is_neutral(provider) {
         assert expect_eq_bool(contract.requires_direct_link, false).ok;
     }
 }
