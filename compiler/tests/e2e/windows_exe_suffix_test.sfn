@@ -59,8 +59,7 @@ fn _traced_build_stderr(dir: string, sfn: string, target_os: string, label: stri
     return process.capture_take_stderr();
 }
 
-// The argv token immediately following a `-o` token in the traced
-// `[trace-link] <argv...>` stderr line, or "" if absent.
+// The traced output path uses clang's `-o PATH` or lld-link's `/out:PATH`.
 fn _trace_out_arg(err: string) -> string {
     let tokens = split(err, " ");
     let mut i: int = 0;
@@ -68,6 +67,9 @@ fn _trace_out_arg(err: string) -> string {
         if i >= tokens.length { break; }
         if tokens[i] == "-o" && i + 1 < tokens.length {
             return tokens[i + 1];
+        }
+        if tokens[i].length > 5 && tokens[i].substring(0, 5) == "/out:" {
+            return tokens[i].substring(5, tokens[i].length);
         }
         i += 1;
     }

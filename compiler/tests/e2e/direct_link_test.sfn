@@ -33,6 +33,7 @@ import {
     clean_runner_env,
     clean_runner_env_without,
     default_scratch_dir,
+    host_is_windows,
     nested_runner_scratch,
     report_child_failure,
     sfn_bin_path,
@@ -161,8 +162,17 @@ test "direct-link: SAILFIN_LINKER=ld falls back to clang with a traced reason" !
     let main_path = _write_fixture(dir);
     let bin = dir + "/fallback-bin";
     let rc = _build(main_path, bin, "ld");
-    assert rc == 0;
     let err = fs.readFile(bin + ".err");
+    if host_is_windows() {
+        // The owned COFF contract has no `ld` provider: an explicit
+        // incompatible linker must fail closed rather than silently switch.
+        assert rc == 2;
+        assert contains(err, "E0628");
+        assert contains(err, "requested linker is ld");
+        assert ! fs.exists(bin);
+        return;
+    }
+    assert rc == 0;
     // The fallback is explicit — a trace-visible reason, then the clang
     // driver path (never a silent ABI change). Still legal after SFN-953
     // made missing prerequisites fail closed: naming a linker is an

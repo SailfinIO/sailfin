@@ -27,7 +27,12 @@
 // not auto-discover `runtime/native/capsule.toml`. See
 // `.claude/rules/no-bash-e2e.md`.
 import { find } from "sfn/strings";
-import { report_child_failure, scratch_root, sfn_bin_path } from "sfn/test";
+import {
+    host_is_windows,
+    report_child_failure,
+    scratch_root,
+    sfn_bin_path
+} from "sfn/test";
 
 fn _child_env() -> string[] ![io] {
     // Inherit the full parent environment: PATH/HOME/TMPDIR plus the macOS
@@ -90,9 +95,15 @@ test "linker: auto-detect surfaces [link] on stderr (not stdout) and runs" ![io]
 
 test "linker: SAILFIN_LINKER=ld forces the system default and runs" ![io] {
     let rc = _build("ld", "ld");
-    assert rc == 0;
     let err = fs.readFile(_dir("ld") + "/build.err");
     assert find(err, "[link] linker: system default (SAILFIN_LINKER=ld)", 0) >= 0;
+    if host_is_windows() {
+        assert rc == 2;
+        assert find(err, "E0628", 0) >= 0;
+        assert ! fs.exists(_bin("ld"));
+        return;
+    }
+    assert rc == 0;
     let run_rc = process.run_capture([_bin("ld")], []);
     let run_out = process.capture_take_stdout();
     let run_err = process.capture_take_stderr();

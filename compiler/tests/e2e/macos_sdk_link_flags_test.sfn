@@ -85,6 +85,10 @@ fn _stripped_traced_env() -> string[] ![io] {
     if home.length > 0 { e.push("HOME=" + home); }
     let tmpdir = env.get("TMPDIR");
     if tmpdir.length > 0 { e.push("TMPDIR=" + tmpdir); }
+    // Select the same coherent LLVM family while keeping SDK configuration
+    // absent; a contributor may have LLVM 18 outside PATH.
+    let llvm_root = env.get("SAILFIN_LLVM_ROOT");
+    if llvm_root.length > 0 { e.push("SAILFIN_LLVM_ROOT=" + llvm_root); }
     if host_is_windows() {
         let keys = _windows_base_env_keys();
         let mut i: int = 0;
@@ -98,6 +102,10 @@ fn _stripped_traced_env() -> string[] ![io] {
     let scratch = env.get("SAILFIN_TEST_SCRATCH");
     if scratch.length > 0 { e.push("SAILFIN_TEST_SCRATCH=" + scratch); }
     e.push("SAILFIN_TRACE_LINK=1");
+    // Windows' owned linker deliberately requires a selected MSVC toolset.
+    // This test strips that selection to exercise clang's independent SDK
+    // discovery, so select the migration oracle explicitly on that host.
+    if host_is_windows() { e.push("SAILFIN_LINK_PROVIDER=clang-oracle"); }
     return e;
 }
 

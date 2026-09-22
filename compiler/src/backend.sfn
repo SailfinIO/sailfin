@@ -468,7 +468,12 @@ struct LlvmTextBackend {
                         + windows_spawn.reason);
                     return 2;
                 }
-                return process.run(windows_spawn.argv);
+                let link_rc = process.run(windows_spawn.argv);
+                // The response file is a link-time input, not a build artifact.
+                // In particular, `sfn run` must not leave a run-*.exe.rsp stem.
+                let rsp_path = eff_plan.out_path + ".rsp";
+                if fs.exists(rsp_path) { fs.deleteFile(rsp_path); }
+                return link_rc;
             }
             let direct_argv = direct_ld_lld_argv(direct, eff_plan.objects, eff_plan.out_path, eff_plan.libs, eff_plan.link_flags);
             // The trace keeps receiving the ORIGINAL argv so
