@@ -19,6 +19,13 @@ import {
     _shard_weights_coverage_warns
 } from "../../src/cli/commands/test/arg_and_jobs";
 
+test "shard-weights: the checked-out scheduling table has usable rows" ![io] {
+    // Windows CRLF conversion once rejected every decimal weight, silently
+    // falling back to alphabetical sharding. Exercise the on-disk bytes.
+    let table_text = fs.readFile("compiler/tests/shard_weights.tsv");
+    assert _shard_weight_table_row_count(table_text) > 0;
+}
+
 test "shard-weights: the default is the median of the loaded table" ![pure] {
     let table_text = "# shard weight table\n" + "path\tweight\n"
         + "a_test.sfn\t10\n"

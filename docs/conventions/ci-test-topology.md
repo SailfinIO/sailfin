@@ -10,6 +10,24 @@ this file is read.
 
 ## Shard taxonomy
 
+Exhaustive compiler work-directory parity lives in `compiler/tests/soak`,
+outside the ordinary workspace test inventory and the eight PR shards.
+`nightly-selfhost.yml` runs it on Linux x86_64 and macOS arm64;
+`windows-native-selfhost.yml` runs it on native Windows. The scheduled
+`soak-aarch64-linux` job in `ci.yml` retains Linux arm64 coverage too.
+The self-host workflows also support manual dispatch. Run it explicitly before a release or when changing
+compiler work-directory staging:
+
+```bash
+build/bin/sfn test compiler/tests/soak --no-test-cache
+```
+
+The smaller `compiler/tests/e2e/work_dir_flag_test.sfn` and integration
+staging-equivalence checks remain in the PR inventory. The soak retains the
+two complete compiler builds and binary/staged-file comparisons; moving it
+does not claim those smaller checks prove full compiler parity. See the
+[September timing audit](../measurements/test-time-2026-09-22.md).
+
 The shard map is owned by the compiler, not bash. `scripts/test_shards.sh`
 does not exist; `compiler/src/cli/commands/dev_shard.sfn:1-16` records that
 `sfn dev shard` retired it.
@@ -112,7 +130,7 @@ unreadable, or has zero parseable data rows
 table degrades the partition's balance, it never fails a build or a test
 run.
 
-**Where the per-file timing lives.** Every `macos-arm64` and `linux-arm64`
+**Where the per-file timing lives.** Every `macos-arm64`, `linux-arm64`, and `windows-x86_64`
 shard leg uploads its JSONL sidecar as a run artifact named
 `ci-test-timing-<target>-<shard>`, retained 90 days (SFN-866). Download those
 from any run to get `file_elapsed_ms` per file without re-running anything —
@@ -122,7 +140,7 @@ it ran.
 
 `linux-x86_64` legs deliberately emit **no** sidecar: they keep the
 byte-identical human output path so one leg still exercises it
-(`sailfin-build/action.yml:410-414`). The two arm64 targets therefore build
+(`sailfin-build/action.yml:410-414`). The two arm64 targets and Windows therefore build
 the whole table, and **every `linux-x86_64` weight is an extrapolation**
 across exactly the cross-target gap measured above — expect its partition to
 balance less well than the targets that were measured. See SFN-862 before
@@ -157,6 +175,14 @@ that run's sidecars and uploads the result plus a drift summary, so a
 candidate usually already exists — check it before downloading anything. A
 regeneration that disagrees with the candidate for the same run is a bug in
 one of the two, not a judgement call.
+
+Unix sidecars use `agent-test.shard-*.jsonl`; Windows uses
+`windows-*.jsonl`. The aggregator reads both and excludes absolute scratch
+paths emitted by nested test runners, whose cost is already counted in the
+enclosing test file. `bash scripts/test-aggregate-shard-weights.sh` checks
+this contract in the shard-cover job. The committed table must stay LF:
+`.gitattributes` pins `*.tsv` because CRLF weights are rejected by the native
+parser and otherwise silently select alphabetical sharding on Windows.
 
 There is no automated refresh job — a stale table only costs balance, per the
 fail-open guarantee above, so refreshing is a manual maintenance task rather

@@ -1,11 +1,13 @@
-// End-to-end parity test for `sfn build -p compiler --work-dir <DIR>`.
+// Nightly parity test for `sfn build -p compiler --work-dir <DIR>`.
+// Two complete compiler builds cost 13-19 minutes per host in run
+// 35724148972. Keep this exhaustive check in the nightly self-host workflows;
+// work_dir_flag_test.sfn covers small-program work-dir behavior on every PR.
 //
 // Native replacement for the former `test_work_dir_parity.sh` (test-infra
 // Phase 3, epic #842). Locks in the #379 invariant that two driver runs
 // into different `--work-dir` roots produce equivalent compiler binaries
-// and the same set of staged import-context artifacts — surfacing a
-// `--work-dir` path leak at e2e-test time instead of buried in
-// `make check`'s 30-min fixed-point comparison.
+// and the same set of staged import-context artifacts. This isolates a
+// `--work-dir` path leak from the fixed-point comparison's other invariants.
 //
 // Two ACs from #379:
 //   1. The two compiler binaries are byte-identical (Linux ELF). Proven
