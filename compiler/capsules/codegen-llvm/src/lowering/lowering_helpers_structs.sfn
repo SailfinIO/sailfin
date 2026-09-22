@@ -10,10 +10,6 @@
 // unrelated concerns: symbol mangling, and this. Neither half is a natural
 // home for the other, so the budget was doing real work in flagging it.
 //
-// The one edge back to `lowering_helpers_mangling` is `append_native_function`
-// — `flatten_struct_methods` appends each lowered method to the result list.
-// The dependency is one-directional by construction: the mangling pass
-// references `flatten_struct_methods` only in comments, never in code.
 import {
     NativeFunction,
     NativeInterface,
@@ -22,13 +18,79 @@ import {
 } from "sfn/ir";
 import { substring } from "sfn/strings";
 
+import { sanitize_symbol } from "../symbols";
 import {
     CapabilityManifest,
     TraitDescriptor,
     TraitImplementationDescriptor,
     TraitMetadata
 } from "../types";
-import { append_native_function } from "./lowering_helpers_mangling";
+import { starts_with, string_array_contains, trim_text } from "../utils";
+
+fn append_native_function(values: NativeFunction[], value: NativeFunction) -> NativeFunction[] {
+    let mut out = values;
+    if out == null { out = []; }
+    out = out.push(value);
+    return out;
+}
+
+// Discover lowered `<StructName><MethodName>` symbols in imported native text.
+fn collect_struct_method_symbols(native_text: string) -> string[] {
+    let mut result: string[] = [];
+    if native_text.length == 0 { return result; }
+    let mut current_struct: string = "";
+    let mut scan_pos: int = 0;
+    loop {
+        if scan_pos >= native_text.length { break; }
+        let mut line_end = scan_pos;
+        loop {
+            if line_end >= native_text.length || native_text[line_end] == "\n" {
+                break;
+            }
+            line_end += 1;
+        }
+        let line = trim_text(substring(native_text, scan_pos, line_end));
+        scan_pos = line_end + 1;
+        if starts_with(line, ".struct ") {
+            let tail = trim_text(substring(line, 8, line.length));
+            let mut end: int = 0;
+            loop {
+                if end >= tail.length || tail[end] == " " || tail[end] == "<" {
+                    break;
+                }
+                end += 1;
+            }
+            current_struct = substring(tail, 0, end);
+            continue;
+        }
+        if starts_with(line, ".endstruct") {
+            current_struct = "";
+            continue;
+        }
+        if current_struct.length == 0 || !starts_with(line, ".method ") {
+            continue;
+        }
+        let mut tail = trim_text(substring(line, 8, line.length));
+        if starts_with(tail, "async ") {
+            tail = trim_text(substring(tail, 6, tail.length));
+        }
+        let mut end: int = 0;
+        loop {
+            if end >= tail.length || tail[end] == "(" || tail[end] == "<" {
+                break;
+            }
+            end += 1;
+        }
+        if end >= tail.length { continue; }
+        let method_name = trim_text(substring(tail, 0, end));
+        if method_name.length == 0 { continue; }
+        let symbol = sanitize_symbol(current_struct + method_name);
+        if symbol.length > 0 && !string_array_contains(result, symbol) {
+            result.push(symbol);
+        }
+    }
+    return result;
+}
 
 fn empty_capability_manifest() -> CapabilityManifest {
     return CapabilityManifest { entries: [] };

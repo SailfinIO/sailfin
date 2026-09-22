@@ -8,6 +8,7 @@
 // extend_native_functions) from the orchestrator's import set.
 import {
     ImplicitSymbol,
+    ImportModuleAlias,
     LayoutManifest,
     NativeBinding,
     NativeEnum,
@@ -21,7 +22,10 @@ import {
     parse_native_imports_for_import
 } from "sfn/ir";
 
-import { apply_layout_manifest_to_module } from "../imports";
+import {
+    apply_layout_manifest_to_module,
+    resolve_import_module_slug_for_module
+} from "../imports";
 import { collect_exported_symbol_names, find_function_by_name_or_import } from "../rendering_helpers";
 import { string_array_contains } from "../utils";
 import {
@@ -73,24 +77,96 @@ fn extract_import_struct_methods(applied_structs: NativeStruct[]) -> NativeFunct
     return flatten_struct_methods(applied_structs);
 }
 
-// Aliased function imports (`import { make as m } from "..."`) bind the call
-// site to the LOCAL alias name (`m`), but imported function signatures are
-// keyed by the EXPORTED name (`make`, possibly mangled `make__<provider>`).
-// The IR-text symbol-mangling pass already rewrites the aliased call symbol
-// (`@m` → `@make__<provider>`), so the only remaining gap is
-// expression-lowering SIGNATURE resolution: `resolve_call_signature` looks the
-// call target (`m`) up in the function table, finds nothing, and emits the
-// `cannot resolve return type` fatal.
-//
-// Mirror `localize_import_symbols_for_program` (effect_imports.sfn): for each
-// aliased specifier, clone the provider's signature under the local alias name
-// so the resolver matches. `candidate_functions` is the combined context table
-// (local + imported + struct methods); `find_function_by_name_or_import`
-// resolves the export by exact name or a unique mangled `name__<provider>`
-// suffix, covering both the bare cross-module case and the mangled test-runner
-// case. The clone carries an empty body — it is a resolution-only entry, never
-// emitted as a definition or a `declare`.
-fn build_import_alias_signatures(imports: NativeImport[], candidate_functions: NativeFunction[]) -> NativeFunction[] {
+fn _native_text_for_module(native_texts: string[], module_name: string) -> string {
+    let mut index: int = 0;
+    loop {
+        if index >= native_texts.length { break; }
+        let text = native_texts[index];
+        index += 1;
+        if text == null || text.length == 0 { continue; }
+        if extract_module_name_from_native_text(text) == module_name {
+            return text;
+        }
+    }
+    return "";
+}
+
+fn _resolved_import_module(import_path: string, parent_module: string, native_texts: string[], module_aliases: ImportModuleAlias[]) -> string {
+    let base = resolve_import_module_slug_for_module(import_path, parent_module);
+    let mut index: int = 0;
+    loop {
+        if index >= module_aliases.length { break; }
+        if module_aliases[index].import_slug == base {
+            return module_aliases[index].provider_slug;
+        }
+        index += 1;
+    }
+    if _native_text_for_module(native_texts, base).length > 0 { return base; }
+    let mod_name = base + "/mod";
+    if _native_text_for_module(native_texts, mod_name).length > 0 {
+        return mod_name;
+    }
+    return base;
+}
+
+// Resolve one imported spelling through its exact provider module and any
+// inline re-export aliases. The `(module, symbol)` cycle key prevents loops;
+// module scoping prevents an unrelated same-named function from supplying the
+// signature (SFN-1302).
+fn _provider_function_signature(module_name: string, symbol: string, native_texts: string[], module_aliases: ImportModuleAlias[]) -> NativeFunction? {
+    let mut current_module = module_name;
+    let mut current_symbol = symbol;
+    let mut seen: string[] = [];
+    loop {
+        let visit_key = current_module + "\n" + current_symbol;
+        if string_array_contains(seen, visit_key) { return null; }
+        seen.push(visit_key);
+        let text = _native_text_for_module(native_texts, current_module);
+        if text.length == 0 { return null; }
+        let functions = parse_native_artifact_for_import_with_bindings(text).functions;
+        let mut function_index: int = 0;
+        loop {
+            if function_index >= functions.length { break; }
+            if functions[function_index].name == current_symbol {
+                return functions[function_index];
+            }
+            function_index += 1;
+        }
+        let exports = parse_native_imports_for_import(text);
+        let mut found = false;
+        let mut i: int = 0;
+        loop {
+            if i >= exports.length { break; }
+            let entry = exports[i];
+            i += 1;
+            if entry == null || entry.kind != "export" || entry.specifiers == null {
+                continue;
+            }
+            let mut j: int = 0;
+            loop {
+                if j >= entry.specifiers.length { break; }
+                let spec = entry.specifiers[j];
+                j += 1;
+                if spec == null { continue; }
+                let mut exported = spec.name;
+                if spec.alias != null { exported = spec.alias; }
+                if exported != current_symbol { continue; }
+                current_symbol = spec.name;
+                current_module = _resolved_import_module(entry.module, current_module, native_texts, module_aliases);
+                found = true;
+                break;
+            }
+            if found { break; }
+        }
+        if !found { return null; }
+    }
+    return null;
+}
+
+// Clone each explicit import's provider-scoped signature under its local
+// spelling. These entries are resolution-only and are ordered before the
+// transitive global function pool by the lowering orchestrator.
+fn build_import_alias_signatures(imports: NativeImport[], candidate_functions: NativeFunction[], native_texts: string[], current_module: string, module_aliases: ImportModuleAlias[]) -> NativeFunction[] {
     let mut aliases: NativeFunction[] = [];
     if imports == null { return aliases; }
     let mut i: int = 0;
@@ -108,12 +184,14 @@ fn build_import_alias_signatures(imports: NativeImport[], candidate_functions: N
             let spec = specs[s];
             s += 1;
             if spec == null { continue; }
-            let alias_opt = spec.alias;
-            if alias_opt == null { continue; }
-            let alias_name: string = alias_opt;
+            let mut alias_name = spec.name;
+            if spec.alias != null { alias_name = spec.alias; }
             if alias_name.length == 0 { continue; }
-            if alias_name == spec.name { continue; }
-            let entry = find_function_by_name_or_import(candidate_functions, spec.name);
+            let provider_module = _resolved_import_module(imp.module, current_module, native_texts, module_aliases);
+            let mut entry = _provider_function_signature(provider_module, spec.name, native_texts, module_aliases);
+            if entry == null {
+                entry = find_function_by_name_or_import(candidate_functions, spec.name);
+            }
             if entry == null { continue; }
             let src: NativeFunction = entry;
             aliases.push(NativeFunction {

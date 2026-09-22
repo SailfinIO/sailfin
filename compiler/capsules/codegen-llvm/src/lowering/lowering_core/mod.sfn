@@ -364,8 +364,6 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     // lower_all_functions below, so context_functions must be a distinct
     // array so imported_functions don't contaminate local_functions.
     let mut context_functions = concat_native_functions(local_functions, imported_functions);
-    // Site 3 — safe in-place extend: context_functions is a fresh array from
-    // site 2, no prior snapshot is aliased.
     context_functions = extend_native_functions_inplace(context_functions, imported_struct_methods);
     // Aliased function imports (`import { make as m }`): register the
     // provider's signature under the local alias name so call-site signature
@@ -373,8 +371,13 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_ar
     // context table — not to `imported_functions`, so no extra `declare` is
     // emitted; the IR-text mangling pass already rewrites `@m` → the provider
     // symbol. See build_import_alias_signatures (lowering_phase_imports.sfn).
-    let import_alias_signatures = build_import_alias_signatures(safe_imports, context_functions);
-    context_functions = extend_native_functions_inplace(context_functions, import_alias_signatures);
+    let import_alias_signatures = build_import_alias_signatures(safe_imports, context_functions, safe_imported_native_texts, native_module.module_name, module_aliases);
+    // Explicit source bindings take precedence over unrelated same-named
+    // functions in the transitive context. Keep locals first, then localized
+    // imports, then the global imported pool (SFN-1302).
+    context_functions = concat_native_functions(local_functions, import_alias_signatures);
+    context_functions = extend_native_functions_inplace(context_functions, imported_functions);
+    context_functions = extend_native_functions_inplace(context_functions, imported_struct_methods);
     if debug_lowering { trace_log("emit-llvm: phase=context_functions"); }
 
     // ── Effect analysis ─────────────────────────────────────────────

@@ -299,6 +299,208 @@ test "ffi variadic: an imported variadic extern's declare carries the ... tail i
     assert expect_eq_bool(_ir_has_variadic_call(ir), true).ok;
 }
 
+// Three-module regression for SFN-1302:
+//
+//   provider (variadic extern) -> reexporter (inline export) -> consumer
+//
+// A normal re-export wrapper can forward its named parameters, but it cannot
+// name the unknown C variadic tail. The old wrapper nevertheless advertised
+// `...` and called the provider with only `n`, silently dropping every
+// variadic argument. The lowering must instead bind the consumer directly to
+// the provider's mangled symbol and emit no wrapper in the middle module. The
+// second exported symbol uses `as total` to prove provider-side spelling also
+// survives an aliased re-export.
+fn _write_reexport_fixture(dir: string) -> void ![io] {
+    fs.writeFile(dir + "/provider.sfn", "export extern fn sum_va(n: i32, ...) -> i32;\n"
+        + "export extern fn sum_va_alias(n: i32, ...) -> i32;\n");
+    fs.writeFile(dir + "/reexporter.sfn", "export { sum_va, sum_va_alias as total } from \"./provider\";\n");
+    fs.writeFile(dir + "/consumer.sfn", "import { sum_va, total } from \"./reexporter\";\n"
+        + "\n"
+        + "fn sfn_variadic_reexport_probe() -> i32 {\n"
+        + "    let a: i32 = 40;\n"
+        + "    let b: i32 = 2;\n"
+        + "    return sum_va(2, a, b) + total(2, a, b);\n"
+        + "}\n");
+}
+
+fn _emit_reexport_fixture(dir: string, label: string) -> boolean ![io] {
+    let sfn = sfn_bin_abs_path();
+    let root = dir + "/build/compiler/import-context";
+    fs.createDirectory(root, true);
+    let child_env = clean_runner_env(nested_runner_scratch(label));
+
+    let provider_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "provider", "-o", root
+        + "/provider.sfn-asm", "native", "provider.sfn"], child_env, dir);
+    let provider_out = process.capture_take_stdout();
+    let provider_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic re-export emit provider", provider_exit, provider_out, provider_err);
+    if provider_exit != 0 { return false; }
+
+    let reexport_asm_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "reexporter", "--import-context", root, "-o", root
+        + "/reexporter.sfn-asm", "native", "reexporter.sfn"], child_env, dir);
+    let reexport_asm_out = process.capture_take_stdout();
+    let reexport_asm_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic re-export emit middle native", reexport_asm_exit, reexport_asm_out, reexport_asm_err);
+    if reexport_asm_exit != 0 { return false; }
+
+    let reexport_ll_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "reexporter", "--import-context", root, "-o", dir
+        + "/reexporter.ll", "llvm", "reexporter.sfn"], child_env, dir);
+    let reexport_ll_out = process.capture_take_stdout();
+    let reexport_ll_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic re-export emit middle llvm", reexport_ll_exit, reexport_ll_out, reexport_ll_err);
+    if reexport_ll_exit != 0 { return false; }
+
+    let consumer_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "consumer", "--import-context", root, "-o", dir
+        + "/consumer.ll", "llvm", "consumer.sfn"], child_env, dir);
+    let consumer_out = process.capture_take_stdout();
+    let consumer_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic re-export emit consumer", consumer_exit, consumer_out, consumer_err);
+    return consumer_exit == 0;
+}
+
+test "ffi variadic: re-export chain binds the provider directly and preserves arguments" ![io] {
+    let dir = _xmod_scratch_dir() + "/reexport";
+    fs.createDirectory(dir, true);
+    _write_reexport_fixture(dir);
+    assert expect_eq_bool(_emit_reexport_fixture(dir, "ffi-variadic-reexport"), true).ok;
+
+    let middle_ir = fs.readFile(dir + "/reexporter.ll");
+    let consumer_ir = fs.readFile(dir + "/consumer.ll");
+    assert expect_eq_bool(contains(middle_ir, "@sum_va__reexporter"), false).ok;
+    assert expect_eq_bool(contains(middle_ir, "@total__reexporter"), false).ok;
+    assert expect_eq_bool(contains(consumer_ir, "@sum_va__reexporter"), false).ok;
+    assert expect_eq_bool(contains(consumer_ir, "@total__reexporter"), false).ok;
+    assert expect_eq_bool(contains(consumer_ir, "@sum_va__provider"), true).ok;
+    assert expect_eq_bool(contains(consumer_ir, "@sum_va_alias__provider"), true).ok;
+
+    let probe_symbol = _mangled_symbol(consumer_ir, "sfn_variadic_reexport_probe");
+    assert expect_eq_bool(probe_symbol.length > 0, true).ok;
+    let harness = dir + "/reexport_harness.c";
+    fs.writeFile(harness, "#include <stdarg.h>\n"
+        + "int sum_va__provider(int n, ...) {\n"
+        + "    va_list ap;\n"
+        + "    va_start(ap, n);\n"
+        + "    int total = 0;\n"
+        + "    for (int i = 0; i < n; ++i) total += va_arg(ap, int);\n"
+        + "    va_end(ap);\n"
+        + "    return total;\n"
+        + "}\n"
+        + "int sum_va_alias__provider(int n, ...) {\n"
+        + "    va_list ap;\n"
+        + "    va_start(ap, n);\n"
+        + "    int total = 0;\n"
+        + "    for (int i = 0; i < n; ++i) total += va_arg(ap, int);\n"
+        + "    va_end(ap);\n"
+        + "    return total;\n"
+        + "}\n"
+        + "extern int SFN_PROBE(void);\n"
+        + "int main(void) { return SFN_PROBE() == 84 ? 0 : 1; }\n");
+    let bin = dir + "/ffi-variadic-reexport";
+    let link_exit = run_external_c_oracle(["-Wno-override-module", "-DSFN_PROBE="
+        + probe_symbol, harness, dir
+        + "/consumer.ll", "-o", bin]);
+    let link_out = process.capture_take_stdout();
+    let link_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic re-export link", link_exit, link_out, link_err);
+    assert expect_eq_int(link_exit, 0).ok;
+
+    let run_exit = process.run_capture([bin], []);
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic re-export run", run_exit, run_out, run_err);
+    assert expect_eq_int(run_exit, 0).ok;
+}
+
+test "ffi variadic: multi-hop aliases resolve to the original provider" ![io] {
+    let dir = _xmod_scratch_dir() + "/reexport-multihop";
+    let root = dir + "/build/compiler/import-context";
+    fs.createDirectory(root, true);
+    fs.writeFile(dir + "/provider.sfn", "export extern fn original(n: i32, ...) -> i32;\n");
+    fs.writeFile(dir + "/middle_one.sfn", "export { original as renamed } from \"./provider\";\n");
+    fs.writeFile(dir + "/middle_two.sfn", "export { renamed as public_sum } from \"./middle_one\";\n");
+    fs.writeFile(dir + "/decoy.sfn", "fn renamed(value: i32) -> i32 { return value; }\n"
+        + "fn marker() -> i32 { return 0; }\n"
+        + "export { renamed, marker };\n");
+    fs.writeFile(dir + "/consumer.sfn", "import { public_sum } from \"./middle_two\";\n"
+        + "import { marker } from \"./decoy\";\n"
+        + "fn sfn_variadic_multihop_probe() -> i32 {\n"
+        + "    let a: i32 = 40;\n"
+        + "    let b: i32 = 2;\n"
+        + "    return public_sum(2, a, b);\n"
+        + "}\n");
+
+    let sfn = sfn_bin_abs_path();
+    let child_env = clean_runner_env(nested_runner_scratch("ffi-variadic-reexport-multihop"));
+    let provider_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "provider", "-o", root
+        + "/provider.sfn-asm", "native", "provider.sfn"], child_env, dir);
+    let provider_out = process.capture_take_stdout();
+    let provider_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic multihop emit provider", provider_exit, provider_out, provider_err);
+    assert expect_eq_int(provider_exit, 0).ok;
+
+    let middle_one_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "middle_one", "--import-context", root, "-o", root
+        + "/middle_one.sfn-asm", "native", "middle_one.sfn"], child_env, dir);
+    let middle_one_out = process.capture_take_stdout();
+    let middle_one_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic multihop emit middle one", middle_one_exit, middle_one_out, middle_one_err);
+    assert expect_eq_int(middle_one_exit, 0).ok;
+
+    let middle_two_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "middle_two", "--import-context", root, "-o", root
+        + "/middle_two.sfn-asm", "native", "middle_two.sfn"], child_env, dir);
+    let middle_two_out = process.capture_take_stdout();
+    let middle_two_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic multihop emit middle two", middle_two_exit, middle_two_out, middle_two_err);
+    assert expect_eq_int(middle_two_exit, 0).ok;
+
+    let decoy_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "decoy", "--import-context", root, "-o", root
+        + "/decoy.sfn-asm", "native", "decoy.sfn"], child_env, dir);
+    let decoy_out = process.capture_take_stdout();
+    let decoy_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic multihop emit decoy", decoy_exit, decoy_out, decoy_err);
+    assert expect_eq_int(decoy_exit, 0).ok;
+
+    let consumer_ll = dir + "/consumer.ll";
+    let consumer_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "consumer", "--import-context", root, "-o", consumer_ll, "llvm", "consumer.sfn"], child_env, dir);
+    let consumer_out = process.capture_take_stdout();
+    let consumer_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic multihop emit consumer", consumer_exit, consumer_out, consumer_err);
+    assert expect_eq_int(consumer_exit, 0).ok;
+
+    let consumer_ir = fs.readFile(consumer_ll);
+    assert expect_eq_bool(contains(consumer_ir, "@public_sum__middle_two"), false).ok;
+    assert expect_eq_bool(contains(consumer_ir, "@renamed__middle_one"), false).ok;
+    assert expect_eq_bool(contains(consumer_ir, "@original__provider"), true).ok;
+    let probe_symbol = _mangled_symbol(consumer_ir, "sfn_variadic_multihop_probe");
+    assert expect_eq_bool(probe_symbol.length > 0, true).ok;
+
+    let harness = dir + "/multihop_harness.c";
+    fs.writeFile(harness, "#include <stdarg.h>\n"
+        + "int original__provider(int n, ...) {\n"
+        + "    va_list ap;\n"
+        + "    va_start(ap, n);\n"
+        + "    int total = 0;\n"
+        + "    for (int i = 0; i < n; ++i) total += va_arg(ap, int);\n"
+        + "    va_end(ap);\n"
+        + "    return total;\n"
+        + "}\n"
+        + "int marker__decoy(void) { return 0; }\n"
+        + "extern int SFN_PROBE(void);\n"
+        + "int main(void) { return SFN_PROBE() == 42 ? 0 : 1; }\n");
+    let bin = dir + "/ffi-variadic-reexport-multihop";
+    let link_exit = run_external_c_oracle(["-Wno-override-module", "-DSFN_PROBE="
+        + probe_symbol, harness, consumer_ll, "-o", bin]);
+    let link_out = process.capture_take_stdout();
+    let link_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic multihop link", link_exit, link_out, link_err);
+    assert expect_eq_int(link_exit, 0).ok;
+
+    let run_exit = process.run_capture([bin], []);
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    report_child_failure("ffi-variadic multihop run", run_exit, run_out, run_err);
+    assert expect_eq_int(run_exit, 0).ok;
+}
+
 // Linked round trip (SFN-1291's whole point): a real C variadic is called
 // with mixed i32/i64/f64/pointer arguments, and the value C computes must
 // match what Sailfin expects. This must pass on macOS arm64 (stack-passed

@@ -31,7 +31,7 @@ import {
     _bootstrap_is_absolute,
     _bootstrap_prefixed_install_path,
     _bootstrap_restore_after_entry_claim
-} from "../../src/cli/commands/dev";
+} from "../../src/cli/commands/dev_bootstrap_install";
 
 // Same scratch shape as `fs_tree_test.sfn`: the per-invocation test
 // scratch when the pool provides one, else a repo-relative path rather

@@ -318,14 +318,11 @@ fn extract_module_name_from_native_text(native_text: string) -> string {
     loop {
         if start >= native_text.length { break; }
         let ch = native_text[start];
-        let mut _if265: boolean = false;
-        if ch == " " { _if265 = true; }
-        if ch == "\t" { _if265 = true; }
-        if _if265 {
-            start += 1;
-            continue;
-        }
-        break;
+        let mut whitespace = false;
+        if ch == " " { whitespace = true; }
+        if ch == "\t" { whitespace = true; }
+        if !whitespace { break; }
+        start += 1;
     }
 
     let mut end = start;
@@ -344,10 +341,7 @@ fn collect_available_import_module_names(imported_native_texts: string[]) -> str
     loop {
         if index >= imported_native_texts.length { break; }
         let text = imported_native_texts[index];
-        let mut _if266: boolean = false;
-        if text == null { _if266 = true; }
-        if text.length == 0 { _if266 = true; }
-        if _if266 {
+        if text == null || text.length == 0 {
             index += 1;
             continue;
         }
@@ -1091,12 +1085,8 @@ fn render_function_shim(export_symbol: string, target_symbol: string, signature:
     loop {
         if idx >= signature.param_types.length { break; }
         let ty = trim_text(signature.param_types[idx]);
-        if ty == "..." {
-            param_decls.push("...");
-            // Varargs shims are not supported; omit forwarding.
-            idx += 1;
-            continue;
-        }
+        // An unknown C variadic tail cannot be named or forwarded (SFN-1302).
+        if ty == "..." { return []; }
         let name = "%a" + number_to_string(idx);
         param_decls.push(ty + " " + name);
         call_args.push(ty + " " + name);

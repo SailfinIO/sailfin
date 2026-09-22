@@ -32,7 +32,7 @@ import { substring } from "sfn/strings";
 import { trace_log } from "../lowering_debug_state";
 import { index_of, number_to_string } from "../utils";
 import { sanitize_collection_length } from "./lowering_helpers";
-import { append_native_function } from "./lowering_helpers_mangling";
+import { append_native_function } from "./lowering_helpers_structs";
 import {
     append_instruction_to_function,
     append_native_import,
