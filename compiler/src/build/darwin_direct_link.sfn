@@ -28,6 +28,7 @@ struct DarwinLinkContract {
     reason: string;
     developer_dir: string;
     linker_path: string;
+    linker_version: string;
     sdk_root: string;
     sdk_version: string;
     deployment_target: string;
@@ -40,6 +41,7 @@ fn empty_darwin_link_contract() -> DarwinLinkContract {
         reason: "",
         developer_dir: "",
         linker_path: "",
+        linker_version: "",
         sdk_root: "",
         sdk_version: "",
         deployment_target: "",
@@ -59,6 +61,16 @@ fn _darwin_probe(argv: string[]) -> string ![io] {
     let _err = process.capture_take_stderr();
     if rc != 0 { return ""; }
     return out;
+}
+
+// Apple ld prints `-v` to stderr, unlike xcrun/plutil discovery probes.
+fn _darwin_linker_version(path: string) -> string ![io] {
+    let rc = process.run_capture([path, "-v"], process.environ());
+    let out = trim(process.capture_take_stdout());
+    let err = trim(process.capture_take_stderr());
+    if rc != 0 { return ""; }
+    if out.length > 0 { return out; }
+    return err;
 }
 
 // Validate the version as numeric major.minor, with an optional patch.
@@ -179,9 +191,11 @@ fn resolve_darwin_link() -> DarwinLinkContract ![io] {
             + system_lib);
     }
     let linker_digest = _sha256_of_file(selected_linker);
+    let linker_version = _darwin_linker_version(selected_linker);
     let sdk_digest = _sha256_of_file(selected_sdk + "/SDKSettings.plist");
     let system_digest = _sha256_of_file(system_lib);
-    if linker_digest.length == 0 || sdk_digest.length == 0 || system_digest.length == 0 {
+    if linker_digest.length == 0 || linker_version.length == 0 || sdk_digest.length == 0
+        || system_digest.length == 0 {
         return _darwin_failure("could not fingerprint Apple ld, SDK metadata, or libSystem for SDK "
             + sdk_version);
     }
@@ -204,6 +218,7 @@ fn resolve_darwin_link() -> DarwinLinkContract ![io] {
         reason: "",
         developer_dir: developer,
         linker_path: selected_linker,
+        linker_version: linker_version,
         sdk_root: selected_sdk,
         sdk_version: sdk_version,
         deployment_target: deployment,

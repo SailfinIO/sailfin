@@ -40,6 +40,9 @@ fn _provider(triple: string, format: string, fingerprint: string) -> LlvmObjectP
         opt_path: "/llvm/bin/opt",
         llc_path: "/llvm/bin/llc",
         clang_path: "",
+        tools: [],
+        family: null,
+        clang_version: "",
         diagnostic: ""
     };
 }

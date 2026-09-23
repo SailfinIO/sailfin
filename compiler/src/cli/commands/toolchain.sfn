@@ -58,6 +58,11 @@ import {
 } from "../../toolchain/user_default";
 import { _strip_build_metadata, resolve_compiler_version } from "../../version";
 import { CliContext } from "../context";
+import {
+    render_toolchain_owners_human,
+    render_toolchain_owners_json,
+    resolve_toolchain_owner_report
+} from "./toolchain_owners";
 
 fn _toolchain_install(version: string, work_root: string, allow_yanked: boolean) -> int ![clock, io, net] {
     let versions_base = toolchain_versions_base();
@@ -505,6 +510,7 @@ fn command_def() -> Command {
     verify_cmd = with_flag(verify_cmd, flag("all", "Verify every complete store entry"));
     verify_cmd = with_flag(verify_cmd, flag("json", "Emit the sailfin-toolchains/1 envelope on stdout"));
     let entry_version_cmd = command("entry-version", "Report this entry toolchain's identity and management-protocol range, without dispatch");
+    let owners_cmd = with_flag(command("owners", "Report the active target's resolved compiler and linker owners"), flag("json", "Emit the versioned toolchain owner report"));
     let default_cmd = with_arg(command("default", "Show or set the per-user default toolchain"), arg_optional("version", "Exact version to make the user default (default: report the current one)", ""));
     let mut update_cmd = with_arg(command("update", "Check for, or install, a newer toolchain on a channel — never a downgrade"), arg_optional("channel", "Channel to follow (stable|rc|beta|alpha|latest); default: the recorded user-default track", ""));
     update_cmd = with_flag(update_cmd, flag("check", "Report whether a newer release exists and change nothing"));
@@ -514,6 +520,7 @@ fn command_def() -> Command {
     remove_cmd = with_flag(remove_cmd, flag("force", "Override the project and user-default protections; never removes the running toolchain"));
     let mut cmd = with_subcommand(command("toolchain", "Manage installed sfn toolchains"), install_cmd);
     cmd = with_subcommand(cmd, entry_version_cmd);
+    cmd = with_subcommand(cmd, owners_cmd);
     cmd = with_subcommand(cmd, run_cmd_full);
     cmd = with_subcommand(cmd, list_cmd);
     cmd = with_subcommand(cmd, active_cmd);
@@ -538,6 +545,14 @@ fn run(matches: Matches, ctx: CliContext) -> int ![clock, io, net] {
         return 2;
     }
     if sub == "entry-version" { return _toolchain_entry_version(ctx); }
+    if sub == "owners" {
+        let report = resolve_toolchain_owner_report();
+        if has_flag(matches, "json") {
+            print(render_toolchain_owners_json(report));
+        } else { print(render_toolchain_owners_human(report)); }
+        if report.ok { return 0; }
+        return 1;
+    }
     if sub == "list" {
         return _toolchain_list(ctx, has_flag(matches, "json"));
     }

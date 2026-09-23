@@ -813,6 +813,17 @@ Whichever candidate wins still has to satisfy this root's `sfn` floor and `chann
 
 `sfn init` and [`sfn toolchain update <channel> --project`](#updating-a-toolchain) are the only commands that write `version` into a project manifest; a channel selector or `latest` resolving directly into a project `version` field remains a later SFEP-0073 slice, not shipped. `sfn toolchain default` (below) records a per-user default, never a project manifest, so it doesn't write this field.
 
+### Resolved tool owners
+
+`sfn toolchain owners [--json]` probes the active native target's first-party
+object and link owners. The human report names the resolved LLVM validator,
+optimizer, object emitter, direct linker, target format, and applicable SDK or
+CRT. `--json` emits the versioned schema described in
+[`docs/reference/toolchain-owners-json-schema.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/reference/toolchain-owners-json-schema.md).
+The command exits nonzero when a required prerequisite is missing or an
+explicit migration oracle prevents a clang-free claim. Foreign C is reported
+as inactive unless `SAILFIN_FOREIGN_C_COMPILER` is configured.
+
 ### Installing a toolchain
 
 `sfn toolchain install <version | channel> [--allow-yanked]` fetches, verifies, and stores a toolchain in the host-qualified version store. `<version>` is an exact release semver (e.g. `0.10.6`); `<channel>` is one of `stable`, `rc`, `beta`, `alpha`, or the `latest` alias for `stable`, resolved to an exact release for the current host through the signed toolchain index.
