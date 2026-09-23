@@ -26,7 +26,11 @@ import {
     merge_string_constants
 } from "../strings";
 import { sanitize_symbol } from "../symbols";
-import { map_return_type } from "../type_mapping";
+import {
+    map_return_type,
+    render_c_abi_parameter_type,
+    render_c_abi_return_type
+} from "../type_mapping";
 import {
     LLVMOperand,
     LifetimeRegionMetadata,
@@ -229,10 +233,8 @@ fn prepare_parameters_from_function(function: NativeFunction, context: TypeConte
         if index >= parameters.length { break; }
         let param_name = parameters[index].name;
         let raw_param_type = parameters[index].type_annotation;
-        // Strip default value from type annotations like "number = 0".
-        // The native IR emitter includes default values in .param annotations;
-        // map_return_type cannot parse "number = 0" and falls back to i8*,
-        // causing ABI mismatches between caller (double) and callee (i8*).
+        // Strip defaults such as `number = 0`; mapping the whole annotation
+        // falls back to i8* and mismatches the caller's ABI type.
         let mut param_type: string = raw_param_type;
         let eq_idx = index_of(raw_param_type, "=");
         if eq_idx > 0 {
@@ -242,8 +244,7 @@ fn prepare_parameters_from_function(function: NativeFunction, context: TypeConte
         if llvm_type == "void" { llvm_type = ""; }
         // Default empty types to i8* so LLVM IR is parseable.
         if llvm_type.length == 0 { llvm_type = "i8*"; }
-        // A channel parameter crosses as the opaque `i8*` handle; canonicalize
-        // its annotation so the element kind threads into the callee (#1466).
+        // Preserve a channel handle's element kind in the callee (#1466).
         let mut binding_annotation: string = param_type;
         let _chan_anno = _canonical_channel_param_annotation(param_type);
         if _chan_anno.length > 0 {
@@ -251,8 +252,7 @@ fn prepare_parameters_from_function(function: NativeFunction, context: TypeConte
             llvm_type = "i8*";
         }
         let sanitized = sanitize_symbol(param_name);
-        // Deduplicate parameter names: if this name was already used,
-        // append a numeric suffix to make it unique (LLVM requires unique param names).
+        // LLVM requires unique parameter names, so suffix duplicates.
         let mut llvm_name = "%" + sanitized;
         let mut dedup_count: int = 1;
         loop {
@@ -261,7 +261,11 @@ fn prepare_parameters_from_function(function: NativeFunction, context: TypeConte
             llvm_name = "%" + sanitized + "_" + number_to_string(dedup_count);
         }
         seen_names.push(llvm_name);
-        signature.push(llvm_type + " " + llvm_name);
+        if function.is_extern {
+            signature.push(render_c_abi_parameter_type(param_type, llvm_type)
+                + " "
+                + llvm_name);
+        } else { signature.push(llvm_type + " " + llvm_name); }
         bindings = append_parameter_binding(bindings, _emit_make_parameter_binding(param_name, llvm_name, llvm_type, binding_annotation));
         index += 1;
     }
@@ -280,7 +284,6 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     let fn_instr_count = function.instructions.length;
     let fn_decorator_count = function.decorators.length;
 
-    // Async lowering: delegate to emission_async module to keep this function small.
     if fn_is_async {
         if !fn_is_extern {
             if fn_name != "main" {
@@ -288,7 +291,6 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
             }
         }
     }
-
     let mut sanitized = sanitize_symbol(fn_name);
     let mut emit_main_wrapper: boolean = false;
     let mut llvm_return = map_return_type(context, fn_return_type);
@@ -297,9 +299,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
             + " llvm_return="
             + llvm_return);
     }
-    // Override return type for specific parse_native functions that return
-    // opaque types the LLVM backend cannot resolve. Use == instead of
-    // index_of which is miscompiled by older seeds.
+    // These opaque parse results cannot be resolved; `index_of` is unsafe on older seeds.
     let mut _if197: boolean = false;
     if sanitized == "parse_native_artifact" { _if197 = true; }
     if sanitized == "parse_native_functions_from_text" { _if197 = true; }
@@ -352,13 +352,11 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     }
 
     if fn_is_extern {
+        llvm_return = render_c_abi_return_type(fn_return_type, llvm_return);
         let mut signature: string = join_with_separator(preparation.signature, ", ");
         if signature.length == 0 { signature = ""; }
-        // The `...` tail is what makes LLVM apply the target's variadic
-        // convention — registers on AAPCS64 Linux, the stack on Apple arm64,
-        // where without it the callee reads its arguments from the wrong
-        // place. E0851 already rejects a `...` with no fixed parameter, so
-        // the degenerate `(...)` LLVM refuses cannot reach here. SFN-1291.
+        // `...` selects the target variadic ABI; E0851 ensures a fixed prefix,
+        // so the invalid LLVM spelling `(...)` cannot reach here. SFN-1291.
         if function.is_variadic {
             if signature.length > 0 { signature = signature + ", ..."; }
         }

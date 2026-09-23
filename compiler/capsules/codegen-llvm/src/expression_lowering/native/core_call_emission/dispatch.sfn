@@ -9,7 +9,11 @@ import { format_temp_name, format_typed_operand } from "../../../expressions_hel
 import { trace_log, trace_lowering } from "../../../lowering_debug_state";
 import { sanitize_symbol } from "../../../symbols";
 import { find_interface_info_by_name } from "../../../type_context_queries";
-import { ends_with_pointer_suffix } from "../../../type_mapping";
+import {
+    ends_with_pointer_suffix,
+    render_c_abi_parameter_type,
+    render_c_abi_return_type
+} from "../../../type_mapping";
 import {
     ExpressionResult,
     LLVMOperand,
@@ -106,7 +110,16 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
         if _trace_ccl {
             trace_log("call_lowering: render-arg idx=" + number_to_string(index));
         }
-        rendered_args.push(format_typed_operand(final_operands[index]));
+        let mut rendered_argument = format_typed_operand(final_operands[index]);
+        if function_entry != null {
+            if function_entry.is_extern {
+                if index < function_entry.parameters.length {
+                    let attributed_type = render_c_abi_parameter_type(function_entry.parameters[index].type_annotation, final_operands[index].llvm_type);
+                    rendered_argument = attributed_type + " " + final_operands[index].value;
+                }
+            }
+        }
+        rendered_args.push(rendered_argument);
         index += 1;
     }
     if _trace_ccl { trace_log("call_lowering: checkpoint-E args rendered"); }
@@ -476,6 +489,10 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
         // surface as an opaque IR error instead of a diagnostic. The
         // analyzer rejects a `...` with no fixed parameter (E0851), so the
         // two sides agree on what an empty list means. SFN-1291.
+        // Parameter attributes belong on the declaration and concrete call
+        // arguments, not inside this function type. LLVM rejects spellings
+        // such as `(i16 zeroext, ...)` with "argument attributes invalid in
+        // function type"; the valid form is `(i16, ...)`. SFN-1292.
         let fixed_text = join_with_separator(expected_params, ", ");
         if fixed_text.length > 0 {
             variadic_fn_type = " (" + fixed_text + ", ...)";
@@ -520,7 +537,13 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], operand
             if abi.length > 0 { abi_return_type = abi; }
         }
     }
-    let call_line = "  " + temp_name + " = call " + abi_return_type
+    let mut rendered_return_type = abi_return_type;
+    if function_entry != null {
+        if function_entry.is_extern {
+            rendered_return_type = render_c_abi_return_type(function_entry.return_type, abi_return_type);
+        }
+    }
+    let call_line = "  " + temp_name + " = call " + rendered_return_type
         + variadic_fn_type
         + " @"
         + call_symbol
