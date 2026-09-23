@@ -1,0 +1,236 @@
+// compiler/tests/e2e/ffi_narrow_int_abi_test.sfn
+//
+// End-to-end coverage for SFN-1292 / SFEP-0079 3.3. Extern declarations and
+// their direct calls must carry clang-compatible extension attributes for
+// narrow integers, while ordinary Sailfin functions keep their existing IR.
+// The linked leg compiles the C half at -O2 so the callee is free to rely on
+// the caller-side extension contract on x86-64 SysV and Apple arm64.
+import {
+    char_at_index,
+    contains,
+    find,
+    split
+} from "sfn/strings";
+import {
+    clean_runner_env,
+    default_scratch_dir,
+    expect_eq_bool,
+    expect_eq_int,
+    nested_runner_scratch,
+    report_child_failure,
+    run_external_c_oracle,
+    sfn_bin_abs_path
+} from "sfn/test";
+
+fn _is_symbol_char(ch: string) -> boolean {
+    if ch.length == 0 { return false; }
+    let chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    return find(chars, ch, 0) >= 0;
+}
+
+fn _mangled_symbol(ir: string, bare_name: string) -> string {
+    let needle = "@" + bare_name;
+    let pos = find(ir, needle, 0);
+    if pos < 0 { return ""; }
+    let mut end = pos + 1;
+    loop {
+        if end >= ir.length { break; }
+        if !_is_symbol_char(char_at_index(ir, end)) { break; }
+        end = end + 1;
+    }
+    let mut symbol = "";
+    let mut index = pos + 1;
+    loop {
+        if index >= end { break; }
+        symbol = symbol + char_at_index(ir, index);
+        index = index + 1;
+    }
+    return symbol;
+}
+
+fn _line_containing(text: string, needle: string) -> string {
+    let lines = split(text, "\n");
+    let mut index = 0;
+    loop {
+        if index >= lines.length { break; }
+        if contains(lines[index], needle) { return lines[index]; }
+        index = index + 1;
+    }
+    return "";
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut dir = env.get("SAILFIN_TEST_SCRATCH");
+    if dir.length == 0 { dir = default_scratch_dir(); }
+    dir = dir + "/sfn-ffi-narrow-int-abi";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _write_fixture(dir: string) -> void ![io] {
+    fs.writeFile(dir + "/probe.sfn", "extern fn takes(a: i8, b: u16, c: bool) -> i16;\n"
+        + "extern fn echo_i8(value: i8) -> i8;\n"
+        + "extern fn echo_u16(value: u16) -> u16;\n"
+        + "extern fn echo_bool(value: bool) -> bool;\n"
+        + "extern fn variadic_narrow(prefix: u16, ...) -> u16;\n"
+        + "\n"
+        + "fn local_narrow(a: i8, b: u16, c: bool) -> i16 {\n"
+        + "    if c { return b as i16; }\n"
+        + "    return a as i16;\n"
+        + "}\n"
+        + "\n"
+        + "fn sfn_narrow_abi_probe() -> i32 {\n"
+        + "    let lo: i8 = -128;\n"
+        + "    let hi: i8 = 127;\n"
+        + "    let zero: u16 = 0;\n"
+        + "    let max: u16 = 65535;\n"
+        + "    let first: i16 = -12345;\n"
+        + "    let second: i16 = 23456;\n"
+        + "    if takes(lo, max, false) != first { return 1; }\n"
+        + "    if takes(hi, zero, true) != second { return 2; }\n"
+        + "    if echo_i8(lo) != lo { return 3; }\n"
+        + "    if echo_i8(hi) != hi { return 4; }\n"
+        + "    if echo_u16(zero) != zero { return 5; }\n"
+        + "    if echo_u16(max) != max { return 6; }\n"
+        + "    if echo_bool(false) { return 7; }\n"
+        + "    if !echo_bool(true) { return 8; }\n"
+        + "    if local_narrow(lo, max, false) != lo as i16 { return 9; }\n"
+        + "    if variadic_narrow(max, 1 as i32) != max { return 10; }\n"
+        + "    return 0;\n"
+        + "}\n");
+}
+
+fn _emit_fixture(dir: string, label: string) -> string ![io] {
+    let sfn = sfn_bin_abs_path();
+    let ll = dir + "/probe.ll";
+    let child_env = clean_runner_env(nested_runner_scratch(label));
+    let exit = process.run_capture_cwd([sfn, "emit", "--module-name", "probe", "-o", ll, "llvm", "probe.sfn"], child_env, dir);
+    let out = process.capture_take_stdout();
+    let err = process.capture_take_stderr();
+    report_child_failure("ffi narrow-int emit", exit, out, err);
+    if exit != 0 { return ""; }
+    if !fs.exists(ll) { return ""; }
+    return fs.readFile(ll);
+}
+
+fn _emit_reexport_fixture(dir: string) -> boolean ![io] {
+    let root = dir + "/build/compiler/import-context";
+    fs.createDirectory(root, true);
+    fs.writeFile(dir + "/provider.sfn", "export extern fn narrow(value: u16) -> u16;\n");
+    fs.writeFile(dir + "/reexporter.sfn", "export { narrow } from \"./provider\";\n");
+    fs.writeFile(dir + "/consumer.sfn", "import { narrow } from \"./reexporter\";\n"
+        + "fn call_narrow(value: u16) -> u16 { return narrow(value); }\n");
+
+    let sfn = sfn_bin_abs_path();
+    let child_env = clean_runner_env(nested_runner_scratch("ffi-narrow-int-reexport"));
+    let provider_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "provider", "-o", root
+        + "/provider.sfn-asm", "native", "provider.sfn"], child_env, dir);
+    let provider_out = process.capture_take_stdout();
+    let provider_err = process.capture_take_stderr();
+    report_child_failure("ffi narrow-int provider emit", provider_exit, provider_out, provider_err);
+    if provider_exit != 0 { return false; }
+
+    let reexport_native_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "reexporter", "--import-context", root, "-o", root
+        + "/reexporter.sfn-asm", "native", "reexporter.sfn"], child_env, dir);
+    let reexport_native_out = process.capture_take_stdout();
+    let reexport_native_err = process.capture_take_stderr();
+    report_child_failure("ffi narrow-int re-export native emit", reexport_native_exit, reexport_native_out, reexport_native_err);
+    if reexport_native_exit != 0 { return false; }
+
+    let reexport_ll_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "reexporter", "--import-context", root, "-o", dir
+        + "/reexporter.ll", "llvm", "reexporter.sfn"], child_env, dir);
+    let reexport_ll_out = process.capture_take_stdout();
+    let reexport_ll_err = process.capture_take_stderr();
+    report_child_failure("ffi narrow-int re-export llvm emit", reexport_ll_exit, reexport_ll_out, reexport_ll_err);
+    if reexport_ll_exit != 0 { return false; }
+
+    let consumer_exit = process.run_capture_cwd([sfn, "emit", "--module-name", "consumer", "--import-context", root, "-o", dir
+        + "/consumer.ll", "llvm", "consumer.sfn"], child_env, dir);
+    let consumer_out = process.capture_take_stdout();
+    let consumer_err = process.capture_take_stderr();
+    report_child_failure("ffi narrow-int consumer emit", consumer_exit, consumer_out, consumer_err);
+    return consumer_exit == 0;
+}
+
+test "ffi narrow integers: extern declares and calls carry extension attributes" ![io] {
+    let dir = _scratch_dir();
+    _write_fixture(dir);
+    let ir = _emit_fixture(dir, "ffi-narrow-int-ir");
+    assert expect_eq_bool(ir.length > 0, true).ok;
+
+    assert expect_eq_bool(contains(ir, "declare signext i16 @takes(i8 signext %a, i16 zeroext %b, i1 zeroext %c)"), true).ok;
+    assert expect_eq_bool(contains(ir, "declare signext i8 @echo_i8(i8 signext %value)"), true).ok;
+    assert expect_eq_bool(contains(ir, "declare zeroext i16 @echo_u16(i16 zeroext %value)"), true).ok;
+    assert expect_eq_bool(contains(ir, "declare zeroext i1 @echo_bool(i1 zeroext %value)"), true).ok;
+
+    assert expect_eq_bool(contains(ir, "call signext i16 @takes(i8 signext"), true).ok;
+    assert expect_eq_bool(contains(ir, "call signext i8 @echo_i8(i8 signext"), true).ok;
+    assert expect_eq_bool(contains(ir, "call zeroext i16 @echo_u16(i16 zeroext"), true).ok;
+    assert expect_eq_bool(contains(ir, "call zeroext i1 @echo_bool(i1 zeroext"), true).ok;
+    assert expect_eq_bool(contains(ir, "declare zeroext i16 @variadic_narrow(i16 zeroext %prefix, ...)"), true).ok;
+    assert expect_eq_bool(contains(ir, "call zeroext i16 (i16, ...) @variadic_narrow(i16 zeroext"), true).ok;
+    assert expect_eq_bool(contains(ir, "(i16 zeroext, ...)"), false).ok;
+
+    let local_define = _line_containing(ir, "define i16 @local_narrow__");
+    let local_call = _line_containing(ir, "call i16 @local_narrow__");
+    assert expect_eq_bool(local_define.length > 0, true).ok;
+    assert expect_eq_bool(local_call.length > 0, true).ok;
+    assert expect_eq_bool(contains(local_define, "signext"), false).ok;
+    assert expect_eq_bool(contains(local_define, "zeroext"), false).ok;
+    assert expect_eq_bool(contains(local_call, "signext"), false).ok;
+    assert expect_eq_bool(contains(local_call, "zeroext"), false).ok;
+}
+
+test "ffi narrow integers: imported externs and re-export shims preserve valid attributes" ![io] {
+    let dir = _scratch_dir() + "/reexport";
+    fs.createDirectory(dir, true);
+    assert expect_eq_bool(_emit_reexport_fixture(dir), true).ok;
+
+    let reexport_ir = fs.readFile(dir + "/reexporter.ll");
+    let consumer_ir = fs.readFile(dir + "/consumer.ll");
+    assert expect_eq_bool(contains(reexport_ir, "define zeroext i16 @narrow__reexporter(i16 zeroext"), true).ok;
+    assert expect_eq_bool(contains(reexport_ir, "call zeroext i16 @narrow__provider(i16 zeroext"), true).ok;
+    assert expect_eq_bool(contains(reexport_ir, "ret zeroext i16"), false).ok;
+    assert expect_eq_bool(contains(consumer_ir, "declare zeroext i16 @narrow__reexporter(i16 zeroext"), true).ok;
+    assert expect_eq_bool(contains(consumer_ir, "call zeroext i16 @narrow__reexporter(i16 zeroext"), true).ok;
+}
+
+test "ffi narrow integers: optimized C boundary values round trip" ![io] {
+    let dir = _scratch_dir();
+    _write_fixture(dir);
+    let ir = _emit_fixture(dir, "ffi-narrow-int-roundtrip");
+    assert expect_eq_bool(ir.length > 0, true).ok;
+
+    let probe_symbol = _mangled_symbol(ir, "sfn_narrow_abi_probe");
+    assert expect_eq_bool(probe_symbol.length > 0, true).ok;
+
+    let harness = dir + "/harness.c";
+    fs.writeFile(harness, "#include <stdbool.h>\n" + "#include <stdint.h>\n"
+        + "\n"
+        + "int16_t takes(int8_t a, uint16_t b, _Bool c) {\n"
+        + "    if (a == INT8_MIN && b == UINT16_MAX && !c) return INT16_C(-12345);\n"
+        + "    if (a == INT8_MAX && b == 0 && c) return INT16_C(23456);\n"
+        + "    return INT16_C(-1);\n"
+        + "}\n"
+        + "int8_t echo_i8(int8_t value) { return value; }\n"
+        + "uint16_t echo_u16(uint16_t value) { return value; }\n"
+        + "_Bool echo_bool(_Bool value) { return value; }\n"
+        + "uint16_t variadic_narrow(uint16_t prefix, ...) { return prefix; }\n"
+        + "extern int SFN_PROBE(void);\n"
+        + "int main(void) { return SFN_PROBE(); }\n");
+
+    let bin = dir + "/ffi-narrow-int-abi";
+    let link_exit = run_external_c_oracle(["-O2", "-Wno-override-module", "-DSFN_PROBE="
+        + probe_symbol, harness, dir
+        + "/probe.ll", "-o", bin]);
+    let link_out = process.capture_take_stdout();
+    let link_err = process.capture_take_stderr();
+    report_child_failure("ffi narrow-int link", link_exit, link_out, link_err);
+    assert expect_eq_int(link_exit, 0).ok;
+
+    let run_exit = process.run_capture([bin], []);
+    let run_out = process.capture_take_stdout();
+    let run_err = process.capture_take_stderr();
+    report_child_failure("ffi narrow-int run", run_exit, run_out, run_err);
+    assert expect_eq_int(run_exit, 0).ok;
+}

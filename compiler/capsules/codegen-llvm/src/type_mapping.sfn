@@ -127,6 +127,38 @@ fn unwrap_move_wrapper(annotation: string) -> string {
     return trimmed;
 }
 
+// LLVM's C ABI lowering needs the same narrow-integer extension attributes
+// clang places on prototypes. Keep this classification in source-type space:
+// the LLVM widths alone cannot distinguish signed `i16` from unsigned `u16`.
+// The parameter spelling is `<type> <attribute>`, while a return attribute
+// precedes the return type; the small render helpers below keep those two
+// grammars from drifting across declarations and call sites. SFN-1292.
+fn c_abi_narrow_extension_attribute(annotation: string) -> string {
+    let mut normalized = trim_text(annotation);
+    let eq_index = index_of(normalized, "=");
+    if eq_index > 0 {
+        normalized = trim_text(substring(normalized, 0, eq_index));
+    }
+    if normalized == "i8" { return "signext"; }
+    if normalized == "i16" { return "signext"; }
+    if normalized == "u8" { return "zeroext"; }
+    if normalized == "u16" { return "zeroext"; }
+    if normalized == "bool" { return "zeroext"; }
+    return "";
+}
+
+fn render_c_abi_parameter_type(annotation: string, llvm_type: string) -> string {
+    let attribute = c_abi_narrow_extension_attribute(annotation);
+    if attribute.length == 0 { return llvm_type; }
+    return llvm_type + " " + attribute;
+}
+
+fn render_c_abi_return_type(annotation: string, llvm_type: string) -> string {
+    let attribute = c_abi_narrow_extension_attribute(annotation);
+    if attribute.length == 0 { return llvm_type; }
+    return attribute + " " + llvm_type;
+}
+
 // =============================================================================
 // Type Classification
 // =============================================================================

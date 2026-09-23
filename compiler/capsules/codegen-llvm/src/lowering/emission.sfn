@@ -26,7 +26,11 @@ import {
     merge_string_constants
 } from "../strings";
 import { sanitize_symbol } from "../symbols";
-import { map_return_type } from "../type_mapping";
+import {
+    map_return_type,
+    render_c_abi_parameter_type,
+    render_c_abi_return_type
+} from "../type_mapping";
 import {
     LLVMOperand,
     LifetimeRegionMetadata,
@@ -261,7 +265,11 @@ fn prepare_parameters_from_function(function: NativeFunction, context: TypeConte
             llvm_name = "%" + sanitized + "_" + number_to_string(dedup_count);
         }
         seen_names.push(llvm_name);
-        signature.push(llvm_type + " " + llvm_name);
+        let mut signature_type = llvm_type;
+        if function.is_extern {
+            signature_type = render_c_abi_parameter_type(param_type, llvm_type);
+        }
+        signature.push(signature_type + " " + llvm_name);
         bindings = append_parameter_binding(bindings, _emit_make_parameter_binding(param_name, llvm_name, llvm_type, binding_annotation));
         index += 1;
     }
@@ -352,6 +360,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     }
 
     if fn_is_extern {
+        llvm_return = render_c_abi_return_type(fn_return_type, llvm_return);
         let mut signature: string = join_with_separator(preparation.signature, ", ");
         if signature.length == 0 { signature = ""; }
         // The `...` tail is what makes LLVM apply the target's variadic

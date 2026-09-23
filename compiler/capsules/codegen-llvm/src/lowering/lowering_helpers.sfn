@@ -1101,12 +1101,19 @@ fn render_function_shim(export_symbol: string, target_symbol: string, signature:
             + join_with_separator(call_args, ", ")
             + ")", "  ret void", "}",];
     }
+    let mut value_return_type = trim_text(signature.return_type);
+    if starts_with(value_return_type, "signext ") {
+        value_return_type = trim_text(substring(value_return_type, 8, value_return_type.length));
+    }
+    if starts_with(value_return_type, "zeroext ") {
+        value_return_type = trim_text(substring(value_return_type, 8, value_return_type.length));
+    }
     return [header, "entry:", "  %t0 = call " + signature.return_type + " @"
         + target_symbol
         + "("
         + join_with_separator(call_args, ", ")
         + ")", "  ret "
-        + signature.return_type
+        + value_return_type
         + " %t0", "}",];
 }
 

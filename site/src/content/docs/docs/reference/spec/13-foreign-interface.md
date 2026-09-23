@@ -98,10 +98,29 @@ type is out of view all pass silently whether or not they need promotion — the
 check does not infer a type in order to accuse it. State the argument's type
 explicitly at the call site if you want the check to see it.
 
-**Not shipped.** Variadic Sailfin function *definitions*, `va_list` access to
-a variadic extern's own arguments, and the `signext`/`zeroext` narrow-integer
-extension attributes are **designed, not shipped** (SFEP-0079 §3.3, remaining
-L4 leaf).
+Variadic Sailfin function *definitions* and `va_list` access to a variadic
+extern's own arguments remain designed, not shipped.
+
+### Narrow-integer extension
+
+Extern prototypes and their matching call sites carry the extension attributes
+used by clang for the governed C ABIs. Signed `i8` and `i16` parameters and
+returns carry `signext`; `u8`, `u16`, and `bool` carry `zeroext`. The return
+attribute precedes the LLVM return type, while a parameter attribute follows
+its LLVM type:
+
+```llvm
+declare signext i16 @takes(i8 signext, i16 zeroext, i1 zeroext)
+
+%result = call signext i16 @takes(
+    i8 signext %signed,
+    i16 zeroext %unsigned,
+    i1 zeroext %flag
+)
+```
+
+These attributes apply only at the C boundary. Sailfin-to-Sailfin definitions
+and calls retain their native ABI and do not gain `signext` or `zeroext`.
 
 ## 13.2 The C-ABI accept-list
 

@@ -17,7 +17,12 @@ import {
     runtime_helper_descriptors
 } from "./runtime_helpers/mod";
 import { sanitize_symbol } from "./symbols";
-import { map_parameter_type, map_return_type } from "./type_mapping";
+import {
+    map_parameter_type,
+    map_return_type,
+    render_c_abi_parameter_type,
+    render_c_abi_return_type
+} from "./type_mapping";
 import { TraitMetadata, TypeContext } from "./types";
 import {
     append_string,
@@ -618,7 +623,19 @@ fn render_imported_function_declarations(imported_functions: NativeFunction[], l
         if index_of(sanitized_name, "parse_native_artifact") >= 0 {
             return_type = "i8*";
         }
-        let param_types = collect_parameter_types(context, function.parameters, function.name);
+        if function.is_extern {
+            return_type = render_c_abi_return_type(function.return_type, return_type);
+        }
+        let mut param_types = collect_parameter_types(context, function.parameters, function.name);
+        if function.is_extern {
+            let mut param_index: int = 0;
+            loop {
+                if param_index >= param_types.length { break; }
+                if param_index >= function.parameters.length { break; }
+                param_types[param_index] = render_c_abi_parameter_type(function.parameters[param_index].type_annotation, param_types[param_index]);
+                param_index += 1;
+            }
+        }
         let mut param_text = join_with_separator(param_types, ", ");
         // An imported variadic extern never reaches `emit_llvm_function`'s
         // extern branch — it is not local to this module — so this is the

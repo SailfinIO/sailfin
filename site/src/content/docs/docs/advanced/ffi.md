@@ -84,8 +84,9 @@ two spellings typecheck and lower identically. Prefer plain `extern fn`; use
 Key properties:
 
 - **C ABI by default.** Parameters use the platform C calling convention.
-  Narrow integers are passed without explicit `signext`/`zeroext` attributes,
-  which is a known gap in calling-convention fidelity (SFEP-0079 §3.3).
+  Extern declarations and matching calls carry `signext` for `i8`/`i16` and
+  `zeroext` for `u8`/`u16`/`bool`, on parameters and returns, matching clang's
+  narrow-integer C ABI lowering on the governed targets (SFEP-0079 §3.3).
 - **No effects on the declaration.** `extern fn f() -> i32 ![io]` is rejected
   with `E0804`. Declare the effect on the Sailfin wrapper that calls it.
   Extern calls are invisible to the effect checker, so a wrapper's effect
