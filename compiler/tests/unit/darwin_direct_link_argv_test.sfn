@@ -59,3 +59,15 @@ test "darwin direct link: translates capsule linker flag pairs" ![pure] {
     assert expect_eq_bool(_contains(argv, "-Xlinker"), false).ok;
     assert expect_eq_bool(_contains(argv, "Security"), true).ok;
 }
+
+test "darwin direct link: deduplicates a capsule's libSystem declaration" ![pure] {
+    let argv = darwin_ld_argv(_contract(), ["main.o"], "app", ["-lSystem"], []);
+    let mut count: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= argv.length { break; }
+        if argv[i] == "-lSystem" { count += 1; }
+        i += 1;
+    }
+    assert expect_eq_bool(count == 1, true).ok;
+}

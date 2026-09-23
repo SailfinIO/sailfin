@@ -149,6 +149,9 @@ test "root capsule link-libs: reach the final link argv without duplicating the 
         runtime_lib = "-ladvapi32";
         trace_lib = "advapi32.lib";
         libpath_prefix = "/libpath:";
+    } else if contains(trace_baseline, "-platform_version macos") {
+        runtime_lib = "-lSystem";
+        trace_lib = runtime_lib;
     }
     let with_lib_root = _scratch_dir() + "/root-app-with_lib";
     let with_lib_bin = _bin_path("root-with_lib");

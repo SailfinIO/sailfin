@@ -270,7 +270,7 @@ fn darwin_ld_argv(contract: DarwinLinkContract, objects: string[], out_path: str
         } else if lib == "-Xlinker" && li + 1 < libs.length {
             li += 1;
             args.push(libs[li]);
-        } else if lib != "-pthread" && lib != "-lpthread" && lib != "-lm" {
+        } else if lib != "-pthread" && lib != "-lpthread" && lib != "-lm" && lib != "-lSystem" {
             args.push(lib);
         }
         li += 1;

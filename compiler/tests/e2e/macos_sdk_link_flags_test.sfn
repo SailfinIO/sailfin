@@ -1,21 +1,8 @@
-// Regression e2e for #1914: on macOS the build driver must pass an
-// explicitly-probed `-isysroot <sdk>` / `-L<sdk>/usr/lib` to `clang` so the
-// link resolves the platform libraries (`libSystem`, `libm`, `libpthread`)
-// on its own and selects Apple's final-link driver — independent of the
-// ambient SDK environment (`SDKROOT` / `LIBRARY_PATH`) or which `clang` is
-// first on `PATH`. Before the fixes the
-// nested link leaned on that ambient env; a subprocess build that inherited
-// a stripped env (the parallel test pool forwards only PATH/HOME/TMPDIR) or
-// a non-Apple `clang` on `PATH` then failed the link (`ld: library
-// 'System'/'m' not found`), which surfaced as non-deterministic macOS-arm64
-// e2e failures because success depended on load-timed SDK re-detection.
-//
-// The discriminator is deterministic on Darwin: the link argv carries
-// `-isysroot` plus an explicit `-mmacosx-version-min` after the fix and not
-// before, and a `![io]` runtime-linking program built under a deliberately
-// stripped env must succeed. On non-Darwin the flags are a no-op, so assert
-// they are absent — guarding against accidentally emitting macOS-only flags on
-// Linux.
+// Regression e2e for #1914 and SFN-954: a macOS link selects the SDK
+// explicitly, even when the child receives no SDKROOT or LIBRARY_PATH.
+// The native arm64 route passes -syslibroot and -platform_version to Apple
+// ld. A runtime-linking program must build under the stripped environment.
+// On other hosts the macOS-only flags must be absent.
 //
 // Matchers note (#842): `sfn/test`'s `expect_*` matchers are `![pure]` and
 // cannot be called from an `![io]` test; assert on captured text directly.
@@ -48,11 +35,21 @@ fn _is_darwin() -> boolean ![io] {
     return find(out, "Darwin", 0) >= 0;
 }
 
-// Deliberately minimal: forward only PATH (clang/ld discovery), HOME,
+fn _is_arm64() -> boolean ![io] {
+    let mut e: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { e.push("PATH=" + path); }
+    let _exit = process.run_capture(["uname", "-m"], e);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    return find(out, "arm64", 0) >= 0;
+}
+
+// Deliberately minimal: forward only PATH (ld discovery), HOME,
 // TMPDIR, and SAILFIN_TEST_SCRATCH (per-invocation build-cache isolation).
 // `SDKROOT` / `LIBRARY_PATH` are intentionally NOT forwarded — the whole
 // point is that the compiler supplies the SDK itself. `SAILFIN_TRACE_LINK`
-// echoes the resolved clang link argv to stderr.
+// echoes the resolved link argv to stderr.
 //
 // On Windows the OS base set goes through too, and that is not a weakening of
 // the claim above. "Only PATH, HOME and TMPDIR" is a POSIX-shaped notion of a
@@ -130,7 +127,7 @@ fn _write_fixture(dir: string) -> string ![io] {
     return path;
 }
 
-test "macos-sdk-link: build carries explicit -isysroot and links under a stripped env (#1914)" ![io] {
+test "macos-sdk-link: Apple ld carries explicit SDK and links under a stripped env (#1914)" ![io] {
     let dir = _scratch_dir();
     let main_path = _write_fixture(dir);
     let bin = dir + "/prog.bin";
@@ -139,19 +136,26 @@ test "macos-sdk-link: build carries explicit -isysroot and links under a strippe
     let err = process.capture_take_stderr();
     report_child_failure("macos-sdk-link build", exit, _out, err);
 
-    if _is_darwin() {
-        // The fix: the link argv self-supplies the SDK.
-        assert contains(err, "-isysroot");
-        assert contains(err, "-mmacosx-version-min=");
+    if _is_darwin() && _is_arm64() {
+        // The final link argv supplies both the SDK and deployment version.
+        assert contains(err, "-syslibroot");
+        assert contains(err, "-platform_version macos");
         assert contains(err, "/usr/lib");
-        assert contains(err, "[trace-link] /usr/bin/clang ");
+        assert contains(err, "/ld -arch arm64");
+        assert contains(err, "-lSystem");
         // Behavioural proof: the runtime-linking build succeeds without any
         // ambient SDK env — the regression was this link failing.
         assert exit == 0;
+    } else if _is_darwin() {
+        // Intel Darwin remains on the clang migration route.
+        assert contains(err, "-isysroot");
+        assert contains(err, "-mmacosx-version-min=");
+        assert contains(err, "[trace-link] /usr/bin/clang ");
+        assert exit == 0;
     } else {
         // No-op on non-Darwin: a Linux link must not carry a macOS SDK root.
-        assert ! contains(err, "-isysroot");
-        assert ! contains(err, "-mmacosx-version-min=");
+        assert ! contains(err, "-syslibroot");
+        assert ! contains(err, "-platform_version macos");
         assert exit == 0;
     }
 }
