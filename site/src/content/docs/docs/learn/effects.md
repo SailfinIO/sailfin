@@ -58,7 +58,7 @@ Java's checked exceptions are also transitive, but they are limited to exception
 | `gpu` | Device dispatch via `sfn/device` | `sfn/device::matmul_f64`, `::synchronize` | Yes, at the shipped device-dispatch boundary |
 | `rand` | OS entropy boundary | `sfn/crypto::random_bytes` | Yes for `random_bytes`; no general call-name detector |
 
-The taxonomy has exactly six canonical **root** effects. `io.fs`, `io.console`, `net.http`, and `net.ws` are shipped refinements within those roots, not additional canonical effects. `gpu` is enforced narrowly, at the `sfn/device::matmul_f64` and `::synchronize` boundary only — there is no general call-name detector, and a raw `extern` to a vendor API bypasses it. `model` remains declarable so signatures and manifests can reserve its authority, but declaring the token does not imply that a corresponding runtime API exists.
+The taxonomy has exactly six canonical **root** effects. `io.fs`, `io.console`, `net.http`, and `net.ws` are shipped refinements within those roots, not additional canonical effects. `gpu` is enforced narrowly, at the `sfn/device::matmul_f64` and `::synchronize` boundary only — there is no general call-name detector, and an unattested `extern` to a vendor API bypasses it. `model` remains declarable so signatures and manifests can reserve its authority, but declaring the token does not imply that a corresponding runtime API exists.
 
 ---
 

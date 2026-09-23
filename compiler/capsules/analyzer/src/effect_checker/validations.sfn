@@ -88,6 +88,9 @@ fn validate_capsule_capabilities(program: Program, capabilities_required: string
 // blocks against the latter, so a test-only effect never enters the
 // surface an artifact ships with (SFN-1216).
 fn _analyze_statement_capabilities(statement: Statement, capabilities: string[], test_capabilities: string[]) -> CapabilityViolation[] {
+    if statement.variant == "ExternFunctionDeclaration" {
+        return _analyze_routine_capabilities(statement.signature, statement.signature.name, capabilities);
+    }
     if statement.variant == "FunctionDeclaration" {
         return _analyze_routine_capabilities(statement.signature, statement.signature.name, capabilities);
     }
@@ -206,6 +209,9 @@ fn validate_recognized_effects(program: Program) -> UnrecognizedEffectViolation[
 }
 
 fn _analyze_statement_recognition(statement: Statement) -> UnrecognizedEffectViolation[] {
+    if statement.variant == "ExternFunctionDeclaration" {
+        return _analyze_routine_recognition(statement.signature, statement.signature.name);
+    }
     if statement.variant == "FunctionDeclaration" {
         let mut issues = _analyze_routine_recognition(statement.signature, statement.signature.name);
         issues = _append_unrecognized_violations(issues, _collect_body_recognition(statement.body));

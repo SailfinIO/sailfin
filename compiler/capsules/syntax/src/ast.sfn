@@ -414,6 +414,8 @@ enum Statement {
         // variant rather than on the shared `FunctionSignature` because only
         // an extern may be variadic. SFN-1291.
         variadic_index: int;
+        // Preserve an explicit `![]` separately from an absent clause.
+        effects_attested: boolean;
     },
     ExternVarDeclaration {
         name: string;

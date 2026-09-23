@@ -115,14 +115,9 @@ fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
     loop {
         if i >= parsed.functions.length { break; }
         let function = parsed.functions[i];
-        // Skip extern declarations from the cross-module
-        // *function-effect* table — the effect-checker's `E0402`
-        // contract is "imported Sailfin function carries effects
-        // the caller must propagate", and `extern fn` declarations
-        // never carry effects per typecheck rule E0804. The
-        // C-runtime FFI surface is gated by the hardcoded helper
-        // roots (`fs.`, `print.`, etc.) that the in-module checker
-        // already handles.
+        // Attested extern declarations carry effects across module boundaries
+        // through the same artifact table as Sailfin function declarations.
+        // Unattested externs retain their existing effect-free behavior.
         //
         // Note: this also means imported extern *symbols* are not
         // currently registered in the importing module's typecheck
@@ -135,7 +130,7 @@ fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
         // chosen in `register_top_level_symbol`) so extern callers
         // imported from `runtime/sfn/platform/*.sfn` resolve
         // cross-module.
-        if !function.is_extern {
+        if !function.is_extern || function.effects.length > 0 {
             // SFEP-0023 §4.2: carry a per-export `is_decorator` bit alongside
             // the effects so the decorator resolver can distinguish an imported
             // decorator from an ordinary imported function. The bit rides the

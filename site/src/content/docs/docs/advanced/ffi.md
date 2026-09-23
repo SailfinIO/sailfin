@@ -40,9 +40,8 @@ and function addresses via `name as *u8` (guarded by `E0808`/`E0809`) all ship.
 extern boundary and suppresses ownership analysis of its interior — and to
 nothing else. A trailing `...` marks an extern as C-variadic (`E0851`). Typed
 `* fn` extern callbacks also ship: a matching named Sailfin function passes
-as its code address, with E0850 for mismatches and closures. Layout guarantees,
-pointer mutability enforcement, and effect-attested externs remain designed
-in SFEP-0079.
+as its code address, with E0850 for mismatches and closures. Layout guarantees and pointer mutability enforcement remain designed in
+SFEP-0079.
 
 ## Overview
 
@@ -88,10 +87,10 @@ Key properties:
   Extern declarations and matching calls carry `signext` for `i8`/`i16` and
   `zeroext` for `u8`/`u16`/`bool`, on parameters and returns, matching clang's
   narrow-integer C ABI lowering on the governed targets (SFEP-0079 §3.3).
-- **No effects on the declaration.** `extern fn f() -> i32 ![io]` is rejected
-  with `E0804`. Declare the effect on the Sailfin wrapper that calls it.
-  Extern calls are invisible to the effect checker, so a wrapper's effect
-  clause is an author's claim about the foreign function, not a derived fact.
+- **Effect attestations.** `extern fn f() -> i32 ![io]` requires callers to
+  declare `io`; an explicit `![]` attests purity. With no clause, an extern
+  contributes no effect. The compiler trusts the author's claim about the
+  foreign function and checks it against the capsule manifest.
 - **Ownership boundary.** Passing a bare owned value to an extern declared in
   the same compilation unit, outside an `unsafe` block, raises `E0906`.
 - **Must be linked.** The library providing the symbol has to reach the final
@@ -150,7 +149,7 @@ and is rejected in an extern signature with `E0805`.
 | `E0801` | The type is `string` / `string?`, or a pointer to one |
 | `E0802` | The type has a top-level `[]` — arrays carry runtime metadata that does not cross the boundary |
 | `E0803` | The extern declares type parameters (`<...>`) |
-| `E0804` | The extern declares effects (`![...]`) |
+| `E0804` | Retired: extern effect attestations are accepted |
 | `E0805` | Any other inadmissible or missing type — including `boolean`, `number`, `*opaque`, a missing annotation, and a `void` parameter |
 | `E0850` | A typed extern callback receives a mismatched or non-C-ABI function signature, or a closure |
 
@@ -537,8 +536,8 @@ Use FFI when:
 Do **not** use FFI when:
 
 - A safe Sailfin implementation exists. Prefer it even if it is slower.
-- The motivation is avoiding the effect system. An extern does not remove the
-  capability — it removes the compiler's record of it.
+- The motivation is avoiding the effect system. Attest the effects the foreign
+  call may use so callers and the capsule manifest carry them.
 - You are early in development and the need is not yet concrete.
 
 Given that layout and pointer mutability are not yet contracts, weigh a port
@@ -568,7 +567,7 @@ neither exists.
 | `unsafe` keyword on an extern | Accepted, inert — same meaning as plain `extern fn` |
 | `unsafe` block | Suppresses ownership analysis of its interior; carries the `E0906` extern boundary. Not required for any pointer operation |
 | `unsafe fn` | Skips ownership analysis of the **whole body** — a `Linear<T>` obligation is not enforced |
-| Effects | On the calling wrapper, never on the extern (`E0804`) |
+| Effects | `![...]` on the extern attests reach; `![]` attests purity; no clause is unattested |
 | Pointer | `*T` — reads **and writes** |
 | `*const T` / `*mut T` | Accepted spellings, no enforcement |
 | Untyped pointer | `*void` (**not** `*opaque`) |

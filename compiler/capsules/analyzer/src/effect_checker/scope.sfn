@@ -235,7 +235,7 @@ fn _merge_local_functions(program: Program, table: ImportSymbolTable) -> ImportS
     loop {
         if index >= program.statements.length { break; }
         let statement = program.statements[index];
-        if statement.variant == "FunctionDeclaration" {
+        if statement.variant == "FunctionDeclaration" || statement.variant == "ExternFunctionDeclaration" {
             merged = append_local_function(merged, statement.signature.name, statement.signature.effects);
         }
         index += 1;
