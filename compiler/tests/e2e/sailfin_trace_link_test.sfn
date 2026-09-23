@@ -1,5 +1,5 @@
 // Regression e2e for the `SAILFIN_TRACE_LINK` observability knob (#1908):
-// the build driver echoes the resolved clang link argv to stderr when the
+// the build driver echoes the resolved link argv to stderr when the
 // flag is set, and is silent (no `[trace-link]` marker) when it is not —
 // the #1112 zero-behaviour gate for the unset fast path. Platform-independent:
 // a hello-world build reaches `LlvmTextBackend.link` on every target, and the
@@ -65,10 +65,11 @@ test "trace-link: SAILFIN_TRACE_LINK=1 echoes the resolved link argv" ![io] {
     let err = _build_stderr(main_path, dir + "/traced-bin", true);
     // The greppable marker plus the invoker it prefixes. On Linux x86-64
     // the final link is a direct `ld.lld` invocation (SFEP-0066 §3.1), on
-    // macOS/Windows (or a direct-link fallback) it is `clang` — assert on
-    // either so the pin stays platform-independent.
+    // macOS arm64 uses Apple `ld`, native Windows uses `lld-link`, and
+    // migration fallbacks use `clang`. Accept the governed providers.
     assert contains(err, "[trace-link]");
-    assert contains(err, "clang") || contains(err, "ld.lld");
+    assert contains(err, "clang") || contains(err, "ld.lld") || contains(err, "lld-link")
+        || contains(err, "/ld ");
     // Object-only inputs (SFN-453): match `.ll ` so the direct linker's
     // own name `ld.lld` (which contains `.ll`) is not read as a `.ll` input.
     assert ! contains(err, ".ll ");
@@ -105,9 +106,9 @@ test "trace-link: SAILFIN_TRACE_LINK=1 echoes the test-layout link argv" ![io] {
     let _out = process.capture_take_stdout();
     let err = process.capture_take_stderr();
     assert contains(err, "[trace-link]");
-    // Direct `ld.lld` on Linux x86-64, else `clang` (see the program-build
-    // case above) — the test-layout link goes through the same seam.
-    assert contains(err, "clang") || contains(err, "ld.lld");
+    // The test-layout link goes through the same provider seam.
+    assert contains(err, "clang") || contains(err, "ld.lld") || contains(err, "lld-link")
+        || contains(err, "/ld ");
     // `.ll ` so the `ld.lld` binary name is not read as a `.ll` input.
     assert ! contains(err, ".ll ");
 }

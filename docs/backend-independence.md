@@ -70,14 +70,14 @@ each role." Measured against the tree on 2026-08-05:
 | Mid-level IR | **Split.** `.sfn-asm` is the live artifact; typed SSA exists but is off the build path | `native_ir.sfn` (342); `typed_ssa.sfn` (1160) + `_verify` (993) + `_render` (366) + `_produce` (284) |
 | Instruction selection, register allocation, optimization | **LLVM CLI selected by Sailfin** | `compiler/src/build/artifact_compile.sfn` |
 | Assemble (`.ll` → `.o`) | **LLVM MC through `llc -filetype=obj`** | `compiler/src/build/artifact_compile.sfn` |
-| Link | **Sailfin direct, fail-closed route on native Linux x86-64/aarch64 and Windows x86-64 MSVC; clang migration oracle and unowned-target driver elsewhere** | `compiler/src/build/direct_link.sfn`; `compiler/src/build/windows_direct_link.sfn` |
+| Link | **Sailfin direct, fail-closed route on native Linux x86-64/aarch64, macOS arm64, and Windows x86-64 MSVC; clang migration oracle and unowned-target driver elsewhere** | `compiler/src/build/direct_link.sfn`; `compiler/src/build/darwin_direct_link.sfn`; `compiler/src/build/windows_direct_link.sfn` |
 | Raw syscall emission | **Sailfin primitive, no consumer** | `compiler/capsules/codegen-llvm/src/syscall.sfn` (156) |
 | Platform access | **libc/POSIX via `extern fn`** | 528 `extern fn` under `runtime/` |
 | TLS / crypto | **Sailfin (native TLS 1.3, SFEP-0036/SFEP-0048, SFN-341)** | `runtime/sfn/platform/tls_record.sfn` |
 
 Three entries in that table are routinely misread, so they are stated plainly:
 
-**Linux and Windows MSVC have Sailfin-authored direct-link routes.**
+**Linux, macOS arm64, and Windows MSVC have Sailfin-authored direct-link routes.**
 `resolve_direct_ld_lld` builds a bare
 `ld.lld` invocation — CRT objects, `-dynamic-linker`, search dirs, libc tail — with
 no clang in the argv and fails closed when an owned prerequisite is absent.
@@ -88,10 +88,15 @@ compiler-rt builtins, console startup, response-file, dead-strip, and `/Brepro`
 inputs before the backend spawns the linker. MinGW and cross-host Windows builds
 remain outside this native ownership contract; `clang-oracle` remains an
 explicit migration selection rather than a fallback.
+On native macOS arm64, Sailfin resolves Apple `ld` through the active developer
+tools, verifies the selected SDK and deployment target, and passes Mach-O
+architecture, platform version, SDK search roots, entry point, retained symbols,
+frameworks, and `libSystem` directly. A missing or mismatched SDK fails with
+`E0628` before the link spawn.
 
 **LLVM validation and object emission now invoke the coherent family's selected
-`llvm-as` → `opt` → `llc -filetype=obj` pipeline; the remaining first-party
-clang roles are final-link fallbacks/drivers.** LLVM keeps optimization,
+`llvm-as` → `opt` → `llc -filetype=obj` pipeline; remaining first-party
+clang link roles serve unowned targets and the explicit migration oracle.** LLVM keeps optimization,
 instruction selection, register allocation, MC encoding, and object writing,
 while Sailfin owns tool/target selection, cache identity, publication, and
 stage-aware diagnostics. The legacy `clang -c` route is available only as the
@@ -226,10 +231,10 @@ as a blocker for something it does not block.
 Each is independently valuable and none needs a flag day. This is a dependency
 sketch, not a schedule; Linear owns sequencing.
 
-- **Complete direct-link ownership** — Linux x86-64/aarch64 and Windows
-  x86-64 MSVC now use required, fail-closed `ld.lld` / `lld-link` routes.
-  Add the direct Apple `ld` contract for macOS arm64; keep clang only as the
-  explicit migration oracle and unowned-target driver until the seed ratchet.
+- **Complete direct-link ownership** — Linux x86-64/aarch64, macOS arm64, and
+  Windows x86-64 MSVC now use required, fail-closed `ld.lld`, Apple `ld`, and
+  `lld-link` routes. Qualify the remaining native cold fixed points and
+  released-asset probes before claiming clang independence for each target.
 - **Make typed SSA load-bearing** — the model, verifier, and renderer exist; the
   producer emits signatures only and nothing consumes it. SFEP-0059 owns this,
   including the normative contract (§10 there). Worth doing even if a native

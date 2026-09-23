@@ -4,6 +4,7 @@ import { int_to_string } from "sfn/strings";
 import { Program, Statement } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
 
+import { resolve_link_contract } from "../../../build/direct_link";
 import { _sanitize_filename_cmd, _write_text_cmd } from "../../../build/fs";
 import { build_target_os, build_target_triple, target_exe_name } from "../../../build/target";
 import {
@@ -206,6 +207,18 @@ fn _run_single_process(test_files: string[], file_suite_index: int[], suites_in:
         // this invocation's restored test-bin entries (SFN-545).
         if tb_compiler_identity.length == 0 { test_cache_enabled = false; } else {
             tb_runtime_identity = _test_bin_runtime_identity(runtime_root, _sanitize_filename_cmd(scratch_root));
+            // A linked test binary embeds the Darwin SDK and deployment
+            // contract. Reusing it after an Xcode/SDK switch would skip
+            // the final link and restore stale Mach-O metadata.
+            if build_target_triple() == "arm64-apple-darwin" {
+                let link_contract = resolve_link_contract("Darwin", false);
+                if !link_contract.ok || link_contract.darwin.identity.length == 0 {
+                    test_cache_enabled = false;
+                } else {
+                    tb_runtime_identity = tb_runtime_identity + ":darwin-link:"
+                        + link_contract.darwin.identity;
+                }
+            }
         }
     }
     let mut tb_flags: string[] = ["-O0"];

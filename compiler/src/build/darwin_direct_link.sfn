@@ -1,0 +1,288 @@
+// SFN-954 / SFEP-0066: Apple ld owns native arm64 Mach-O final links.
+// Resolve the selected developer tools and SDK together before any link spawn.
+import { trim } from "sfn/strings";
+
+import { _get_env_cmd } from "../build_flags";
+import {
+    char_code_at_text,
+    ends_with,
+    index_of,
+    starts_with,
+    substring
+} from "../string_utils";
+import { user_config_linker } from "../user_config";
+import { darwin_deployment_target } from "./artifact_compile";
+import { _sha256_of_file } from "./fs";
+import { sha256_hex_of_string } from "./hash";
+
+extern fn realpath(path: *u8, resolved: *u8) -> *u8;
+
+fn _darwin_realpath(path: string) -> string ![io] {
+    let resolved: *u8 = realpath(path as *u8, null);
+    if resolved as i64 == 0 { return ""; }
+    return resolved as string;
+}
+
+struct DarwinLinkContract {
+    ok: boolean;
+    reason: string;
+    developer_dir: string;
+    linker_path: string;
+    sdk_root: string;
+    sdk_version: string;
+    deployment_target: string;
+    identity: string;
+}
+
+fn empty_darwin_link_contract() -> DarwinLinkContract {
+    return DarwinLinkContract {
+        ok: false,
+        reason: "",
+        developer_dir: "",
+        linker_path: "",
+        sdk_root: "",
+        sdk_version: "",
+        deployment_target: "",
+        identity: ""
+    };
+}
+
+fn _darwin_failure(reason: string) -> DarwinLinkContract {
+    let mut contract = empty_darwin_link_contract();
+    contract.reason = reason;
+    return contract;
+}
+
+fn _darwin_probe(argv: string[]) -> string ![io] {
+    let rc = process.run_capture(argv, process.environ());
+    let out = trim(process.capture_take_stdout());
+    let _err = process.capture_take_stderr();
+    if rc != 0 { return ""; }
+    return out;
+}
+
+// Validate the version as numeric major.minor, with an optional patch.
+fn _darwin_version_ok(value: string) -> boolean {
+    if value.length == 0 { return false; }
+    let mut dots: int = 0;
+    let mut digit: boolean = false;
+    let mut i: int = 0;
+    loop {
+        if i >= value.length { break; }
+        let ch = value[i];
+        if ch == "." {
+            if !digit || dots >= 2 { return false; }
+            dots += 1;
+            digit = false;
+        } else if ch >= "0" && ch <= "9" { digit = true; } else { return false; }
+        i += 1;
+    }
+    return dots >= 1 && digit;
+}
+
+fn _darwin_major(value: string) -> int {
+    let mut result: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= value.length || value[i] == "." { break; }
+        result = result * 10 + char_code_at_text(value, i) - 48;
+        i += 1;
+    }
+    return result;
+}
+
+fn resolve_darwin_link() -> DarwinLinkContract ![io] {
+    let mut developer = _get_env_cmd("DEVELOPER_DIR");
+    if developer.length == 0 {
+        developer = _darwin_probe(["xcode-select", "-p"]);
+    }
+    developer = _darwin_realpath(developer);
+    if developer.length == 0 || !fs.is_directory(developer) {
+        return _darwin_failure("active Xcode/Command Line Tools developer directory is missing");
+    }
+    let mut requested = _get_env_cmd("SAILFIN_LINKER");
+    if requested.length == 0 {
+        requested = user_config_linker("arm64-apple-darwin");
+    }
+    let mut selected_linker: string = "";
+    if requested.length > 0 && requested != "default" && requested != "system"
+        && requested != "ld" {
+        let override_path = _darwin_realpath(requested);
+        if !starts_with(requested, "/") || override_path.length == 0 || (!starts_with(override_path, developer
+            + "/")
+            && override_path != "/usr/bin/ld")
+            || !ends_with(override_path, "/ld")
+            || !fs.exists(override_path) {
+            return _darwin_failure("Darwin direct linking requires Apple ld in active developer tools; requested linker is "
+                + requested);
+        }
+        selected_linker = override_path;
+    } else {
+        selected_linker = _darwin_probe(["xcrun", "--find", "ld"]);
+        // xcrun may return /usr/bin/ld for CLT, while Xcode names its
+        // toolchain. Neither may silently resolve an ambient Homebrew ld.
+        if selected_linker.length == 0 || !fs.exists(selected_linker) || (!starts_with(selected_linker, developer
+            + "/")
+            && selected_linker != "/usr/bin/ld") {
+            return _darwin_failure("Apple ld is missing from active developer tools "
+                + developer
+                + ": "
+                + selected_linker);
+        }
+    }
+    let sdk_override = _get_env_cmd("SDKROOT");
+    let mut selected_sdk: string = "";
+    if sdk_override.length > 0 {
+        selected_sdk = _darwin_realpath(sdk_override);
+        if selected_sdk.length == 0 || !starts_with(selected_sdk, developer
+            + "/")
+            || index_of(selected_sdk, "/SDKs/MacOSX") < 0
+            || !fs.is_directory(selected_sdk) {
+            return _darwin_failure("SDKROOT=" + sdk_override
+                + " is not a macOS SDK in active developer tools "
+                + developer);
+        }
+    } else {
+        selected_sdk = _darwin_realpath(_darwin_probe(["xcrun", "--sdk", "macosx", "--show-sdk-path"]));
+        if selected_sdk.length == 0 || !starts_with(selected_sdk, developer
+            + "/")
+            || !fs.is_directory(selected_sdk) {
+            return _darwin_failure("active macOS SDK is missing from developer tools "
+                + developer);
+        }
+    }
+    let sdk_version = _darwin_probe(["plutil", "-extract", "Version", "raw", "-o", "-", selected_sdk
+        + "/SDKSettings.plist"]);
+    let mut active_version: string = "";
+    if sdk_override.length == 0 {
+        active_version = _darwin_probe(["xcrun", "--sdk", "macosx", "--show-sdk-version"]);
+    }
+    if !_darwin_version_ok(sdk_version) || (sdk_override.length == 0
+        && sdk_version != active_version) {
+        return _darwin_failure("macOS SDK version mismatch: SDK " + sdk_version
+            + ", active "
+            + active_version
+            + " at "
+            + selected_sdk);
+    }
+    let deployment = darwin_deployment_target();
+    if !_darwin_version_ok(deployment) || _darwin_major(deployment) < 11
+        || _darwin_major(deployment) > _darwin_major(sdk_version) {
+        return _darwin_failure("unsupported macOS arm64 deployment target "
+            + deployment
+            + " for SDK "
+            + sdk_version);
+    }
+    let system_lib = selected_sdk + "/usr/lib/libSystem.tbd";
+    if !fs.exists(system_lib) {
+        return _darwin_failure("required macOS SDK library missing: "
+            + system_lib);
+    }
+    let linker_digest = _sha256_of_file(selected_linker);
+    let sdk_digest = _sha256_of_file(selected_sdk + "/SDKSettings.plist");
+    let system_digest = _sha256_of_file(system_lib);
+    if linker_digest.length == 0 || sdk_digest.length == 0 || system_digest.length == 0 {
+        return _darwin_failure("could not fingerprint Apple ld, SDK metadata, or libSystem for SDK "
+            + sdk_version);
+    }
+    let identity = sha256_hex_of_string("darwin-ld-v1\n" + developer + "\n"
+        + selected_linker
+        + "\n"
+        + linker_digest
+        + "\n"
+        + selected_sdk
+        + "\n"
+        + sdk_version
+        + "\n"
+        + sdk_digest
+        + "\n"
+        + deployment
+        + "\n"
+        + system_digest);
+    return DarwinLinkContract {
+        ok: true,
+        reason: "",
+        developer_dir: developer,
+        linker_path: selected_linker,
+        sdk_root: selected_sdk,
+        sdk_version: sdk_version,
+        deployment_target: deployment,
+        identity: identity
+    };
+}
+
+fn _darwin_wl_parts(flag: string) -> string[] {
+    let rest = substring(flag, 4, flag.length);
+    let mut parts: string[] = [];
+    let mut start: int = 0;
+    let mut i: int = 0;
+    loop {
+        if i >= rest.length { break; }
+        if rest[i] == "," {
+            if i > start { parts.push(substring(rest, start, i)); }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    if start < rest.length {
+        parts.push(substring(rest, start, rest.length));
+    }
+    return parts;
+}
+
+fn darwin_ld_argv(contract: DarwinLinkContract, objects: string[], out_path: string, libs: string[], link_flags: string[]) -> string[] {
+    let mut args: string[] = [contract.linker_path, "-arch", "arm64", "-platform_version", "macos", contract.deployment_target, contract.sdk_version, "-syslibroot", contract.sdk_root, "-F"
+        + contract.sdk_root
+        + "/System/Library/Frameworks", "-e", "_main", "-o", out_path];
+    let mut fi: int = 0;
+    loop {
+        if fi >= link_flags.length { break; }
+        let f = link_flags[fi];
+        if starts_with(f, "-Wl,") {
+            let parts = _darwin_wl_parts(f);
+            let mut pi: int = 0;
+            loop {
+                if pi >= parts.length { break; }
+                args.push(parts[pi]);
+                pi += 1;
+            }
+        }
+        fi += 1;
+    }
+    let mut oi: int = 0;
+    loop {
+        if oi >= objects.length { break; }
+        args.push(objects[oi]);
+        oi += 1;
+    }
+    let mut li: int = 0;
+    loop {
+        if li >= libs.length { break; }
+        let lib = libs[li];
+        if starts_with(lib, "-Wl,") {
+            let parts = _darwin_wl_parts(lib);
+            let mut pi: int = 0;
+            loop {
+                if pi >= parts.length { break; }
+                args.push(parts[pi]);
+                pi += 1;
+            }
+        } else if lib == "-Xlinker" && li + 1 < libs.length {
+            li += 1;
+            args.push(libs[li]);
+        } else if lib != "-pthread" && lib != "-lpthread" && lib != "-lm" && lib != "-lSystem" {
+            args.push(lib);
+        }
+        li += 1;
+    }
+    args.push("-L" + contract.sdk_root + "/usr/lib");
+    args.push("-lSystem");
+    return args;
+}
+
+export {
+    DarwinLinkContract,
+    empty_darwin_link_contract,
+    resolve_darwin_link,
+    darwin_ld_argv
+};

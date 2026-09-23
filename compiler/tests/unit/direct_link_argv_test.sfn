@@ -9,6 +9,7 @@
 // is a silent ABI change, exactly what the acceptance criteria forbid.
 import { expect_eq_bool, expect_eq_str_array } from "sfn/test";
 
+import { empty_darwin_link_contract } from "../../src/build/darwin_direct_link";
 import { DirectLinkContract, _version_order_greater, direct_ld_lld_argv } from "../../src/build/direct_link";
 import { empty_windows_link_contract } from "../../src/build/windows_direct_link";
 
@@ -49,6 +50,7 @@ fn _contract() -> DirectLinkContract ![pure] {
         crtend: "/usr/lib/gcc/x86_64-linux-gnu/13/crtendS.o",
         search_dirs: ["/usr/lib/gcc/x86_64-linux-gnu/13", "/usr/lib/x86_64-linux-gnu"],
         windows: empty_windows_link_contract(),
+        darwin: empty_darwin_link_contract(),
         requires_direct_link: false
     };
 }
@@ -68,6 +70,7 @@ fn _aarch64_contract() -> DirectLinkContract ![pure] {
         crtend: "/usr/lib/gcc/aarch64-linux-gnu/13/crtendS.o",
         search_dirs: ["/usr/lib/gcc/aarch64-linux-gnu/13", "/usr/lib/aarch64-linux-gnu"],
         windows: empty_windows_link_contract(),
+        darwin: empty_darwin_link_contract(),
         requires_direct_link: false
     };
 }
@@ -89,6 +92,7 @@ fn _static_contract() -> DirectLinkContract ![pure] {
         crtend: "/usr/lib/gcc/x86_64-linux-gnu/13/crtend.o",
         search_dirs: ["/usr/lib/gcc/x86_64-linux-gnu/13", "/usr/lib/x86_64-linux-gnu"],
         windows: empty_windows_link_contract(),
+        darwin: empty_darwin_link_contract(),
         requires_direct_link: false
     };
 }

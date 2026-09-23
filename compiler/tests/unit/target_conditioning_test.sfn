@@ -866,10 +866,19 @@ fn _link_provider_is_neutral(provider: string) -> boolean ![pure] {
     return provider.length == 0 || provider == "direct" || provider == "clang-oracle";
 }
 
-test "direct-link: resolve_link_contract(Darwin) keeps the clang route (unowned target)" ![io] {
+test "direct-link: resolve_link_contract(Darwin) owns native arm64" ![io] {
     let contract = resolve_link_contract("Darwin", false);
-    assert expect_eq_bool(contract.ok, false).ok;
-    if _link_provider_is_neutral(env.get("SAILFIN_LINK_PROVIDER")) {
+    let provider = env.get("SAILFIN_LINK_PROVIDER");
+    if build_host_os() == "Darwin" && build_target_triple() == "arm64-apple-darwin"
+        && (provider.length == 0
+        || provider == "direct") {
+        if contract.ok {
+            assert expect_eq_str(contract.provider, "darwin-apple-ld").ok;
+        } else {
+            assert expect_eq_bool(contract.requires_direct_link, true).ok;
+        }
+    } else { assert expect_eq_bool(contract.ok, false).ok; }
+    if build_host_os() != "Darwin" && _link_provider_is_neutral(provider) {
         assert expect_eq_bool(contract.requires_direct_link, false).ok;
     }
 }
@@ -905,8 +914,16 @@ test "direct-link: an unset SAILFIN_LINK_PROVIDER does not by itself force the f
     let provider = env.get("SAILFIN_LINK_PROVIDER");
     if provider.length == 0 {
         let contract = resolve_link_contract("Darwin", false);
-        assert expect_eq_bool(contract.ok, false).ok;
-        assert expect_eq_bool(contract.requires_direct_link, false).ok;
+        if build_host_os() == "Darwin" && build_target_triple() == "arm64-apple-darwin" {
+            if contract.ok {
+                assert expect_eq_str(contract.provider, "darwin-apple-ld").ok;
+            } else {
+                assert expect_eq_bool(contract.requires_direct_link, true).ok;
+            }
+        } else {
+            assert expect_eq_bool(contract.ok, false).ok;
+            assert expect_eq_bool(contract.requires_direct_link, false).ok;
+        }
         assert expect_eq_bool(contains(contract.reason, "SAILFIN_LINK_PROVIDER"), false).ok;
     }
 }

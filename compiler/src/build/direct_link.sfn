@@ -39,6 +39,7 @@ import {
     substring
 } from "../string_utils";
 import { user_config_linker, user_config_linker_origin } from "../user_config";
+import { DarwinLinkContract, empty_darwin_link_contract, resolve_darwin_link } from "./darwin_direct_link";
 import { list_child_dirs } from "./fs_tree";
 import { _resolve_on_path } from "./llvm_toolchain_resolver";
 import { build_target_triple, native_host_os, triple_target_arch } from "./target";
@@ -84,6 +85,7 @@ struct DirectLinkContract {
     search_dirs: string[];
     // Populated only when provider == "windows-lld-link".
     windows: WindowsLinkContract;
+    darwin: DarwinLinkContract;
     // Meaningful only when `ok` is false, and the whole point of SFN-953:
     // it splits the two incompatible things `ok=false` used to mean.
     //
@@ -121,6 +123,7 @@ fn _direct_fail(reason: string) -> DirectLinkContract {
         crtend: "",
         search_dirs: [],
         windows: empty_windows_link_contract(),
+        darwin: empty_darwin_link_contract(),
         requires_direct_link: false
     };
 }
@@ -143,6 +146,7 @@ fn _direct_unmet(reason: string) -> DirectLinkContract {
         crtend: "",
         search_dirs: [],
         windows: empty_windows_link_contract(),
+        darwin: empty_darwin_link_contract(),
         requires_direct_link: true
     };
 }
@@ -443,8 +447,24 @@ fn resolve_link_contract(target_os: string, static_link: boolean) -> DirectLinkC
     // value was actually resolved. `target_flag_cache_key_test.sfn` pins the
     // recognized/unrecognized contrast on exactly that echo.
     if target_os == "Darwin" {
-        return _direct_fail("target os (" + target_os
-            + ") has no owned direct linker yet (SFN-954)");
+        let triple = build_target_triple();
+        if triple != "arm64-apple-darwin" {
+            return _direct_fail("Darwin target (" + triple
+                + ") is outside the native arm64 direct-link contract");
+        }
+        if native_host_os() != "Darwin" {
+            return _direct_fail("cross-building to Darwin is not a governed native pair");
+        }
+        if static_link {
+            return _direct_unmet("--static is supported only for native glibc Linux targets");
+        }
+        let darwin = resolve_darwin_link();
+        if !darwin.ok { return _direct_unmet(darwin.reason); }
+        let mut contract = _direct_fail("");
+        contract.ok = true;
+        contract.provider = "darwin-apple-ld";
+        contract.darwin = darwin;
+        return contract;
     }
     if target_os == "Windows" {
         let triple = build_target_triple();
@@ -635,6 +655,7 @@ fn resolve_direct_ld_lld(target_os: string, static_link: boolean) -> DirectLinkC
         crtend: gccdir + "/crtendS.o",
         search_dirs: _link_search_dirs(arch, gccdir, libdir, ""),
         windows: empty_windows_link_contract(),
+        darwin: empty_darwin_link_contract(),
         requires_direct_link: false
     };
 }
@@ -727,6 +748,7 @@ fn _resolve_static_contract(arch: string, emulation: string) -> DirectLinkContra
         crtend: gccdir + "/crtend.o",
         search_dirs: _link_search_dirs(arch, gccdir, libdir, libc_dir),
         windows: empty_windows_link_contract(),
+        darwin: empty_darwin_link_contract(),
         requires_direct_link: false
     };
 }

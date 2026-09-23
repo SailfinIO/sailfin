@@ -20,6 +20,7 @@
 import { expect_eq_bool } from "sfn/test";
 
 import { LinkPlan, _llvm_text_link_program_argv, _llvm_text_link_test_argv } from "../../src/backend";
+import { empty_darwin_link_contract } from "../../src/build/darwin_direct_link";
 import { DirectLinkContract, direct_ld_lld_argv } from "../../src/build/direct_link";
 import { empty_windows_link_contract } from "../../src/build/windows_direct_link";
 
@@ -116,6 +117,7 @@ test "backend: static argv reproduces every plan.libs entry" ![pure] {
         crtend: "/usr/lib/gcc/x86_64-linux-gnu/13/crtend.o",
         search_dirs: ["/usr/lib/gcc/x86_64-linux-gnu/13", "/usr/lib/x86_64-linux-gnu"],
         windows: empty_windows_link_contract(),
+        darwin: empty_darwin_link_contract(),
         requires_direct_link: false
     };
     let argv = direct_ld_lld_argv(contract, plan.objects, plan.out_path, plan.libs, plan.link_flags);

@@ -300,7 +300,7 @@ JSON object with no trailing whitespace.
 ## Per-test binary cache
 
 `sfn test` content-addresses each test's linked native binary so an
-unchanged test skips LLVM lowering and the `clang` link — the dominant
+unchanged test skips LLVM lowering and the native link — the dominant
 per-test cost — and just re-runs the cached executable. The cache key is
 
 ```
@@ -308,8 +308,10 @@ sha256(
   sha256(test_source_bytes)
   || sha256(sorted(hash of each transitive dep the link consumes))
   || compiler_identity        // capsule version + compiler binary SHA-256
-  || runtime_identity         // content hash of the runtime link inputs
-  || canonical(clang_flags)
+  || runtime_identity         // content hash of runtime link inputs; on macOS
+                              // arm64 also includes Apple ld, SDK, deployment,
+                              // and libSystem identity
+  || canonical(link_flags)
   || schema_version
 )
 ```
