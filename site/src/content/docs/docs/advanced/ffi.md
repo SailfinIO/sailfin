@@ -38,10 +38,11 @@ spelling of the boolean is **`bool`**, not `boolean`.
 and function addresses via `name as *u8` (guarded by `E0808`/`E0809`) all ship.
 `unsafe { }` is meaningful to the ownership checker — it carries the `E0906`
 extern boundary and suppresses ownership analysis of its interior — and to
-nothing else. A trailing `...` marks an extern as C-variadic (`E0851`) and
-also ships. Layout guarantees, pointer mutability enforcement, typed callback
-parameters, and effect-attested externs are designed in SFEP-0079 and are not
-shipped.
+nothing else. A trailing `...` marks an extern as C-variadic (`E0851`). Typed
+`* fn` extern callbacks also ship: a matching named Sailfin function passes
+as its code address, with E0850 for mismatches and closures. Layout guarantees,
+pointer mutability enforcement, and effect-attested externs remain designed
+in SFEP-0079.
 
 ## Overview
 
@@ -136,12 +137,11 @@ Sailfin supports — the governed set is four 64-bit triples (SFEP-0066 §3.2,
 enforced by `E0614`/`E0623`), so there is no 32-bit case today. Use `usize`
 for any size or count crossing to a C `size_t`.
 
-**Typed function-pointer parameters do not work in practice.** The checker
-accepts the tight spelling `fn(A) -> B`, but `sfn fmt` rewrites it to
-`fn (A) -> B`, which the same checker then rejects with `E0805`. A formatted
-file cannot carry one. Pass callbacks as raw addresses instead — see
-[Callbacks into Sailfin](#callbacks-into-sailfin). Typed callback parameters
-are designed in SFEP-0079 §3.4 and not shipped.
+**Typed function-pointer parameters.** An extern accepts `* fn (A) -> B` in
+both compact and formatted spellings when every argument and the result has a
+C-ABI type. Pass a named Sailfin function with the exact signature directly;
+the compiler passes its code address. A bare `fn (A) -> B` is a closure pair
+and is rejected in an extern signature with `E0805`.
 
 ### Declaration diagnostics
 
@@ -152,6 +152,7 @@ are designed in SFEP-0079 §3.4 and not shipped.
 | `E0803` | The extern declares type parameters (`<...>`) |
 | `E0804` | The extern declares effects (`![...]`) |
 | `E0805` | Any other inadmissible or missing type — including `boolean`, `number`, `*opaque`, a missing annotation, and a `void` parameter |
+| `E0850` | A typed extern callback receives a mismatched or non-C-ABI function signature, or a closure |
 
 Sailfin `string` needs an explicit conversion. A string *literal* is
 NUL-terminated, so `literal as *u8` may be passed to a C `const char*`

@@ -23,24 +23,14 @@ import {
 //
 // Accepted forms:
 //   - Primitive scalars accepted by `compiler/capsules/codegen-llvm/src/type_mapping.sfn:
-//     map_primitive_type` today: i8, i32, i64, u8, usize, bool.
+//     map_primitive_type` today (see `is_extern_primitive_type`).
 //   - Raw pointers:       *T, *const T, *mut T, **T (recursive — pointee
 //                         must itself be c-abi or an opaque struct name).
 //                         `*void` is permitted as the canonical
 //                         "untyped pointer" alias for `*opaque`.
-//   - Function pointers:  fn(A, B) -> C where each of A, B is a
+//   - Function pointers:  * fn (A, B) -> C where each of A, B is a
 //                         c-abi *parameter* type and C is a c-abi
 //                         *return* type.
-//
-// Intentionally NOT yet on the accept-list:
-//   - i16, u16, u32, u64, isize, f32, f64.
-//
-// The original blocker — no entries in the LLVM type mapper — is gone:
-// every copy of `map_primitive_type` maps all of these (floats since
-// #1372, the integer widths since SFN-571). What remains is the extern
-// C-ABI decision itself, which is a separate call from what the mapper
-// can lower; widening this accept-list is a deliberate change to the
-// extern surface, not a mechanical follow-on.
 //
 // Notably rejected:
 //   - `number` (legacy f64 alias) — externs must commit to i64 today.
@@ -73,6 +63,9 @@ fn _is_c_abi_type_inner(normalized: string, allow_bare_void: boolean) -> boolean
     if is_extern_primitive_type(normalized) { return true; }
     if starts_with(normalized, "*") {
         let pointee = trim_text(strip_prefix(normalized, "*"));
+        if starts_with(pointee, "fn(") || starts_with(pointee, "fn (") {
+            return is_c_abi_function_pointer(pointee);
+        }
         if starts_with(pointee, "const ") {
             return _is_c_abi_type_inner(strip_prefix(pointee, "const "), true);
         }
@@ -89,9 +82,6 @@ fn _is_c_abi_type_inner(normalized: string, allow_bare_void: boolean) -> boolean
         // a real type system; the v0 rule is "if it looks like an
         // identifier and is uppercase, accept it as opaque."
         return is_extern_opaque_pointee(pointee);
-    }
-    if starts_with(normalized, "fn(") {
-        return is_c_abi_function_pointer(normalized);
     }
     return false;
 }
@@ -335,14 +325,16 @@ fn is_extern_opaque_pointee(text: string) -> boolean {
     return true;
 }
 
-// Validate `fn(A, B) -> C` style function-pointer types. Each
+// Validate the pointee in `* fn (A, B) -> C`. Each
 // argument must be a valid c-abi *parameter* type (so bare `void`
 // is rejected); the return type must be a valid c-abi *return*
 // type (so `void` is allowed). Implicit `void` return when the
 // `-> T` clause is omitted matches C convention.
 fn is_c_abi_function_pointer(text: string) -> boolean {
-    if !starts_with(text, "fn(") { return false; }
-    let after_open = strip_prefix(text, "fn(");
+    let mut after_open: string = "";
+    if starts_with(text, "fn(") { after_open = strip_prefix(text, "fn("); } else if starts_with(text, "fn (") {
+        after_open = strip_prefix(text, "fn (");
+    } else { return false; }
     let close_index = find_matching_paren(after_open);
     if close_index < 0 { return false; }
     let args_block = slice_text(after_open, 0, close_index);
@@ -592,6 +584,9 @@ fn extern_diagnostic_code_for(kind: string) -> string {
 }
 
 fn extern_type_hint_for(kind: string, type_text: string) -> string {
+    if starts_with(type_text, "fn(") || starts_with(type_text, "fn (") {
+        return "A bare `fn` is a Sailfin closure pair; use `* fn` for a C function pointer.";
+    }
     if strings_equal(kind, "string") {
         return "Use `*u8` for raw byte buffers. Adapters that need to"
             + " hand a Sailfin `string` to a C function must allocate a"
@@ -620,5 +615,5 @@ fn extern_type_hint_for(kind: string, type_text: string) -> string {
         + "`i32`/`i64`, `u8`/`u16`/`u32`/`u64`, `usize`/`isize` —"
         + " both pointer-sized, `bool`), `void` (return only),"
         + " raw pointers (`*T`, `**T`, `*OpaqueStruct`), and function"
-        + " pointers (`fn(A) -> B`).";
+        + " pointers (`* fn (A) -> B`).";
 }

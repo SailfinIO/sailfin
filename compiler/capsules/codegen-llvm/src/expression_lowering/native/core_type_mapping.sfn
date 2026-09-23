@@ -396,6 +396,9 @@ fn map_return_type(context: TypeContext, return_type: string) -> string {
     if starts_with(normalized, "*") {
         let mut remainder = trim_text(substring(normalized, 1, normalized.length));
         remainder = strip_pointer_qualifier(remainder);
+        if starts_with(remainder, "fn(") || starts_with(remainder, "fn (") {
+            return "i8*";
+        }
         let mut _if136: boolean = false;
         if remainder == "opaque" { _if136 = true; }
         if remainder.length == 0 { _if136 = true; }
@@ -620,6 +623,9 @@ fn map_parameter_type(context: TypeContext, parameter_type: string) -> string {
     if starts_with(normalized, "*") {
         let mut remainder = trim_text(substring(normalized, 1, normalized.length));
         remainder = strip_pointer_qualifier(remainder);
+        if starts_with(remainder, "fn(") || starts_with(remainder, "fn (") {
+            return "i8*";
+        }
         let mut _if140: boolean = false;
         if remainder == "opaque" { _if140 = true; }
         if remainder.length == 0 { _if140 = true; }

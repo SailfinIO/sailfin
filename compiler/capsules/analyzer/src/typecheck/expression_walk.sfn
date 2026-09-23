@@ -17,7 +17,14 @@ import {
 import { make_nested_fn_capture_diagnostic, make_undefined_function_diagnostic } from "../typecheck_types/declaration_and_statement_checks";
 import { make_parse_error_diagnostic } from "../typecheck_types/expr_type_rules";
 import { is_builtin_call_name, is_builtin_member_root } from "../typecheck_types/extern_abi";
-import { check_named_fn_value_compatibility } from "../typecheck_types/named_fn_values";
+import {
+    check_extern_callback_name,
+    check_extern_callback_value,
+    check_named_fn_value_compatibility,
+    extern_callback_cast_source,
+    is_extern_callback_type,
+    make_extern_callback_argument_diagnostic
+} from "../typecheck_types/named_fn_values";
 import {
     SymbolEntry,
     check_char_literal_raw,
@@ -149,31 +156,71 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         let mut index: int = 0;
         loop {
             if index >= expression.arguments.length { break; }
-            diagnostics = diagnostics.concat(walk_expression(expression.arguments[index], ctx_with_expected_type(ctx, _call_argument_expected_type(expression, index, ctx))));
-            // SFN-812: a void call cannot supply an argument. Without this the
-            // operand lowers to nothing and the callee reads a fabricated
-            // zero — indistinguishable from a legitimate `0`/`""` result.
+            let argument = expression.arguments[index];
+            let expected = _call_argument_expected_type(expression, index, ctx);
+            let mut callback_handled = false;
+            if expression.callee != null && expected != null {
+                if expression.callee.variant == "Identifier"
+                    && is_extern_callback_type(expected.text) {
+                    let callee = find_value_symbol(bindings, expression.callee.name);
+                    if callee == null {
+                        callee = find_value_symbol(ctx.top_level, expression.callee.name);
+                    }
+                    if callee != null && callee.kind == "extern function" {
+                        if argument.variant == "Identifier" {
+                            let mut candidate = find_value_symbol(bindings, argument.name);
+                            if candidate == null {
+                                candidate = find_value_symbol(ctx.top_level, argument.name);
+                            }
+                            if candidate != null {
+                                if is_function_kind(candidate.kind) {
+                                    diagnostics = diagnostics.concat(check_extern_callback_name(argument.name, candidate, expected.text, argument.span));
+                                    callback_handled = true;
+                                } else {
+                                    diagnostics = diagnostics.concat(check_extern_callback_value(argument.name, candidate, expected.text, argument.span));
+                                }
+                            }
+                        } else if argument.variant == "Lambda" {
+                            diagnostics.push(make_extern_callback_argument_diagnostic("a lambda carries a Sailfin environment", argument.span));
+                            callback_handled = true;
+                        } else if argument.variant == "Cast" {
+                            let operand = extern_callback_cast_source(argument);
+                            if operand.variant == "Identifier" {
+                                let mut candidate = find_value_symbol(bindings, operand.name);
+                                if candidate == null {
+                                    candidate = find_value_symbol(ctx.top_level, operand.name);
+                                }
+                                if candidate != null {
+                                    if is_function_kind(candidate.kind) {
+                                        diagnostics = diagnostics.concat(check_extern_callback_name(operand.name, candidate, expected.text, argument.span));
+                                    } else {
+                                        diagnostics = diagnostics.concat(check_extern_callback_value(operand.name, candidate, expected.text, argument.span));
+                                    }
+                                }
+                            } else if operand.variant == "Lambda" {
+                                diagnostics.push(make_extern_callback_argument_diagnostic("a lambda carries a Sailfin environment", argument.span));
+                            }
+                        }
+                    }
+                }
+            }
+            if !callback_handled {
+                diagnostics = diagnostics.concat(walk_expression(argument, ctx_with_expected_type(ctx, expected)));
+            }
+            // Reject void arguments before lowering fabricates a zero (SFN-812).
             diagnostics = diagnostics.concat(void_argument_diagnostics(expression, index, ctx));
             index += 1;
         }
-        // SFN-812: reject an argument count the callee cannot accept (E0423).
-        // A missing argument is otherwise zero-filled and an extra one
-        // dropped, with no diagnostic at any stage.
+        // Reject arity mismatches before lowering fills or drops arguments (SFN-812).
         diagnostics = diagnostics.concat(call_arity_diagnostics(expression, ctx));
-        // `ch.send(v)` on a `Channel<T>`-annotated receiver enforces the
-        // element type -> E0815 (#1942). Silent unless the mismatch is
-        // certain (see `channel_send_diagnostics`).
+        // E0815 checks the stated Channel<T> element type (#1942).
         diagnostics = diagnostics.concat(channel_send_diagnostics(expression, bindings));
         // `hs.push(spawn ...)` on an inferred-empty `[]`-tagged receiver ->
         // E0823 (SFN-386). See `push_spawn_handle_diagnostics`.
         diagnostics = diagnostics.concat(push_spawn_handle_diagnostics(expression, bindings));
         diagnostics = diagnostics.concat(array_hof_diagnostics(expression, bindings));
-        // `field.to_uppercase()` on a proven primitive receiver whose method
-        // resolves to neither a primitive method descriptor nor a free callable
-        // -> E0012 (SFN-385). Silent unless the receiver's primitive kind is
-        // known and the method is provably unresolvable (see
-        // `primitive_method_diagnostics`), so it rejects exactly the calls the
-        // lowerer would fatal on ("callee signature is not known").
+        // Reject a provably absent primitive method before lowering fails
+        // with an unknown callee signature (E0012, SFN-385).
         diagnostics = diagnostics.concat(primitive_method_diagnostics(expression, ctx));
         diagnostics = diagnostics.concat(call_argument_type_diagnostics(expression, bindings));
         // An argument past a variadic extern's last fixed parameter must
@@ -596,12 +643,8 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
     if expression.variant == "ParseError" {
         return [make_parse_error_diagnostic(expression.message, expression.span)];
     }
-    // #1147: a bare identifier that resolves to a function used in value
-    // position (not as a call target — those are handled in the Call arm)
-    // is unsupported. The only way to materialize a function's address is
-    // `<fn> as * u8` (#1146), which the parser degrades to a `Raw` node
-    // (handled below), so a structured `Identifier` here is always an
-    // unsupported value use (e.g. `let f = worker;`, `take(worker)`).
+    // A function identifier needs a matching function-value slot or a typed
+    // extern callback parameter. Casts and call targets take separate paths.
     if expression.variant == "Identifier" {
         let mut entry = find_value_symbol(bindings, expression.name);
         // Top-level initializer walks use the sequential declaration scope in

@@ -9,7 +9,7 @@ sidebar:
 Sailfin reaches foreign code through `extern fn` declarations, raw pointers,
 and a validated `@repr(C)` struct layout. This chapter is normative for the
 surface that **ships today**. The broader interop contract — a read-only
-`*const T`, typed callback parameters, and effect-attested externs — is
+`*const T` and effect-attested externs — is
 designed in [SFEP-0079](/sfep/0079-systems-c-interop/) and is called out as
 **designed, not shipped** wherever it appears below.
 
@@ -156,12 +156,11 @@ today — see §13.4.
 > rule requires an uppercase initial, so the lowercase `opaque` matches nothing.
 > Write `*void`.
 
-**Function pointers.** `fn(A, B) -> C` is accepted, but only in the tight
-spelling with no space before `(`. `sfn fmt` normalizes that to `fn (A, B) -> C`,
-which the checker then rejects with `E0805`, so a formatted source file cannot
-carry a typed function-pointer extern parameter. Typed callback parameters are
-**designed, not shipped** (SFEP-0079 §3.4, leaf L5). Pass a callback as a raw
-address instead — §13.5.
+**Function pointers.** `* fn (A, B) -> C` is a single C code pointer, accepted
+in both the compact `*fn(` spelling and the formatted `* fn (` spelling. Each
+parameter must satisfy this accept-list in parameter position, and the return
+must satisfy it in return position. Bare `fn (A, B) -> C` is a Sailfin closure
+pair and is rejected in an extern declaration with `E0805`.
 
 ### Declaration diagnostics
 
@@ -172,6 +171,7 @@ address instead — §13.5.
 | `E0803` | The extern declares type parameters (`<...>`). Only concrete C-ABI types cross the boundary. |
 | `E0804` | The extern declares effects (`![...]`). Move the clause onto the calling wrapper. |
 | `E0805` | Any other inadmissible or missing type: a missing parameter or `extern var` annotation, bare `void` in parameter position, an unrecognized name such as `number` or `boolean`, and any `string`/array shape the two rules above do not reach (a nested `Foo<int[]>` lands here, not on `E0802`). |
+| `E0850` | A named function passed to a typed extern callback parameter has a mismatched or non-C-ABI signature, or a lambda is passed to that slot. |
 | `E0851` | A variadic extern's `...` is misplaced — no fixed parameter before it, or a parameter after it — or a call-site argument in variadic position has a stated type C would have promoted (`i8`, `i16`, `u8`, `u16`, `f32`, `bool`/`boolean`). See [Variadic externs](#variadic-externs). |
 
 ## 13.3 The `@repr(C)` layout contract
@@ -336,6 +336,12 @@ is a contract: nothing prevents a future layout optimization from reordering
 its fields. `@repr(C)` is the guarantee — see §13.3.
 
 ## 13.5 Function addresses
+
+At a call to an extern with a `* fn (A) -> R` parameter, a bare named
+function with the exact C-ABI parameter and return types is passed as a code
+address. For example, `qsort(base, count, width, compare)` accepts a Sailfin
+`fn compare(a: *u8, b: *u8) -> i32`. A lambda cannot fill this slot because
+its environment has no place in a C function pointer.
 
 A named Sailfin function's address is taken with an explicit cast:
 

@@ -1,0 +1,67 @@
+// SFN-1293: an extern callback slot is a C code pointer, not a closure pair.
+import { typecheck_diagnostics } from "sfn/analyzer/typecheck";
+import { parse_program } from "sfn/syntax";
+
+fn _count_code(source: string, code: string) -> int ![io] {
+    let diagnostics = typecheck_diagnostics(parse_program(source));
+    let mut count: int = 0;
+    for diagnostic in diagnostics {
+        if diagnostic.code == code { count += 1; }
+    }
+    return count;
+}
+
+test "extern callback: both pointer spellings are accepted" ![io] {
+    let compact = "extern fn qsort(base: *u8, n: usize, w: usize, cmp: *fn(*u8, *u8) -> i32) -> void;";
+    let formatted = "extern fn qsort(base: * u8, n: usize, w: usize, cmp: * fn (* u8, * u8) -> i32) -> void;";
+    assert _count_code(compact, "E0805") == 0;
+    assert _count_code(formatted, "E0805") == 0;
+    assert _count_code("extern fn current() -> * fn (*u8) -> i32;", "E0805") == 0;
+    assert _count_code("extern fn bad(cb: * fn (string) -> i32) -> void;", "E0805") == 1;
+}
+
+test "extern callback: bare function type requires a pointer" ![io] {
+    let source = "extern fn install(cb: fn (*u8) -> i32) -> void;";
+    assert _count_code(source, "E0805") == 1;
+}
+
+test "extern callback: named function signature must match" ![io] {
+    let matching = "extern fn install(cb: * fn (*u8) -> i32) -> void; fn callback(p: *u8) -> i32 { return 0; } fn main() { install(callback); }";
+    let mismatch = "extern fn install(cb: * fn (*u8) -> i32) -> void; fn callback(p: *u8) -> u32 { return 0; } fn main() { install(callback); }";
+    let non_c = "extern fn install(cb: * fn (*u8) -> i32) -> void; fn callback(p: string) -> i32 { return 0; } fn main() { install(callback); }";
+    assert _count_code(matching, "E0850") == 0;
+    assert _count_code(matching, "E0808") == 0;
+    assert _count_code(mismatch, "E0850") == 1;
+    assert _count_code(non_c, "E0850") == 1;
+}
+
+test "extern callback: a lambda cannot supply a C callback" ![io] {
+    let source = "extern fn install(cb: * fn (*u8) -> i32) -> void; fn main() { let x: i32 = 1; install(fn (p: *u8) -> i32 { return x; }); }";
+    assert _count_code(source, "E0850") == 1;
+}
+
+test "extern callback: a closure value cannot supply a C callback" ![io] {
+    let source = "extern fn install(cb: * fn (*u8) -> i32) -> void; fn main() { let x: i32 = 1; let callback: fn (*u8) -> i32 = fn (p: *u8) -> i32 { return x; }; install(callback); }";
+    assert _count_code(source, "E0850") == 1;
+}
+
+test "extern callback: a cast cannot hide a non-C signature" ![io] {
+    let source = "extern fn install(cb: * fn (*u8) -> i32) -> void; fn callback(p: string) -> i32 { return 0; } fn main() { install(callback as *u8); }";
+    let nested = "extern fn install(cb: * fn (*u8) -> i32) -> void; fn callback(p: string) -> i32 { return 0; } fn main() { install((callback as *u8) as * fn (*u8) -> i32); }";
+    assert _count_code(source, "E0850") == 1;
+    assert _count_code(nested, "E0850") == 1;
+}
+
+test "extern callback: a casted pointer retains its declared signature" ![io] {
+    let mismatch = "extern fn install(cb: * fn (*u8) -> i32) -> void; fn bad(p: *u8) -> i64 { return 42; } fn main() { let cb: * fn (*u8) -> i64 = bad as * fn (*u8) -> i64; install(cb as *u8); }";
+    let closure = "extern fn install(cb: * fn (*u8) -> i32) -> void; fn main() { let x: i32 = 1; let cb: fn (*u8) -> i32 = fn (p: *u8) -> i32 { return x; }; install(cb as *u8); }";
+    let invalid_target = "extern fn install(cb: * fn (*u8) -> i32) -> void; fn good(p: *u8) -> i32 { return 1; } fn main() { install(good as *Unknown); }";
+    assert _count_code(mismatch, "E0850") == 1;
+    assert _count_code(closure, "E0850") == 1;
+    assert _count_code(invalid_target, "E0808") == 1;
+}
+
+test "extern callback: a nested function cannot capture an outer local pointer" ![io] {
+    let source = "extern fn install(cb: * fn (*u8) -> i32) -> void; fn good(p: *u8) -> i32 { return 1; } fn outer() { let cb: * fn (*u8) -> i32 = good as * fn (*u8) -> i32; fn inner() { install(cb); } inner(); }";
+    assert _count_code(source, "E0421") == 1;
+}
