@@ -38,6 +38,7 @@
 // vtable). See `build/clang_argv.sfn`'s header for the seed-lowering
 // reason (#1730).
 import { LlvmArtifactRequest, darwin_deployment_target, run_llvm_artifact } from "./build/artifact_compile";
+import { darwin_ld_argv } from "./build/darwin_direct_link";
 // Sailfin owns the Link role on Linux x86-64 (SFEP-0066 §3.1 role table,
 // `direct_link.sfn`): a direct `ld.lld` invocation instead of clang.
 // Resolves `ok=false` (a controlled fallback to the clang path) on any
@@ -441,11 +442,6 @@ struct LlvmTextBackend {
         // resolutions are threaded independently.
         let target_os = build_target_os();
         let triple = build_target_triple();
-        let mut link_driver = target_linker_driver(triple);
-        if link_driver == "clang" {
-            link_driver = _clang_link_driver(target_os);
-        }
-        let driver_flags = _concat_driver_flags(target_linker_driver_flags(triple, host_target_triple()), _macos_sdk_link_flags());
         let eff_plan = _target_conditioned_plan(plan, triple);
         // Sailfin owns Link on Linux x86-64/aarch64 (SFEP-0066 §3.1 role
         // table): take the direct `ld.lld` path when the link contract
@@ -458,6 +454,12 @@ struct LlvmTextBackend {
         let static_link = active_static_link();
         let direct = resolve_link_contract(target_os, static_link);
         if direct.ok {
+            if direct.provider == "darwin-apple-ld" {
+                let darwin_argv = darwin_ld_argv(direct.darwin, eff_plan.objects, eff_plan.out_path, eff_plan.libs, eff_plan.link_flags);
+                let darwin_spawn = link_argv_or_response_file(darwin_argv, eff_plan.out_path);
+                _llvm_text_trace_link(darwin_argv);
+                return process.run(darwin_spawn);
+            }
             if direct.provider == "windows-lld-link" {
                 let windows_argv = windows_lld_link_argv(direct.windows, eff_plan.objects, eff_plan.out_path, eff_plan.libs, eff_plan.link_flags);
                 let windows_spawn = windows_link_argv_with_response_file(windows_argv, eff_plan.out_path);
@@ -501,6 +503,11 @@ struct LlvmTextBackend {
         // describing a provider that did not execute.
         if direct.requires_direct_link { return 2; }
         trace_direct_link_fallback(direct.reason);
+        let mut link_driver = target_linker_driver(triple);
+        if link_driver == "clang" {
+            link_driver = _clang_link_driver(target_os);
+        }
+        let driver_flags = _concat_driver_flags(target_linker_driver_flags(triple, host_target_triple()), _macos_sdk_link_flags());
         if eff_plan.test_mode {
             let test_argv = _llvm_text_link_test_argv_with_driver(eff_plan, driver_flags, link_driver);
             let test_spawn = link_argv_or_response_file(test_argv, eff_plan.out_path);

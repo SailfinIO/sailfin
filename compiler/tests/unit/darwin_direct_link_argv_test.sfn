@@ -1,0 +1,61 @@
+// SFN-954: Darwin link argv is an Apple ld invocation with explicit SDK inputs.
+import { expect_eq_bool, expect_eq_str_array } from "sfn/test";
+
+import { DarwinLinkContract, darwin_ld_argv } from "../../src/build/darwin_direct_link";
+
+fn _contract() -> DarwinLinkContract {
+    return DarwinLinkContract {
+        ok: true,
+        reason: "",
+        developer_dir: "/Xcode/Contents/Developer",
+        linker_path: "/Xcode/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld",
+        sdk_root: "/Xcode/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk",
+        sdk_version: "15.5",
+        deployment_target: "14.0",
+        identity: "identity"
+    };
+}
+
+fn _contains(args: string[], needle: string) -> boolean {
+    let mut i: int = 0;
+    loop {
+        if i >= args.length { break; }
+        if args[i] == needle { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "darwin direct link: exact minimal argv" ![pure] {
+    let c = _contract();
+    let argv = darwin_ld_argv(c, ["main.o"], "app", [], []);
+    let expected: string[] = [c.linker_path, "-arch", "arm64", "-platform_version", "macos", "14.0", "15.5", "-syslibroot", c.sdk_root, "-F"
+        + c.sdk_root
+        + "/System/Library/Frameworks", "-e", "_main", "-o", "app", "main.o", "-L"
+        + c.sdk_root
+        + "/usr/lib", "-lSystem"];
+    assert expect_eq_str_array(argv, expected).ok;
+}
+
+test "darwin direct link: retains symbols and passes frameworks" ![pure] {
+    let argv = darwin_ld_argv(_contract(), ["runtime.o", "main.o"], "app", ["-framework", "Security", "-lm", "-lpthread", "-lobjc"], ["-Wl,-dead_strip", "-Wl,-u,_sfn_provider", "-ffunction-sections"]);
+    assert expect_eq_bool(_contains(argv, "-dead_strip"), true).ok;
+    assert expect_eq_bool(_contains(argv, "-u"), true).ok;
+    assert expect_eq_bool(_contains(argv, "_sfn_provider"), true).ok;
+    assert expect_eq_bool(_contains(argv, "-framework"), true).ok;
+    assert expect_eq_bool(_contains(argv, "Security"), true).ok;
+    assert expect_eq_bool(_contains(argv, "-lobjc"), true).ok;
+    assert expect_eq_bool(_contains(argv, "-lpthread"), false).ok;
+    assert expect_eq_bool(_contains(argv, "-lm"), false).ok;
+    assert expect_eq_bool(_contains(argv, "clang"), false).ok;
+}
+
+test "darwin direct link: translates capsule linker flag pairs" ![pure] {
+    let argv = darwin_ld_argv(_contract(), ["main.o"], "app", ["-Wl,-rpath,@executable_path/Frameworks", "-Xlinker", "-no_adhoc_codesign", "-framework", "Security"], []);
+    assert expect_eq_bool(_contains(argv, "-rpath"), true).ok;
+    assert expect_eq_bool(_contains(argv, "@executable_path/Frameworks"), true).ok;
+    assert expect_eq_bool(_contains(argv, "-no_adhoc_codesign"), true).ok;
+    assert expect_eq_bool(_contains(argv, "-Wl,-rpath,@executable_path/Frameworks"), false).ok;
+    assert expect_eq_bool(_contains(argv, "-Xlinker"), false).ok;
+    assert expect_eq_bool(_contains(argv, "Security"), true).ok;
+}

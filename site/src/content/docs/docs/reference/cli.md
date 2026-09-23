@@ -358,10 +358,13 @@ install its C development packages (e.g. `libc6-dev` + `gcc`, or
 `glibc-devel` + `libgcc`) so the CRT objects are present. To opt out of the
 direct path instead of fixing the host, either select a different linker with
 `SAILFIN_LINKER=<name>` (e.g. `SAILFIN_LINKER=mold`) or select the legacy
-clang-driven link with `SAILFIN_LINK_PROVIDER=clang-oracle`. Every other
-target — macOS, Windows, musl Linux, and non-x86-64/aarch64 Linux hosts —
-still links via the clang driver by default and does not hit `E0628` for a
-missing `ld.lld`/CRT; an unrecognized `SAILFIN_LINK_PROVIDER` value, however,
+clang-driven link with `SAILFIN_LINK_PROVIDER=clang-oracle`. Native macOS arm64
+uses Apple `ld` directly with the active Xcode or Command Line Tools SDK,
+an explicit deployment target, and `libSystem`. A missing or mismatched SDK,
+linker, or unsupported deployment target fails with `E0628`; set
+`SAILFIN_LINK_PROVIDER=clang-oracle` only for migration comparison. Other
+unowned targets — macOS x86-64, musl Linux, and non-x86-64/aarch64 Linux hosts —
+may still use a compiler driver; an unrecognized `SAILFIN_LINK_PROVIDER` value
 fails with `E0628` on any target, since it is a configuration error rather
 than a missing host prerequisite. See
 [`SAILFIN_LINK_PROVIDER`](#environment-variables) below.
@@ -1000,9 +1003,11 @@ directory and, just as importantly, which directories a given variable does
 | `SAILFIN_EFFECT_ENFORCE` | `sfn` binary | Control runtime effect-enforcement (the seal, SFEP-0016); partial on macOS arm64 (#613). |
 | `GLOBAL_BIN_DIR` | Installer script | Override the installation bin directory directly (takes precedence over `PREFIX`). |
 | `GITHUB_TOKEN` | installer / `sfn dev bootstrap fetch` | GitHub token used to raise API rate limits and access release assets. |
-| `SAILFIN_LINKER` | `sfn` binary (native final links) | Override the linker for the final link step. `ld`/`system`/`default` force the platform linker; any other value selects that linker by name (e.g. `mold`, `lld`). Auto-detect (mold, then lld) is Linux-only. Falls through to `~/.sfn/config.toml`'s `[target.<triple>] linker` when unset, ahead of the compiled-in default — see below. On the governed Linux x86-64/aarch64 direct-link path, any value other than `lld`/`ld.lld` defers the final link to the clang driver instead of `E0628`-failing. |
-| `SAILFIN_LINK_PROVIDER` | `sfn` binary (native final links) | Select the Link-role provider (SFEP-0066 §3.1/§3.5). `direct` (default) is Sailfin's own `ld.lld` invocation on the governed targets (Linux x86-64/aarch64 glibc); `clang-oracle` is the migration escape hatch that routes the final link back through the clang driver. Not read from `~/.sfn/config.toml` — env-only. An unrecognized value fails with `E0628` on every target, not only the governed ones. Mirrors the Assemble-role `SAILFIN_OBJECT_PROVIDER=clang-oracle` switch — one spelling per role. |
-| `SAILFIN_CC` | `sfn` binary (native macOS final links) | Explicit Darwin clang-driver override. Defaults to `/usr/bin/clang`; object assembly still follows `PATH`. Falls through to `~/.sfn/config.toml`'s `[target.<triple>] cc` when unset, ahead of the compiled-in default — see below. |
+| `SAILFIN_LINKER` | `sfn` binary (native final links) | Override the linker for the final link step. `ld`/`system`/`default` force the platform linker. Auto-detect (mold, then lld) is Linux-only. Falls through to `~/.sfn/config.toml`'s `[target.<triple>] linker` when unset. On governed Linux, a non-LLD value explicitly selects the legacy driver. On native macOS arm64, only active Apple `ld` is accepted by the direct provider; an incompatible override fails with `E0628`. |
+| `SAILFIN_LINK_PROVIDER` | `sfn` binary (native final links) | Select the Link-role provider (SFEP-0066 §3.1/§3.5). `direct` (default) invokes `ld.lld` on native glibc Linux, Apple `ld` on native macOS arm64, and `lld-link` on native Windows MSVC. `clang-oracle` explicitly routes the final link through clang for migration comparison. Not read from `~/.sfn/config.toml` — env-only. An unrecognized value fails with `E0628` on every target. |
+| `SDKROOT` | `sfn` binary (native macOS arm64 builds) | Select a macOS SDK within the active Xcode or Command Line Tools developer directory. The direct linker reads its SDK version and `libSystem` from this root; a missing or foreign SDK fails with `E0628`. When unset, `xcrun` selects the active macOS SDK. |
+| `MACOSX_DEPLOYMENT_TARGET` | `sfn` binary (macOS arm64 objects and links) | Select the minimum macOS version for LLVM Mach-O objects and Apple `ld -platform_version`. It must be a supported version no newer than the selected SDK's major version. When unset, the native host version is used. |
+| `SAILFIN_CC` | `sfn` binary (migration oracle and foreign C compilation) | Select a clang driver for explicit migration comparison or foreign C compilation. Native macOS arm64 direct links do not consult this setting. |
 
 `SAILFIN_LINKER` and `SAILFIN_CC` are two of four settings admitted to a
 hand-edited `~/.sfn/config.toml` (SFEP-0076): `linker` and `cc` live under a

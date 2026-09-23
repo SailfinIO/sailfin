@@ -100,9 +100,12 @@ fn static_prerequisites_diagnostic(triple: string, reason: string) -> Diagnostic
 // sending the wrong hint is worse than sending none: telling a developer to
 // install glibc packages they already have is the exact failure
 // `_static_prerequisite_hint` was split to avoid (SFN-1268).
-fn _direct_link_prerequisite_hint(reason: string) -> string {
+fn _direct_link_prerequisite_hint(triple: string, reason: string) -> string {
     if index_of(reason, "SAILFIN_LINK_PROVIDER") >= 0 {
         return " (hint: unset SAILFIN_LINK_PROVIDER, or set it to `direct` or `clang-oracle`)";
+    }
+    if triple == "arm64-apple-darwin" {
+        return " (hint: select a complete Xcode or Command Line Tools installation and check SDKROOT, SAILFIN_LINKER, and MACOSX_DEPLOYMENT_TARGET)";
     }
     if index_of(reason, "ld.lld") >= 0 {
         // Name the escape hatch too. A mold-only host is the common way to
@@ -125,14 +128,16 @@ fn _direct_link_prerequisite_hint(reason: string) -> string {
 // (Darwin/SFN-954, Windows/SFN-955) and an explicit provider selection
 // still take the legacy route without seeing this diagnostic.
 fn direct_link_prerequisites_diagnostic(triple: string, reason: string) -> Diagnostic {
+    let mut owner = "direct ld.lld";
+    if triple == "arm64-apple-darwin" { owner = "direct Apple ld"; }
     return Diagnostic {
         code: "E0628",
         severity: "error",
-        message: "could not resolve the direct ld.lld link prerequisites for "
+        message: "could not resolve the " + owner + " link prerequisites for "
             + triple
             + ": "
             + reason
-            + _direct_link_prerequisite_hint(reason),
+            + _direct_link_prerequisite_hint(triple, reason),
         file_path: "",
         primary: null,
         suggestion: null
