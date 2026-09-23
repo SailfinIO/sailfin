@@ -59,6 +59,9 @@ fn _ros_provider(target_triple: string) -> LlvmObjectProvider {
         opt_path: "opt",
         llc_path: "llc",
         clang_path: "",
+        tools: [],
+        family: null,
+        clang_version: "",
         diagnostic: ""
     };
 }

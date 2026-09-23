@@ -117,6 +117,9 @@ test "llvm object provider parity: O0 and O2 match the explicit clang oracle" ![
         opt_path: "",
         llc_path: "",
         clang_path: oracle_path,
+        tools: [],
+        family: null,
+        clang_version: "",
         diagnostic: ""
     };
     let outcome = with_tmp_dir(fn (dir: string) -> int {

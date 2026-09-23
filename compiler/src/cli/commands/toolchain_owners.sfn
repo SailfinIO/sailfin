@@ -1,0 +1,380 @@
+// SFN-956: one report over the provider and link contracts used by builds.
+import {
+    LlvmObjectProvider,
+    llvm_object_target_profile,
+    resolve_llvm_object_provider_for_target
+} from "../../build/artifact_compile";
+import {
+    DirectLinkContract,
+    empty_direct_link_contract,
+    resolve_link_contract,
+    resolve_link_contract_with_family
+} from "../../build/direct_link";
+import { LlvmTool, llvm_governed_triples, llvm_object_format } from "../../build/llvm_toolchain_resolver";
+import { build_target_os, build_target_triple } from "../../build/target";
+import { _get_env_cmd } from "../../build_flags";
+import {
+    char_code_at_text,
+    index_of,
+    starts_with,
+    substring
+} from "../../string_utils";
+
+struct ToolchainOwnerReport {
+    target: string;
+    object_format: string;
+    provider: LlvmObjectProvider;
+    link: DirectLinkContract;
+    foreign_c: string;
+    ok: boolean;
+    reason: string;
+}
+
+fn resolve_toolchain_owner_report() -> ToolchainOwnerReport ![io] {
+    let target = build_target_triple();
+    let provider = resolve_llvm_object_provider_for_target(target);
+    let mut link = empty_direct_link_contract();
+    if provider.family != null {
+        link = resolve_link_contract_with_family(build_target_os(), false, provider.family);
+    } else { link = resolve_link_contract(build_target_os(), false); }
+    let mut reason = "";
+    let governed = llvm_governed_triples();
+    let mut supported = false;
+    let mut i = 0;
+    loop {
+        if i >= governed.length { break; }
+        if governed[i] == target {
+            supported = true;
+            break;
+        }
+        i += 1;
+    }
+    if !supported { reason = "unsupported native target: " + target; }
+    if !provider.ok { reason = provider.diagnostic; }
+    if !link.ok && reason.length == 0 { reason = link.reason; }
+    if provider.kind == "clang-oracle" && reason.length == 0 {
+        reason = "clang-oracle was selected explicitly; this is not a clang-free contract";
+    }
+    if !link.ok && !link.requires_direct_link && reason.length == 0 {
+        reason = "direct link owner is inactive: " + link.reason;
+    }
+    let coherent_linker = toolchain_owner_linker_matches(provider, link);
+    if provider.ok && link.ok && provider.kind == "llvm-cli" && !coherent_linker {
+        reason = "direct linker differs from the resolved LLVM family linker";
+    }
+    return ToolchainOwnerReport {
+        target: target,
+        object_format: llvm_object_format(target),
+        provider: provider,
+        link: link,
+        foreign_c: _get_env_cmd("SAILFIN_FOREIGN_C_COMPILER"),
+        ok: supported && provider.ok && link.ok && coherent_linker && provider.kind == "llvm-cli",
+        reason: reason
+    };
+}
+
+fn toolchain_owner_linker_matches(provider: LlvmObjectProvider, link: DirectLinkContract) -> boolean {
+    if !provider.ok || !link.ok || provider.kind != "llvm-cli" { return false; }
+    if link.provider == "linux-ld.lld" {
+        if link.linker_path.length == 0 { return false; }
+        return _owner_tool(provider.tools, "ld.lld").path == link.linker_path;
+    }
+    if link.provider == "windows-lld-link" {
+        if link.windows.linker_path.length == 0 { return false; }
+        return _owner_tool(provider.tools, "lld-link").path == link.windows.linker_path;
+    }
+    return link.provider == "darwin-apple-ld";
+}
+
+fn _owner_tool(tools: LlvmTool[], role: string) -> LlvmTool {
+    let mut i = 0;
+    loop {
+        if i >= tools.length { break; }
+        if tools[i].role == role { return tools[i]; }
+        i += 1;
+    }
+    return LlvmTool {
+        role: role,
+        path: "",
+        version_output: "",
+        major: 0,
+        failure: "not_selected"
+    };
+}
+
+fn _owner_quote(s: string) -> string {
+    let mut out = "\"";
+    let mut i = 0;
+    loop {
+        if i >= s.length { break; }
+        let c = substring(s, i, i + 1);
+        if c == "\"" { out = out + "\\\""; } else if c == "\\" {
+            out = out + "\\\\";
+        } else if c == "\n" { out = out + "\\n"; } else if c == "\r" {
+            out = out + "\\r";
+        } else if c == "\t" { out = out + "\\t"; } else if char_code_at_text(s, i) < 32 {
+            let code = char_code_at_text(s, i);
+            let hex = "0123456789abcdef";
+            out = out + "\\u00" + substring(hex, code / 16, code / 16 + 1)
+                + substring(hex, code % 16, code % 16
+                + 1);
+        } else { out = out + c; }
+        i += 1;
+    }
+    return out + "\"";
+}
+
+fn _owner_tool_json(tool: LlvmTool) -> string {
+    return "{\"path\":" + _owner_quote(tool.path) + ",\"version\":"
+        + _owner_quote(tool.version_output)
+        + "}";
+}
+
+fn _owner_version_line(version: string) -> string {
+    let newline = index_of(version, "\n");
+    if newline < 0 { return version; }
+    return substring(version, 0, newline);
+}
+
+fn _owner_bool(value: boolean) -> string {
+    if value { return "true"; }
+    return "false";
+}
+
+fn _owner_string_array(values: string[]) -> string {
+    let mut out = "[";
+    let mut i = 0;
+    loop {
+        if i >= values.length { break; }
+        if i > 0 { out = out + ","; }
+        out = out + _owner_quote(values[i]);
+        i += 1;
+    }
+    return out + "]";
+}
+
+fn render_toolchain_owners_json(report: ToolchainOwnerReport) -> string {
+    let provider = report.provider;
+    let link = report.link;
+    let validator = _owner_tool(provider.tools, "llvm-as");
+    let optimizer = _owner_tool(provider.tools, "opt");
+    let emitter = _owner_tool(provider.tools, "llc");
+    let profile = llvm_object_target_profile(provider.target_triple);
+    let mut linker_path = "";
+    let mut linker_version = "";
+    let mut sdk_root = "";
+    let mut sdk_version = "";
+    let mut crt_root = "";
+    let mut crt_version = "";
+    let mut deployment = "";
+    if link.provider == "linux-ld.lld" {
+        linker_path = link.linker_path;
+        linker_version = link.linker_version;
+    } else if link.provider == "darwin-apple-ld" {
+        linker_path = link.darwin.linker_path;
+        linker_version = link.darwin.linker_version;
+        sdk_root = link.darwin.sdk_root;
+        sdk_version = link.darwin.sdk_version;
+        deployment = link.darwin.deployment_target;
+    } else if link.provider == "windows-lld-link" {
+        linker_path = link.windows.linker_path;
+        let linker = _owner_tool(provider.tools, "lld-link");
+        linker_version = linker.version_output;
+        sdk_root = link.windows.sdk_root;
+        sdk_version = link.windows.sdk_version;
+        crt_root = link.windows.msvc_root;
+        crt_version = link.windows.msvc_version;
+    }
+    let mut c_state = "inactive";
+    if report.foreign_c.length > 0 { c_state = "configured"; }
+    let mut ok = "false";
+    if report.ok { ok = "true"; }
+    let mut object_ok = "false";
+    if provider.ok { object_ok = "true"; }
+    let mut link_ok = "false";
+    if link.ok { link_ok = "true"; }
+    let mut link_required = "false";
+    if link.requires_direct_link { link_required = "true"; }
+    let mut link_selected = link.provider;
+    if starts_with(link.reason, "SAILFIN_LINK_PROVIDER=clang-oracle") {
+        link_selected = "clang-oracle";
+    }
+    return "{\"schema_version\":1,\"target\":" + _owner_quote(report.target)
+        + ",\"object_format\":"
+        + _owner_quote(report.object_format)
+        + ",\"target_profile\":{\"applies\":"
+        + _owner_bool(provider.ok
+        && provider.kind == "llvm-cli")
+        + ",\"effective_triple\":"
+        + _owner_quote(provider.target_triple)
+        + ",\"cpu\":"
+        + _owner_quote(profile.cpu)
+        + ",\"features\":"
+        + _owner_quote(profile.features)
+        + ",\"relocation_model\":"
+        + _owner_quote(profile.relocation_model)
+        + ",\"code_model\":"
+        + _owner_quote(profile.code_model)
+        + ",\"exception_model\":"
+        + _owner_quote(profile.exception_model)
+        + ",\"fp_contract\":"
+        + _owner_quote(profile.fp_contract)
+        + ",\"frame_pointer_o0\":"
+        + _owner_quote(profile.frame_pointer_o0)
+        + ",\"frame_pointer_o2\":"
+        + _owner_quote(profile.frame_pointer_o2)
+        + ",\"function_sections\":"
+        + _owner_bool(profile.function_sections)
+        + ",\"data_sections\":"
+        + _owner_bool(profile.data_sections)
+        + ",\"incremental_linker_compatible\":"
+        + _owner_bool(profile.incremental_linker_compatible)
+        + ",\"emulated_tls\":"
+        + _owner_bool(profile.emulated_tls)
+        + "}"
+        + ",\"clang_free\":"
+        + ok
+        + ",\"object_provider\":{\"selected\":"
+        + _owner_quote(provider.kind)
+        + ",\"default\":\"llvm-cli\",\"fingerprint\":"
+        + _owner_quote(provider.fingerprint)
+        + ",\"validator\":"
+        + _owner_tool_json(validator)
+        + ",\"optimizer\":"
+        + _owner_tool_json(optimizer)
+        + ",\"emitter\":"
+        + _owner_tool_json(emitter)
+        + ",\"oracle\":{\"path\":"
+        + _owner_quote(provider.clang_path)
+        + ",\"version\":"
+        + _owner_quote(provider.clang_version)
+        + "}},\"link\":{\"selected\":"
+        + _owner_quote(link_selected)
+        + ",\"default\":"
+        + _owner_quote(_owner_default_link(report.target))
+        + ",\"path\":"
+        + _owner_quote(linker_path)
+        + ",\"version\":"
+        + _owner_quote(linker_version)
+        + ",\"sdk_root\":"
+        + _owner_quote(sdk_root)
+        + ",\"sdk_version\":"
+        + _owner_quote(sdk_version)
+        + ",\"crt_root\":"
+        + _owner_quote(crt_root)
+        + ",\"crt_version\":"
+        + _owner_quote(crt_version)
+        + ",\"crt1\":"
+        + _owner_quote(link.crt1)
+        + ",\"crti\":"
+        + _owner_quote(link.crti)
+        + ",\"crtn\":"
+        + _owner_quote(link.crtn)
+        + ",\"crtbegin\":"
+        + _owner_quote(link.crtbegin)
+        + ",\"crtend\":"
+        + _owner_quote(link.crtend)
+        + ",\"dynamic_loader\":"
+        + _owner_quote(link.dynamic_linker)
+        + ",\"search_dirs\":"
+        + _owner_string_array(link.search_dirs)
+        + ",\"deployment_target\":"
+        + _owner_quote(deployment)
+        + ",\"identity\":"
+        + _owner_quote(_owner_link_identity(link))
+        + "},\"foreign_c\":{\"state\":"
+        + _owner_quote(c_state)
+        + ",\"configured\":"
+        + _owner_quote(report.foreign_c)
+        + "},\"prerequisites\":{\"object\":{\"ok\":"
+        + object_ok
+        + ",\"reason\":"
+        + _owner_quote(provider.diagnostic)
+        + "},\"link\":{\"ok\":"
+        + link_ok
+        + ",\"required\":"
+        + link_required
+        + ",\"reason\":"
+        + _owner_quote(link.reason)
+        + "}},\"error\":"
+        + _owner_quote(report.reason)
+        + "}";
+}
+
+fn _owner_default_link(target: string) -> string {
+    if target == "x86_64-unknown-linux-gnu" || target == "aarch64-unknown-linux-gnu" {
+        return "linux-ld.lld";
+    }
+    if target == "arm64-apple-darwin" { return "darwin-apple-ld"; }
+    if target == "x86_64-pc-windows-msvc" { return "windows-lld-link"; }
+    return "";
+}
+
+fn _owner_link_identity(link: DirectLinkContract) -> string {
+    if link.provider == "darwin-apple-ld" { return link.darwin.identity; }
+    if link.provider == "windows-lld-link" { return link.windows.identity; }
+    return "";
+}
+
+fn render_toolchain_owners_human(report: ToolchainOwnerReport) -> string {
+    let mut out = "target: " + report.target + " (" + report.object_format
+        + ")\n";
+    out = out + "object: " + report.provider.kind + " (default: llvm-cli)\n";
+    if report.provider.kind == "clang-oracle" {
+        out = out + "  migration oracle: " + report.provider.clang_path + " ("
+            + _owner_version_line(report.provider.clang_version)
+            + ")\n";
+    } else {
+        out = out + "  validate: " + report.provider.llvm_as_path + " ("
+            + _owner_version_line(_owner_tool(report.provider.tools, "llvm-as").version_output)
+            + ")\n";
+        out = out + "  optimize: " + report.provider.opt_path + " ("
+            + _owner_version_line(_owner_tool(report.provider.tools, "opt").version_output)
+            + ")\n";
+        out = out + "  emit: " + report.provider.llc_path + " ("
+            + _owner_version_line(_owner_tool(report.provider.tools, "llc").version_output)
+            + ")\n";
+    }
+    let mut link_owner = report.link.provider;
+    if starts_with(report.link.reason, "SAILFIN_LINK_PROVIDER=clang-oracle") {
+        link_owner = "clang-oracle (explicit migration selection)";
+    }
+    out = out + "link: " + link_owner + "\n";
+    if report.link.provider == "darwin-apple-ld" {
+        out = out + "  " + report.link.darwin.linker_path + " ("
+            + _owner_version_line(report.link.darwin.linker_version)
+            + "); SDK "
+            + report.link.darwin.sdk_version
+            + " at "
+            + report.link.darwin.sdk_root
+            + "\n";
+    } else if report.link.provider == "windows-lld-link" {
+        out = out + "  " + report.link.windows.linker_path + " ("
+            + _owner_version_line(_owner_tool(report.provider.tools, "lld-link").version_output)
+            + "); SDK "
+            + report.link.windows.sdk_version
+            + "; MSVC "
+            + report.link.windows.msvc_version
+            + "\n";
+    } else if report.link.provider == "linux-ld.lld" {
+        out = out + "  " + report.link.linker_path + " (" + _owner_version_line(report.link.linker_version)
+            + "); CRT "
+            + report.link.crt1
+            + "\n";
+    }
+    if report.foreign_c.length > 0 {
+        out = out + "foreign C: configured (" + report.foreign_c + ")\n";
+    } else { out = out + "foreign C: inactive\n"; }
+    if report.ok { out = out + "clang-free contract: ready"; } else {
+        out = out + "clang-free contract: unavailable (" + report.reason + ")";
+    }
+    return out;
+}
+
+export {
+    ToolchainOwnerReport,
+    resolve_toolchain_owner_report,
+    render_toolchain_owners_json,
+    render_toolchain_owners_human,
+    toolchain_owner_linker_matches
+};

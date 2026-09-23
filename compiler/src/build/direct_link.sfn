@@ -41,12 +41,13 @@ import {
 import { user_config_linker, user_config_linker_origin } from "../user_config";
 import { DarwinLinkContract, empty_darwin_link_contract, resolve_darwin_link } from "./darwin_direct_link";
 import { list_child_dirs } from "./fs_tree";
-import { _resolve_on_path } from "./llvm_toolchain_resolver";
+import { LlvmFamily, resolve_llvm_toolchain } from "./llvm_toolchain_resolver";
 import { build_target_triple, native_host_os, triple_target_arch } from "./target";
 import {
     WindowsLinkContract,
     empty_windows_link_contract,
-    resolve_windows_lld_link
+    resolve_windows_lld_link,
+    resolve_windows_lld_link_with_family
 } from "./windows_direct_link";
 
 // The resolved Linux link contract. `ok` gates the direct path;
@@ -59,6 +60,8 @@ struct DirectLinkContract {
     // platform choice in the resolved contract lets Backend.link dispatch
     // argv construction without re-probing the host or target.
     provider: string;
+    linker_path: string;
+    linker_version: string;
     // GNU/LLD linker emulation (`elf_x86_64` or `aarch64linux`).
     linker_emulation: string;
     // The architecture's glibc ELF interpreter for -pie. Empty under
@@ -113,6 +116,8 @@ fn _direct_fail(reason: string) -> DirectLinkContract {
         ok: false,
         reason: reason,
         provider: "",
+        linker_path: "",
+        linker_version: "",
         linker_emulation: "",
         dynamic_linker: "",
         static_link: false,
@@ -128,6 +133,10 @@ fn _direct_fail(reason: string) -> DirectLinkContract {
     };
 }
 
+fn empty_direct_link_contract() -> DirectLinkContract {
+    return _direct_fail("");
+}
+
 // Required but unsatisfied: this target owns Link and a prerequisite is
 // missing, skewed, or unsupported. The caller renders E0628 and fails the
 // link (SFN-953); it must not reach the clang driver.
@@ -136,6 +145,8 @@ fn _direct_unmet(reason: string) -> DirectLinkContract {
         ok: false,
         reason: reason,
         provider: "",
+        linker_path: "",
+        linker_version: "",
         linker_emulation: "",
         dynamic_linker: "",
         static_link: false,
@@ -383,19 +394,6 @@ fn _push_dir_if_new(dirs: string[], dir: string) -> string[] ![io] {
     return out;
 }
 
-// Resolve `name` to an absolute path on PATH, or "" when absent.
-//
-// Native PATH walk, not `command -v` (SFN-953): the production resolver
-// spawns no shell. Reuses `llvm_toolchain_resolver`'s `_resolve_on_path`
-// rather than growing a second implementation — it already resolves to an
-// absolute path at probe time for the SFEP-0066 §3.8 fingerprinting
-// reasons, and already pairs `fs.is_executable` with `!fs.is_directory`,
-// which is load-bearing because `is_executable` degrades to `access(path,
-// 0)` on Windows and cannot itself tell a file from a directory.
-fn _which(name: string) -> string ![io] {
-    return _resolve_on_path(name, native_host_os());
-}
-
 // The Link-role migration oracle (SFEP-0066 §3.1/§3.5, SFN-953). The
 // default and only supported first-party value is `direct`; `clang-oracle`
 // routes the final link back through the clang driver for differential
@@ -425,6 +423,14 @@ fn _link_provider_override() -> string ![io] {
 // is owned by SFN-955 and therefore fails closed on a missing prerequisite;
 // MinGW and cross-host Windows builds remain outside that native contract.
 fn resolve_link_contract(target_os: string, static_link: boolean) -> DirectLinkContract ![io] {
+    return _resolve_link_contract(target_os, static_link, null);
+}
+
+fn resolve_link_contract_with_family(target_os: string, static_link: boolean, family: LlvmFamily) -> DirectLinkContract ![io] {
+    return _resolve_link_contract(target_os, static_link, family);
+}
+
+fn _resolve_link_contract(target_os: string, static_link: boolean, supplied_family: LlvmFamily?) -> DirectLinkContract ![io] {
     // Provider selection outranks the OS dispatch, not just the host
     // probing below it. Nested inside the Linux arm it would leave an
     // unrecognized value silently meaning "direct" on Darwin and Windows —
@@ -438,6 +444,9 @@ fn resolve_link_contract(target_os: string, static_link: boolean) -> DirectLinkC
         return _direct_unmet(provider_reason);
     }
     if target_os == "Linux" {
+        if supplied_family != null {
+            return resolve_direct_ld_lld_with_family(target_os, static_link, supplied_family);
+        }
         return resolve_direct_ld_lld(target_os, static_link);
     }
     // Every arm echoes `target_os` verbatim in a `(<os>)` group. That is
@@ -498,7 +507,10 @@ fn resolve_link_contract(target_os: string, static_link: boolean) -> DirectLinkC
             return _direct_unmet("Windows direct linking requires lld-link; requested linker is "
                 + requested_linker);
         }
-        let windows = resolve_windows_lld_link();
+        let mut windows = empty_windows_link_contract();
+        if supplied_family != null {
+            windows = resolve_windows_lld_link_with_family(supplied_family);
+        } else { windows = resolve_windows_lld_link(); }
         if !windows.ok { return _direct_unmet(windows.reason); }
         let mut contract = _direct_fail("");
         contract.ok = true;
@@ -548,6 +560,14 @@ fn _non_glibc_linux_userland() -> boolean ![io] {
 // to prevent) and E0628 for the ordinary dynamic link (SFN-953). Only an
 // unowned target or an explicit provider selection still reaches clang.
 fn resolve_direct_ld_lld(target_os: string, static_link: boolean) -> DirectLinkContract ![io] {
+    return _resolve_direct_ld_lld(target_os, static_link, null);
+}
+
+fn resolve_direct_ld_lld_with_family(target_os: string, static_link: boolean, family: LlvmFamily) -> DirectLinkContract ![io] {
+    return _resolve_direct_ld_lld(target_os, static_link, family);
+}
+
+fn _resolve_direct_ld_lld(target_os: string, static_link: boolean, supplied_family: LlvmFamily?) -> DirectLinkContract ![io] {
     if target_os != "Linux" {
         return _direct_fail("target is not Linux (" + target_os + ")");
     }
@@ -603,12 +623,39 @@ fn resolve_direct_ld_lld(target_os: string, static_link: boolean) -> DirectLinkC
                 + " defers to clang");
         }
     }
-    if _which("ld.lld").length == 0 {
-        return _direct_unmet("ld.lld not on PATH");
+    if supplied_family != null {
+        return _resolve_direct_ld_lld_for_family(arch, static_link, supplied_family);
+    }
+    return _resolve_direct_ld_lld_for_family(arch, static_link, resolve_llvm_toolchain(build_target_triple()));
+}
+
+fn _resolve_direct_ld_lld_for_family(arch: string, static_link: boolean, family: LlvmFamily) -> DirectLinkContract ![io] {
+    if !family.ok {
+        if family.diagnostic != null {
+            return _direct_unmet(family.diagnostic.message);
+        }
+        return _direct_unmet("coherent LLVM family with ld.lld is unavailable");
+    }
+    let mut linker_path = "";
+    let mut linker_version = "";
+    let mut tool_index: int = 0;
+    loop {
+        if tool_index >= family.tools.length { break; }
+        if family.tools[tool_index].role == "ld.lld" {
+            linker_path = family.tools[tool_index].path;
+            linker_version = family.tools[tool_index].version_output;
+            break;
+        }
+        tool_index += 1;
+    }
+    if linker_path.length == 0 {
+        return _direct_unmet("resolved LLVM family has no ld.lld");
     }
     let mut emulation = "elf_x86_64";
     if arch == "aarch64" { emulation = "aarch64linux"; }
-    if static_link { return _resolve_static_contract(arch, emulation); }
+    if static_link {
+        return _resolve_static_contract(arch, emulation, linker_path, linker_version);
+    }
     let mut dyn = "/lib64/ld-linux-x86-64.so.2";
     if arch == "aarch64" { dyn = "/lib/ld-linux-aarch64.so.1"; }
     if !fs.exists(dyn) {
@@ -645,6 +692,8 @@ fn resolve_direct_ld_lld(target_os: string, static_link: boolean) -> DirectLinkC
         ok: true,
         reason: "",
         provider: "linux-ld.lld",
+        linker_path: linker_path,
+        linker_version: linker_version,
         linker_emulation: emulation,
         dynamic_linker: dyn,
         static_link: false,
@@ -699,7 +748,7 @@ fn _link_search_dirs(arch: string, gccdir: string, libdir: string, libc_dir: str
 // not. `-l` entries arriving from `LinkPlan.libs` (`-lm`, `-lpthread`) are
 // resolved by `ld.lld` against `search_dirs` and are not probed here,
 // because this resolver does not see the plan (SFN-1268).
-fn _resolve_static_contract(arch: string, emulation: string) -> DirectLinkContract ![io] {
+fn _resolve_static_contract(arch: string, emulation: string, linker_path: string, linker_version: string) -> DirectLinkContract ![io] {
     let libdirs = _multiarch_libdirs(arch);
     let libdir = _first_libdir_with(libdirs, "crt1.o");
     if libdir.length == 0 {
@@ -738,6 +787,8 @@ fn _resolve_static_contract(arch: string, emulation: string) -> DirectLinkContra
         ok: true,
         reason: "",
         provider: "linux-ld.lld",
+        linker_path: linker_path,
+        linker_version: linker_version,
         linker_emulation: emulation,
         dynamic_linker: "",
         static_link: true,
@@ -830,7 +881,9 @@ fn _sanitize_direct_libs(libs: string[]) -> string[] {
 fn direct_ld_lld_argv(contract: DirectLinkContract, objects: string[], out_path: string, libs: string[], link_flags: string[]) -> string[] {
     // Position 1: `-static` replaces `-pie`, and `-dynamic-linker <loader>`
     // is dropped — a static executable has no ELF interpreter to name.
-    let mut a: string[] = ["ld.lld"];
+    let mut linker = "ld.lld";
+    if contract.linker_path.length > 0 { linker = contract.linker_path; }
+    let mut a: string[] = [linker];
     if contract.static_link { a.push("-static"); } else { a.push("-pie"); }
     a.push("--eh-frame-hdr");
     a.push("-z");
@@ -922,9 +975,12 @@ fn trace_direct_link_fallback(reason: string) ![io] {
 
 export {
     DirectLinkContract,
+    empty_direct_link_contract,
     _version_order_greater,
     resolve_direct_ld_lld,
+    resolve_direct_ld_lld_with_family,
     resolve_link_contract,
+    resolve_link_contract_with_family,
     direct_ld_lld_argv,
     trace_direct_link_fallback
 };

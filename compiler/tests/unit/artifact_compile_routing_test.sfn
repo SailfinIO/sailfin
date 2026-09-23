@@ -50,6 +50,9 @@ fn _llvm_provider() -> LlvmObjectProvider {
         opt_path: "opt",
         llc_path: "llc",
         clang_path: "",
+        tools: [],
+        family: null,
+        clang_version: "",
         diagnostic: ""
     };
 }

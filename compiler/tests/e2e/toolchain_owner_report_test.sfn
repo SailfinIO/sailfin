@@ -1,0 +1,46 @@
+// SFN-956: the CLI probe emits one JSON document and exits nonzero when the
+// selected LLVM family is unavailable. The explicit migration oracle is
+// represented as a selection, never as an implicit default.
+import { contains } from "sfn/strings";
+import { clean_runner_env_without, sfn_bin_path } from "sfn/test";
+
+fn _probe_env() -> string[] ![io] {
+    return clean_runner_env_without("", ["SAILFIN_LLVM_ROOT", "SAILFIN_OBJECT_PROVIDER", "SAILFIN_CLANG_ORACLE", "SAILFIN_LINK_PROVIDER", "SAILFIN_TOOLCHAIN"]);
+}
+
+test "toolchain owners: missing LLVM family has structured nonzero JSON" ![io] {
+    let mut e = _probe_env();
+    e.push("SAILFIN_LLVM_ROOT=/no/such/llvm-family-for-owner-test");
+    let rc = process.run_capture([sfn_bin_path(), "toolchain", "owners", "--json"], e);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert rc != 0;
+    assert contains(out, "\"schema_version\":1");
+    assert contains(out, "\"clang_free\":false");
+    assert contains(out, "\"selected\":\"llvm-cli\"");
+    assert contains(out, "\"prerequisites\":{\"object\":{\"ok\":false");
+    assert contains(out, "SAILFIN_LLVM_ROOT");
+}
+
+test "toolchain owners: explicit oracle is named even when absent" ![io] {
+    let mut e = _probe_env();
+    e.push("SAILFIN_OBJECT_PROVIDER=clang-oracle");
+    let rc = process.run_capture([sfn_bin_path(), "toolchain", "owners", "--json"], e);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert rc != 0;
+    assert contains(out, "\"selected\":\"clang-oracle\",\"default\":\"llvm-cli\"");
+    assert contains(out, "\"clang_free\":false");
+    assert contains(out, "SAILFIN_CLANG_ORACLE");
+}
+
+test "toolchain owners: link oracle is explicit in the report" ![io] {
+    let mut e = _probe_env();
+    e.push("SAILFIN_LINK_PROVIDER=clang-oracle");
+    let rc = process.run_capture([sfn_bin_path(), "toolchain", "owners", "--json"], e);
+    let out = process.capture_take_stdout();
+    let _err = process.capture_take_stderr();
+    assert rc != 0;
+    assert contains(out, "\"link\":{\"selected\":\"clang-oracle\"");
+    assert contains(out, "\"clang_free\":false");
+}

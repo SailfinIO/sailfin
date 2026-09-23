@@ -1,0 +1,129 @@
+// SFN-956: versioned owner-report rendering uses resolved contracts.
+import { contains } from "sfn/strings";
+
+import { LlvmObjectProvider } from "../../src/build/artifact_compile";
+import { empty_darwin_link_contract } from "../../src/build/darwin_direct_link";
+import { DirectLinkContract } from "../../src/build/direct_link";
+import { LlvmTool } from "../../src/build/llvm_toolchain_resolver";
+import { empty_windows_link_contract } from "../../src/build/windows_direct_link";
+import {
+    ToolchainOwnerReport,
+    render_toolchain_owners_human,
+    render_toolchain_owners_json,
+    toolchain_owner_linker_matches
+} from "../../src/cli/commands/toolchain_owners";
+
+fn _provider(kind: string) -> LlvmObjectProvider {
+    return LlvmObjectProvider {
+        ok: true,
+        kind: kind,
+        target_triple: "x86_64-unknown-linux-gnu",
+        host_triple: "x86_64-unknown-linux-gnu",
+        object_format: "elf",
+        fingerprint: "fingerprint",
+        llvm_as_path: "/llvm/llvm-as",
+        opt_path: "/llvm/opt",
+        llc_path: "/llvm/llc",
+        clang_path: "",
+        tools: [LlvmTool {
+            role: "llvm-as", path: "/llvm/llvm-as", version_output: "LLVM version 18\n", major: 18, failure: ""
+        }, LlvmTool {
+            role: "opt", path: "/llvm/opt", version_output: "LLVM version 18\n", major: 18, failure: ""
+        }, LlvmTool {
+            role: "llc", path: "/llvm/llc", version_output: "LLVM version 18\n", major: 18, failure: ""
+        }, LlvmTool {
+            role: "ld.lld", path: "/llvm/ld.lld", version_output: "LLD 18\n", major: 18, failure: ""
+        }],
+        family: null,
+        clang_version: "",
+        diagnostic: ""
+    };
+}
+
+fn _link() -> DirectLinkContract {
+    return DirectLinkContract {
+        ok: true,
+        reason: "",
+        provider: "linux-ld.lld",
+        linker_path: "/llvm/ld.lld",
+        linker_version: "LLD 18\n",
+        linker_emulation: "elf_x86_64",
+        dynamic_linker: "/lib64/ld-linux-x86-64.so.2",
+        static_link: false,
+        crt1: "/usr/lib/Scrt1.o",
+        crti: "/usr/lib/crti.o",
+        crtn: "/usr/lib/crtn.o",
+        crtbegin: "/usr/lib/crtbeginS.o",
+        crtend: "/usr/lib/crtendS.o",
+        search_dirs: ["/usr/lib"],
+        windows: empty_windows_link_contract(),
+        darwin: empty_darwin_link_contract(),
+        requires_direct_link: false
+    };
+}
+
+test "toolchain owners: JSON names exact resolved tools and is stable" ![pure] {
+    let report = ToolchainOwnerReport {
+        target: "x86_64-unknown-linux-gnu",
+        object_format: "elf",
+        provider: _provider("llvm-cli"),
+        link: _link(),
+        foreign_c: "",
+        ok: true,
+        reason: ""
+    };
+    let json = render_toolchain_owners_json(report);
+    assert strings_equal(json, render_toolchain_owners_json(report));
+    assert contains(json, "\"schema_version\":1");
+    assert contains(json, "\"clang_free\":true");
+    assert contains(json, "\"validator\":{\"path\":\"/llvm/llvm-as\",\"version\":\"LLVM version 18\\n\"}");
+    assert contains(json, "\"selected\":\"linux-ld.lld\"");
+    assert contains(json, "\"path\":\"/llvm/ld.lld\",\"version\":\"LLD 18\\n\"");
+    assert toolchain_owner_linker_matches(report.provider, report.link);
+    assert contains(json, "\"target_profile\":{\"applies\":true,\"effective_triple\":\"x86_64-unknown-linux-gnu\"");
+    assert contains(json, "\"crt1\":\"/usr/lib/Scrt1.o\"");
+    assert contains(json, "\"state\":\"inactive\"");
+    assert contains(render_toolchain_owners_human(report), "clang-free contract: ready");
+}
+
+test "toolchain owners: mixed LLVM and link families are rejected" ![pure] {
+    let provider = _provider("llvm-cli");
+    let mut link = _link();
+    link.linker_path = "/other/ld.lld";
+    link.linker_version = "LLD 19\n";
+    assert ! toolchain_owner_linker_matches(provider, link);
+}
+
+test "toolchain owners: JSON escapes control bytes" ![pure] {
+    let report = ToolchainOwnerReport {
+        target: "x86_64-unknown-linux-gnu",
+        object_format: "elf",
+        provider: _provider("llvm-cli"),
+        link: _link(),
+        foreign_c: "cc" + char_from_code(1) + "extra",
+        ok: true,
+        reason: ""
+    };
+    assert contains(render_toolchain_owners_json(report), "cc\\u0001extra");
+}
+
+test "toolchain owners: explicit oracle cannot claim clang-free" ![pure] {
+    let mut provider = _provider("clang-oracle");
+    provider.clang_path = "/oracle/clang";
+    provider.clang_version = "clang version 18\n";
+    provider.tools = [];
+    let report = ToolchainOwnerReport {
+        target: "x86_64-unknown-linux-gnu",
+        object_format: "elf",
+        provider: provider,
+        link: _link(),
+        foreign_c: "cc",
+        ok: false,
+        reason: "migration oracle selected"
+    };
+    let json = render_toolchain_owners_json(report);
+    assert contains(json, "\"selected\":\"clang-oracle\",\"default\":\"llvm-cli\"");
+    assert contains(json, "\"clang_free\":false");
+    assert contains(json, "\"state\":\"configured\"");
+    assert contains(render_toolchain_owners_human(report), "migration oracle: /oracle/clang");
+}

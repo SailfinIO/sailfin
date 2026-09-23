@@ -40,6 +40,8 @@ fn _contract() -> DirectLinkContract ![pure] {
         ok: true,
         reason: "",
         provider: "linux-ld.lld",
+        linker_path: "",
+        linker_version: "",
         linker_emulation: "elf_x86_64",
         dynamic_linker: "/lib64/ld-linux-x86-64.so.2",
         static_link: false,
@@ -60,6 +62,8 @@ fn _aarch64_contract() -> DirectLinkContract ![pure] {
         ok: true,
         reason: "",
         provider: "linux-ld.lld",
+        linker_path: "",
+        linker_version: "",
         linker_emulation: "aarch64linux",
         dynamic_linker: "/lib/ld-linux-aarch64.so.1",
         static_link: false,
@@ -82,6 +86,8 @@ fn _static_contract() -> DirectLinkContract ![pure] {
         ok: true,
         reason: "",
         provider: "linux-ld.lld",
+        linker_path: "",
+        linker_version: "",
         linker_emulation: "elf_x86_64",
         dynamic_linker: "",
         static_link: true,
@@ -118,6 +124,13 @@ test "direct-link: invokes ld.lld with PIE target-identity flags" ![pure] {
     assert expect_eq_bool(_argv_contains(argv, "a.out"), true).ok;
     // The final link never re-invokes clang.
     assert expect_eq_bool(_argv_contains(argv, "clang"), false).ok;
+}
+
+test "direct-link: executes the linker path selected by the resolved family" ![pure] {
+    let mut contract = _contract();
+    contract.linker_path = "/llvm-18/bin/ld.lld";
+    let argv = direct_ld_lld_argv(contract, ["main.o"], "a.out", [], []);
+    assert expect_eq_bool(argv[0] == contract.linker_path, true).ok;
 }
 
 test "direct-link: aarch64 contract selects its linker emulation and loader" ![pure] {

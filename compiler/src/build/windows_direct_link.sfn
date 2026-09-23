@@ -238,7 +238,10 @@ fn _resolve_builtins_lib(llvm_root: string, major: int) -> string ![io] {
 }
 
 fn resolve_windows_lld_link() -> WindowsLinkContract ![io] {
-    let family: LlvmFamily = resolve_llvm_toolchain("x86_64-pc-windows-msvc");
+    return resolve_windows_lld_link_with_family(resolve_llvm_toolchain("x86_64-pc-windows-msvc"));
+}
+
+fn resolve_windows_lld_link_with_family(family: LlvmFamily) -> WindowsLinkContract ![io] {
     if !family.ok {
         return _windows_link_failure("coherent LLVM 18 family with lld-link.exe could not be resolved");
     }
@@ -443,6 +446,7 @@ export {
     WindowsLinkContract,
     empty_windows_link_contract,
     resolve_windows_lld_link,
+    resolve_windows_lld_link_with_family,
     trace_windows_link_contract,
     windows_lld_link_argv
 };

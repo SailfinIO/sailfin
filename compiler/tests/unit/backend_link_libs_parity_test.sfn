@@ -107,6 +107,8 @@ test "backend: static argv reproduces every plan.libs entry" ![pure] {
         ok: true,
         reason: "",
         provider: "linux-ld.lld",
+        linker_path: "",
+        linker_version: "",
         linker_emulation: "elf_x86_64",
         dynamic_linker: "",
         static_link: true,

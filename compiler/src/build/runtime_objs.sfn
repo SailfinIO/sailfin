@@ -607,6 +607,9 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
         opt_path: "",
         llc_path: "",
         clang_path: "",
+        tools: [],
+        family: null,
+        clang_version: "",
         diagnostic: ""
     };
     if needs_llvm {
