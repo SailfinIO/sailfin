@@ -26,7 +26,6 @@ import {
     extern_type_uses_string,
     is_c_abi_parameter_type,
     is_c_abi_return_type,
-    make_extern_effects_diagnostic,
     make_extern_parameter_missing_type_diagnostic,
     make_extern_parameter_type_diagnostic,
     make_extern_return_type_diagnostic,
@@ -175,11 +174,6 @@ fn check_function_signature(signature: FunctionSignature, interfaces: Statement[
 // Constraints enforced:
 //   - No type parameters (E0803). Generic externs are nonsensical;
 //     C has no type parameters.
-//   - No effect annotations (E0804). Effects are enforced on the
-//     wrapping adapter, not on the raw extern. The example
-//     `examples/advanced/unsafe-extern-interop.sfn` already
-//     demonstrates this pattern: `![unsafe, io]` lives on
-//     `allocate_and_free`, not on `malloc`/`free`.
 //   - Each parameter must carry a non-empty type annotation
 //     (E0805). The extern boundary has no body for inference;
 //     missing annotations would silently default to `i8*` in
@@ -216,10 +210,6 @@ fn check_extern_signature(signature: FunctionSignature, variadic_index: int) -> 
 
     if signature.type_parameters.length > 0 {
         diagnostics.push(make_extern_type_parameters_diagnostic(signature.name));
-    }
-
-    if signature.effects.length > 0 {
-        diagnostics.push(make_extern_effects_diagnostic(signature.name, signature.effects));
     }
 
     let mut _pi: int = 0;

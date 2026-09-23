@@ -9,7 +9,6 @@ import {
     find_matching_paren,
     is_ascii_upper,
     is_identifier_char,
-    join_with_separator,
     slice_text,
     split_top_level_commas,
     trim_text,
@@ -480,22 +479,6 @@ fn make_extern_variadic_argument_diagnostic(name: string, position: int, type_te
             + " not promote implicitly — cast explicitly (`as "
             + target
             + "`).",
-        file_path: "",
-        primary: null,
-        suggestion: null
-    };
-}
-
-fn make_extern_effects_diagnostic(name: string, effects: string[]) -> Diagnostic {
-    let effect_text = join_with_separator(effects, ", ");
-    return Diagnostic {
-        code: "E0804",
-        severity: "error",
-        message: "extern fn `" + name + "` must not declare effects (`!["
-            + effect_text
-            + "]`); effects are enforced on the wrapping adapter, not the raw"
-            + " extern. Move the `![...]` clause onto the function that calls"
-            + " this extern.",
         file_path: "",
         primary: null,
         suggestion: null

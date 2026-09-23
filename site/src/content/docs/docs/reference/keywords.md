@@ -221,9 +221,9 @@ unsafe extern fn malloc(size: usize) -> *u8;
 unsafe extern fn free(ptr: *u8) -> void;
 ```
 
-`extern fn` signatures must use only C-ABI-compatible types that the LLVM backend can lower today: `int` (i64), `float` / `f64` (double), `f32` (single-precision float), `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `usize` (i64), `isize` (i64), `f16`, `bf16`, `bool`, `void` (return only), raw pointers (`*T`, `**T`, `*const T`, `*mut T`, `*OpaqueStruct`, `*void`), or function pointers (`fn(A) -> B`). `usize`/`isize` are pointer-sized aliases that lower to `i64` on every platform Sailfin currently targets. Sailfin aggregates (`string`, `T[]`, structs) cannot cross the extern boundary directly — adapters must decompose them into pointer + length pairs first. Externs must not declare effects (`![io]`, `![net]`, …); effects belong on the wrapping adapter, not the raw extern.
+`extern fn` signatures must use only C-ABI-compatible types that the LLVM backend can lower today: `int` (i64), `float` / `f64` (double), `f32` (single-precision float), `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `usize` (i64), `isize` (i64), `f16`, `bf16`, `bool`, `void` (return only), raw pointers (`*T`, `**T`, `*const T`, `*mut T`, `*OpaqueStruct`, `*void`), or function pointers (`fn(A) -> B`). `usize`/`isize` are pointer-sized aliases that lower to `i64` on every platform Sailfin currently targets. Sailfin aggregates (`string`, `T[]`, structs) cannot cross the extern boundary directly — adapters must decompose them into pointer + length pairs first. Externs may attest effects (`![io]`, `![net]`, …); an explicit `![]` attests purity, while no clause leaves the extern unattested.
 
-Diagnostic codes: `E0801` (`string` parameter/return), `E0802` (array), `E0803` (type parameters), `E0804` (effects on the extern), `E0805` (other non-C-ABI types — including the legacy `number` alias).
+Diagnostic codes: `E0801` (`string` parameter/return), `E0802` (array), `E0803` (type parameters), `E0805` (other non-C-ABI types — including the legacy `number` alias).
 
 `unsafe` is optional on extern declarations and primarily documents the call site as opting out of Sailfin's safety story.
 

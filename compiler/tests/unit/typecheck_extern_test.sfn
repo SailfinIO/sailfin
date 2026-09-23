@@ -109,11 +109,11 @@ test "extern: rejects type parameters (E0803)" ![io] {
     assert _has_code(diagnostics, "E0803");
 }
 
-test "extern: rejects effects on the extern itself (E0804)" ![io] {
+test "extern: accepts effects on the extern itself" ![io] {
     let source = "extern fn malloc(size: i64) ![io] -> *u8;";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
-    assert _has_code(diagnostics, "E0804");
+    assert diagnostics.length == 0;
 }
 
 // -------------------------------------------------------------------

@@ -168,7 +168,7 @@ reference kernel, and `sfn/device::has_accelerator()` returns `false`.
 |-----|-------|
 | `sfn/device::matmul_f64(a, m, k, b, n)` | Dense f64 matmul dispatch entry point; carries and propagates `![gpu]` |
 | `sfn/device::synchronize()` | Device barrier; carries and propagates `![gpu]`. A no-op on the CPU reference backend |
-| Vendor `extern` calls | Not detected — externs carry no effect (`E0804`) |
+| Vendor `extern` calls | Attested effects propagate; unattested externs contribute no effect |
 | `sfn/tensor`, `sfn/nn`, `sfn/layers` | CPU-only and effect-free; they do **not** require `![gpu]` |
 
 ### `rand` effect

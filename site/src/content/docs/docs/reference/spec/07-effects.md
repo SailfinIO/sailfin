@@ -71,6 +71,14 @@ authorize every `io.*` sub-effect.
 
 See [Effect System Reference](/docs/reference/effects) for the complete API surface per effect.
 
+An `extern fn` may attest effects with `![...]`. Its calls propagate those
+effects through the same local, imported, hierarchical, and capsule checks as
+Sailfin function calls. Extern attestations are also checked against the
+capsule manifest and the recognized effect roots. Explicit `![]` attests
+purity; no clause leaves the
+foreign function unattested and adds no requirement. The compiler trusts the
+attestation rather than inspecting foreign code; see [§13 Foreign Interface](/docs/reference/spec/13-foreign-interface/).
+
 ## 7.1 Guarantee boundary
 
 An absent effect annotation proves only that the 0.8 checker found no registered direct operation or effect inherited through a resolved call. Unresolved or dynamic callees yield no guessed effect, and FFI/native code is not confined by the emitted binary. Capsule and workspace checks are compile-time declaration contracts; the runtime syscall seal is a 1.0 target.

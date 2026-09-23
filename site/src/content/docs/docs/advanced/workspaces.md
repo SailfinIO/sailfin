@@ -135,7 +135,7 @@ With this policy in place:
 
 > **There is no `unsafe` policy.** Confining the foreign surface of a program
 > is not something a capability policy can express today: `unsafe` is not an
-> effect, and an `extern` call contributes no effect to its caller. A derived
+> effect, and an unattested `extern` call contributes no effect to its caller. A derived
 > record of every foreign edge is designed in
 > [SFEP-0079](/sfep/0079-systems-c-interop/) §3.5 and is not shipped.
 

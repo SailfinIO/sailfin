@@ -162,8 +162,8 @@ fn _package_basename(path: string) -> string {
 // onto `sfn/http`'s typed `fetch` once SFN-893 makes name resolution
 // provenance-aware.
 //
-// The extern carries no effect annotation (externs may not); enforcement
-// rides on the `![net]` wrappers below. `sfn_http_request_raw` returns the
+// This extern remains unattested; enforcement rides on the `![net]` wrappers
+// below. `sfn_http_request_raw` returns the
 // FULL raw response (status line + headers + body) as a caller-owned
 // NUL-terminated buffer, or null on a socket/connect/TLS failure.
 extern fn sfn_http_request_raw(method: *u8, url: *u8, headers: *u8, body: *u8) -> *u8;

@@ -9,7 +9,7 @@ sidebar:
 Sailfin reaches foreign code through `extern fn` declarations, raw pointers,
 and a validated `@repr(C)` struct layout. This chapter is normative for the
 surface that **ships today**. The broader interop contract — a read-only
-`*const T` and effect-attested externs — is
+`*const T` — is
 designed in [SFEP-0079](/sfep/0079-systems-c-interop/) and is called out as
 **designed, not shipped** wherever it appears below.
 
@@ -43,8 +43,11 @@ parsed marker: it is consumed by the parser and no analysis pass reads it back,
 so `extern fn` and `unsafe extern fn` typecheck and lower identically. `unsafe`
 is **not** an effect — see §13.6.
 
-An extern declaring effects is rejected with `E0804`; effects belong on the
-Sailfin wrapper that calls the extern, not on the extern itself.
+An extern may attest its effects with `![...]`, including an explicit `![]`
+claim of purity. Calls to an attested extern require the caller to declare its
+effects. An extern with no effect clause is unattested and contributes no
+effect requirement. The compiler trusts the attestation; it does not inspect
+foreign code to verify it.
 
 ### Variadic externs
 
@@ -169,7 +172,7 @@ pair and is rejected in an extern declaration with `E0805`.
 | `E0801` | The type is `string` or `string?`, or a pointer whose pointee is (`*string`, `*const string`). Use `*u8` plus a NUL-terminated copy. |
 | `E0802` | The type has a `[]` at the top level. Sailfin arrays carry runtime metadata; use `*T` plus a length parameter. |
 | `E0803` | The extern declares type parameters (`<...>`). Only concrete C-ABI types cross the boundary. |
-| `E0804` | The extern declares effects (`![...]`). Move the clause onto the calling wrapper. |
+| `E0804` | Retired: extern effect attestations are accepted. |
 | `E0805` | Any other inadmissible or missing type: a missing parameter or `extern var` annotation, bare `void` in parameter position, an unrecognized name such as `number` or `boolean`, and any `string`/array shape the two rules above do not reach (a nested `Foo<int[]>` lands here, not on `E0802`). |
 | `E0850` | A named function passed to a typed extern callback parameter has a mismatched or non-C-ABI signature, or a lambda is passed to that slot. |
 | `E0851` | A variadic extern's `...` is misplaced — no fixed parameter before it, or a parameter after it — or a call-site argument in variadic position has a stated type C would have promoted (`i8`, `i16`, `u8`, `u16`, `f32`, `bool`/`boolean`). See [Variadic externs](#variadic-externs). |
@@ -368,11 +371,13 @@ is undefined.
 
 ## 13.6 Effects and `unsafe`
 
-Extern calls are invisible to the effect checker: `E0804` forbids effects on
-the declaration, and no analysis pass attributes an effect to an extern call.
-The capability surface of foreign code is therefore **not** derived — declare
-the effects on the Sailfin wrapper that calls the extern, so that the wrapper's
-callers propagate them normally.
+An attested extern call participates in ordinary effect checking. A caller
+missing an attested effect receives `E0400` in the same module or `E0402`
+across modules. The capsule manifest must grant effects attested by externs
+and declared by callers, or `E0403` reports the mismatch. An unknown effect
+root receives `E0404`. Hierarchical sub-effects apply as for
+Sailfin functions. An unattested extern call contributes nothing; foreign
+effects remain the author's responsibility to attest.
 
 `unsafe` is meaningful to the ownership checker and to nothing else. No pointer
 operation requires it. What it does is **suppress ownership analysis**, and the

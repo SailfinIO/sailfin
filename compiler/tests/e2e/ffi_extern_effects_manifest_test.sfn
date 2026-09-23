@@ -1,0 +1,67 @@
+// SFN-1294: check-path diagnostics for attested foreign reach.
+import { find } from "sfn/strings";
+import { default_scratch_dir, sfn_bin_path } from "sfn/test";
+
+fn _child_env() -> string[] ![io] {
+    let mut vars: string[] = [];
+    let path = env.get("PATH");
+    if path.length > 0 { vars.push("PATH=" + path); }
+    let home = env.get("HOME");
+    if home.length > 0 { vars.push("HOME=" + home); }
+    let tmpdir = env.get("TMPDIR");
+    if tmpdir.length > 0 { vars.push("TMPDIR=" + tmpdir); }
+    let scratch = env.get("SAILFIN_TEST_SCRATCH");
+    if scratch.length > 0 { vars.push("SAILFIN_TEST_SCRATCH=" + scratch); }
+    return vars;
+}
+
+fn _stage(tag: string, required: string, provider: string, caller: string) -> string ![io] {
+    let mut base = env.get("SAILFIN_TEST_SCRATCH");
+    if base.length == 0 { base = default_scratch_dir(); }
+    let dir = base + "/sfn-extern-effects-" + tag;
+    fs.createDirectory(dir + "/src", true);
+    fs.writeFile(dir + "/capsule.toml", "[capsule]\nname = \"extern_effects_fixture\"\nversion = \"0.0.0\"\n\n[capabilities]\nrequired = "
+        + required
+        + "\n");
+    fs.writeFile(dir + "/src/provider.sfn", provider);
+    fs.writeFile(dir + "/src/caller.sfn", caller);
+    return dir + "/src/caller.sfn";
+}
+
+fn _check(path: string) -> string ![io] {
+    let exit = process.run_capture([sfn_bin_path(), "check", path], _child_env());
+    let output = process.capture_take_stdout() + process.capture_take_stderr();
+    assert exit != 0;
+    return output;
+}
+
+test "extern effects: caller declaration is checked against capsule manifest" ![io] {
+    let path = _stage("manifest", "[\"io\"]", "extern fn connect(fd: i32) -> i32 ![net];\n", "extern fn connect(fd: i32) -> i32 ![net];\nfn caller() -> i32 ![net] { return connect(0); }\n");
+    let output = _check(path);
+    assert find(output, "E0403", 0) >= 0;
+    assert find(output, "net", 0) >= 0;
+}
+
+test "extern effects: declaration itself is checked against capsule manifest" ![io] {
+    let path = _stage("declaration", "[]", "", "extern fn connect(fd: i32) -> i32 ![net];\n");
+    let output = _check(path);
+    assert find(output, "E0403", 0) >= 0;
+    assert find(output, "net", 0) >= 0;
+}
+
+test "extern effects: local call without attestation raises E0400" ![io] {
+    let caller = "extern fn connect(fd: i32) -> i32 ![net];\nfn caller() -> i32 { return connect(0); }\n";
+    let path = _stage("local", "[\"net\"]", "", caller);
+    let output = _check(path);
+    assert find(output, "E0400", 0) >= 0;
+    assert find(output, "net", 0) >= 0;
+}
+
+test "extern effects: imported attestation propagates as E0402" ![io] {
+    let provider = "extern fn connect(fd: i32) -> i32 ![net];\nexport { connect };\n";
+    let caller = "import { connect } from \"./provider\";\nfn caller() -> i32 { return connect(0); }\n";
+    let path = _stage("import", "[\"net\"]", provider, caller);
+    let output = _check(path);
+    assert find(output, "E0402", 0) >= 0;
+    assert find(output, "net", 0) >= 0;
+}
