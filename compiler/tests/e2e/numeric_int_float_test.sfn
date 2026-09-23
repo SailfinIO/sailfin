@@ -171,11 +171,12 @@ test "numeric-int-float: wider int/float widths lower to expected LLVM types" ![
         + "extern fn fchmod(fd: i32, mode: u32) -> i32;\n"
         + "extern fn fast_sin(x: f32) -> f32;\n", "wider");
     assert ir.length > 0;
-    assert contains(ir, "declare i16 @read_u16(i8*");
+    // Narrow externs retain their LLVM width and carry C ABI extension attrs.
+    assert contains(ir, "declare zeroext i16 @read_u16(i8*");
     assert contains(ir, "declare i32 @ioctl(i32");
     // isize → i64 return.
     assert contains(ir, "declare i64 @read_bytes(i32");
-    assert contains(ir, "declare i32 @pad(i16");
+    assert contains(ir, "declare i32 @pad(i16 signext");
     // u32 → i32.
     assert contains(ir, "declare i32 @fchmod(i32");
     // f32 → float.
