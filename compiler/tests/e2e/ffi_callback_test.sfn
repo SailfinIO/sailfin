@@ -1,0 +1,91 @@
+// SFN-1293: libc qsort and a delayed C callback receive named Sailfin functions.
+import { char_at_index, contains, find } from "sfn/strings";
+import { default_scratch_dir, run_external_c_oracle, sfn_bin_path } from "sfn/test";
+import { skip } from "sfn/test/skip";
+
+fn _fixture() -> string {
+    return "compiler/tests/e2e/fixtures/ffi_callback.sfn";
+}
+
+fn _child_env() -> string[] ![io] {
+    let mut result: string[] = [];
+    let names = ["PATH", "HOME", "TMPDIR", "SAILFIN_TEST_SCRATCH", "SAILFIN_LLVM_ROOT"];
+    for name in names {
+        let value = env.get(name);
+        if value.length > 0 { result.push(name + "=" + value); }
+    }
+    return result;
+}
+
+fn _scratch_dir() -> string ![io] {
+    let mut root = env.get("SAILFIN_TEST_SCRATCH");
+    if root.length == 0 { root = default_scratch_dir(); }
+    let dir = root + "/sfn-ffi-callback";
+    fs.createDirectory(dir, true);
+    return dir;
+}
+
+fn _exercise_symbol(ir: string) -> string {
+    let needle = "@sfn_callback_exercise";
+    let start = find(ir, needle, 0);
+    if start < 0 { return ""; }
+    let mut index = start + 1;
+    let mut symbol = "";
+    let alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    loop {
+        if index >= ir.length { break; }
+        let ch = char_at_index(ir, index);
+        if find(alphabet, ch, 0) < 0 { break; }
+        symbol = symbol + ch;
+        index += 1;
+    }
+    return symbol;
+}
+
+test "extern callback: qsort and delayed watch callback round-trip" ![io] {
+    let dir = _scratch_dir();
+    let ll = dir + "/callback.ll";
+    let emit_exit = process.run_capture([sfn_bin_path(), "emit", "-o", ll, "llvm", _fixture()], _child_env());
+    let _emit_out = process.capture_take_stdout();
+    let _emit_err = process.capture_take_stderr();
+    assert emit_exit == 0;
+    let ir = fs.readFile(ll);
+    assert contains(ir, "declare void @qsort(i8*");
+    assert contains(ir, "call void @qsort(i8*");
+    assert contains(ir, "call void @register_watch(i8*");
+    assert ! contains(ir, "call void @qsort(i8* %base, i64 4, i64 1, {i8*, i8*}*");
+    let symbol = _exercise_symbol(ir);
+    assert symbol.length > 0;
+
+    let clang_probe = run_external_c_oracle(["--version"]);
+    let _probe_out = process.capture_take_stdout();
+    let _probe_err = process.capture_take_stderr();
+    if clang_probe != 0 {
+        skip("clang is unavailable for the linked callback round-trip");
+        return;
+    }
+
+    let harness = dir + "/harness.c";
+    fs.writeFile(harness, "#include <stdint.h>\n" + "#include <stdio.h>\n"
+        + "static uint32_t (*saved)(uint8_t *, uint8_t *);\n"
+        + "void register_watch(uint32_t (*cb)(uint8_t *, uint8_t *)) { saved = cb; }\n"
+        + "extern void ENTRY(uint8_t *);\n"
+        + "int main(void) {\n"
+        + "    uint8_t values[4] = {9, 2, 7, 1};\n"
+        + "    uint8_t watch = 13, data = 5;\n"
+        + "    ENTRY(values);\n"
+        + "    if (values[0] != 1 || values[1] != 2 || values[2] != 7 || values[3] != 9) return 1;\n"
+        + "    if (!saved || saved(&watch, &data) != 18) return 2;\n"
+        + "    return 0;\n"
+        + "}\n");
+    let bin = dir + "/callback-roundtrip";
+    let link_exit = run_external_c_oracle(["-Wno-override-module", "-DENTRY="
+        + symbol, harness, ll, "-o", bin]);
+    let _link_out = process.capture_take_stdout();
+    let _link_err = process.capture_take_stderr();
+    assert link_exit == 0;
+    let run_exit = process.run_capture([bin], _child_env());
+    let _run_out = process.capture_take_stdout();
+    let _run_err = process.capture_take_stderr();
+    assert run_exit == 0;
+}

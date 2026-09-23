@@ -539,6 +539,11 @@ fn map_type_annotation(annotation: string) -> string {
     if starts_with(normalized, "*") {
         let mut remainder = trim_text(substring(normalized, 1, normalized.length));
         remainder = strip_pointer_qualifier(remainder);
+        // `* fn` carries one code address. Bare `fn` is a closure pair;
+        // taking its LLVM aggregate pointer would give externs the wrong ABI.
+        if starts_with(remainder, "fn(") || starts_with(remainder, "fn (") {
+            return "i8*";
+        }
         if remainder == "opaque" { return "i8*"; }
         if remainder.length == 0 { return "i8*"; }
         let inner = map_type_annotation(remainder);
@@ -788,6 +793,9 @@ fn map_return_type(context: TypeContext, return_type: string) -> string {
     if starts_with(normalized, "*") {
         let mut remainder = trim_text(substring(normalized, 1, normalized.length));
         remainder = strip_pointer_qualifier(remainder);
+        if starts_with(remainder, "fn(") || starts_with(remainder, "fn (") {
+            return "i8*";
+        }
         let mut _if316: boolean = false;
         if remainder == "opaque" { _if316 = true; }
         if remainder.length == 0 { _if316 = true; }

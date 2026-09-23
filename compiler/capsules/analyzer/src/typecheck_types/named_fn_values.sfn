@@ -2,12 +2,16 @@
 //
 // Compatibility and ABI checks for named functions used as typed values.
 import { parse_fn_type_text } from "sfn/ir";
-import { starts_with } from "sfn/strings";
-import { SourceSpan } from "sfn/syntax";
+import { starts_with, strip_prefix } from "sfn/strings";
+import { Expression, SourceSpan } from "sfn/syntax";
 
 import { effect_subsumes, is_universally_allowed_effect } from "../effect_taxonomy";
 import { Diagnostic } from "../typecheck_types";
-import { is_extern_primitive_type } from "./extern_abi";
+import {
+    is_c_abi_parameter_type,
+    is_c_abi_return_type,
+    is_extern_primitive_type
+} from "./extern_abi";
 import { SymbolEntry, make_fn_value_position_diagnostic } from "./symbol_table_and_raw_exprs";
 import { token_from_name, trim_text, typecheck_int_to_string } from "./text_utils";
 
@@ -84,6 +88,106 @@ fn check_named_fn_value_compatibility(name: string, entry: SymbolEntry, expected
         return [_make_fn_value_abi_diagnostic(name, entry.function_return_type, "return", span)];
     }
     return [];
+}
+
+fn is_extern_callback_type(text: string) -> boolean {
+    let normalized = trim_text(text);
+    if !starts_with(normalized, "*") { return false; }
+    let pointee = trim_text(strip_prefix(normalized, "*"));
+    return starts_with(pointee, "fn(") || starts_with(pointee, "fn (");
+}
+
+// Casts cannot erase the original function signature at a typed C boundary.
+fn extern_callback_cast_source(expression: Expression) -> Expression {
+    if expression.variant == "Cast" {
+        return extern_callback_cast_source(expression.operand);
+    }
+    return expression;
+}
+
+// A C callback slot contains one code address, unlike a Sailfin `fn` value's
+// code/environment pair. Compare source types after removing formatter spaces.
+fn _c_callback_type_equal(left: string, right: string) -> boolean {
+    let mut a: string = "";
+    let mut b: string = "";
+    let mut index: int = 0;
+    loop {
+        if index >= left.length { break; }
+        let ch = left[index];
+        if ch != " " { a = a + ch; }
+        index += 1;
+    }
+    index = 0;
+    loop {
+        if index >= right.length { break; }
+        let ch = right[index];
+        if ch != " " { b = b + ch; }
+        index += 1;
+    }
+    if a.length == 0 { a = "void"; }
+    if b.length == 0 { b = "void"; }
+    return a == b;
+}
+
+fn check_extern_callback_name(name: string, entry: SymbolEntry, expected_text: string, span: SourceSpan?) -> Diagnostic[] {
+    let pointee = trim_text(strip_prefix(trim_text(expected_text), "*"));
+    let expected = parse_fn_type_text(pointee);
+    if !expected.ok {
+        return [_make_extern_callback_diagnostic(name, "invalid callback type", span)];
+    }
+    if entry.is_generic || entry.function_is_async || name == "main" || !entry.is_c_abi {
+        return [_make_extern_callback_diagnostic(name, "its signature is not a concrete C-ABI function", span)];
+    }
+    if entry.function_parameter_types.length != expected.param_types.length {
+        return [_make_extern_callback_diagnostic(name, "parameter count does not match `"
+            + expected_text
+            + "`", span)];
+    }
+    let mut index: int = 0;
+    loop {
+        if index >= expected.param_types.length { break; }
+        let actual = entry.function_parameter_types[index];
+        if !is_c_abi_parameter_type(actual) || !_c_callback_type_equal(actual, expected.param_types[index]) {
+            return [_make_extern_callback_diagnostic(name, "parameter "
+                + typecheck_int_to_string(index
+                + 1)
+                + " does not match `"
+                + expected.param_types[index]
+                + "`", span)];
+        }
+        index += 1;
+    }
+    if !is_c_abi_return_type(entry.function_return_type) || !_c_callback_type_equal(entry.function_return_type, expected.return_type) {
+        return [_make_extern_callback_diagnostic(name, "return type does not match `"
+            + expected.return_type
+            + "`", span)];
+    }
+    return [];
+}
+
+fn check_extern_callback_value(name: string, entry: SymbolEntry, expected_text: string, span: SourceSpan?) -> Diagnostic[] {
+    if is_extern_callback_type(entry.declared_type) {
+        if _c_callback_type_equal(entry.declared_type, expected_text) {
+            return [];
+        }
+    }
+    return [_make_extern_callback_diagnostic(name, "only a matching C function pointer or named function may fill this slot", span)];
+}
+
+fn make_extern_callback_argument_diagnostic(reason: string, span: SourceSpan?) -> Diagnostic {
+    return _make_extern_callback_diagnostic("callback", reason, span);
+}
+
+fn _make_extern_callback_diagnostic(name: string, reason: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0850",
+        severity: "error",
+        message: "function `" + name + "` cannot fill a C callback parameter: "
+            + reason,
+        file_path: "",
+        primary: token_from_name(name, span),
+        suggestion: null
+    };
 }
 
 fn _fn_value_types_equal(actual_text: string, expected_text: string) -> boolean {

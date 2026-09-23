@@ -1,0 +1,17 @@
+// SFN-1293: C calls a named Sailfin comparator and a stored watch callback.
+extern fn qsort(base: *u8, n: usize, w: usize, cmp: *fn (*u8, *u8) -> i32) -> void;
+
+extern fn register_watch(cb: *fn (*u8, *u8) -> u32) -> void;
+
+fn sfn_callback_compare(a: *u8, b: *u8) -> i32 {
+    return load_byte(a as i64) as i32 - load_byte(b as i64) as i32;
+}
+
+fn sfn_callback_watch(watch: *u8, data: *u8) -> u32 {
+    return (load_byte(watch as i64) + load_byte(data as i64)) as u32;
+}
+
+fn sfn_callback_exercise(base: *u8) -> void {
+    qsort(base, 4 as usize, 1 as usize, sfn_callback_compare);
+    register_watch(sfn_callback_watch);
+}
