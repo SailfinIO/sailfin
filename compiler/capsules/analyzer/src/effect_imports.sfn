@@ -30,7 +30,7 @@
 // rewrites). That keeps cross-module name collisions from emitting
 // spurious `E0402` against a same-named in-module function.
 import { IntrinsicEffectTable, empty_intrinsic_effects } from "sfn/ir";
-import { ends_with, starts_with, substring } from "sfn/strings";
+import { starts_with, substring } from "sfn/strings";
 import { Program } from "sfn/syntax";
 
 // Driver-resolved source import identity. The source spelling is kept so the
@@ -38,18 +38,34 @@ import { Program } from "sfn/syntax";
 struct ImportProviderBinding {
     source: string;
     provider_module: string;
+    symbol_name: string;
+    provider_symbol_name: string;
 }
 
 fn provider_for_import_source(bindings: ImportProviderBinding[], source: string) -> string {
     let mut i: int = 0;
     loop {
         if i >= bindings.length { break; }
-        if bindings[i].source == source {
+        if bindings[i].source == source && bindings[i].symbol_name.length == 0 {
             return bindings[i].provider_module;
         }
         i += 1;
     }
     return "";
+}
+
+fn provider_binding_for_imported_symbol(bindings: ImportProviderBinding[], source: string, name: string) -> ImportProviderBinding? {
+    for binding in bindings {
+        if binding.source == source && binding.symbol_name == name {
+            return binding;
+        }
+    }
+    for binding in bindings {
+        if binding.source == source && binding.symbol_name.length == 0 {
+            return binding;
+        }
+    }
+    return null;
 }
 
 // One callable signature exposed to a downstream caller. `name` is
@@ -312,24 +328,7 @@ fn _lookup_explicit_imported_function(table: ImportSymbolTable, name: string, so
         }
         i += 1;
     }
-    // A capsule root can re-export a function from one of its member
-    // modules. Its resolved provider is `.../mod`, while the callable row
-    // retains the defining module's slug. Prefer that capsule's subtree
-    // before considering an unrelated same-named function in the closure.
-    let mut provider_root = provider_module;
-    if ends_with(provider_root, "/mod") {
-        provider_root = substring(provider_root, 0, provider_root.length - 4);
-    }
-    if provider_root.length > 0 {
-        i = 0;
-        loop {
-            if i >= table.functions.length { break; }
-            let entry = table.functions[i];
-            if entry.name == name && entry.origin != "implicit" && starts_with(entry.provider_module, provider_root
-                + "/") { return entry; }
-            i += 1;
-        }
-    }
+    if provider_module.length > 0 { return null; }
     i = 0;
     loop {
         if i >= table.functions.length { break; }
@@ -376,10 +375,20 @@ fn localize_import_symbols_for_program(program: Program, table: ImportSymbolTabl
             loop {
                 if s >= statement.import_specifiers.length { break; }
                 let spec = statement.import_specifiers[s];
-                let mut entry_opt = _lookup_explicit_imported_function(table, spec.name, statement.source, provider_for_import_source(providers, statement.source));
+                let binding = provider_binding_for_imported_symbol(providers, statement.source, spec.name);
+                let mut provider = "";
+                let mut provider_name = spec.name;
+                if binding != null {
+                    let selected: ImportProviderBinding? = binding;
+                    provider = selected.provider_module;
+                    if selected.provider_symbol_name.length > 0 {
+                        provider_name = selected.provider_symbol_name;
+                    }
+                }
+                let mut entry_opt = _lookup_explicit_imported_function(table, provider_name, statement.source, provider);
                 // A provider may be both implicit and explicitly depended on;
                 // resolver deduplication leaves only its implicit-origin row.
-                if entry_opt == null {
+                if entry_opt == null && provider.length == 0 {
                     entry_opt = lookup_imported_function(table, spec.name);
                 }
                 if entry_opt != null {
@@ -426,5 +435,6 @@ export {
     localize_import_symbols_for_program,
     lookup_imported_function,
     provider_for_import_source,
+    provider_binding_for_imported_symbol,
     with_intrinsic_effects
 };

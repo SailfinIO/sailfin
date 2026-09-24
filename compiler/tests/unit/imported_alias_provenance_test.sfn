@@ -1,0 +1,26 @@
+// SFN-1296: a re-exported alias keeps the qualifier of its defining module.
+import { ImportProviderBinding } from "sfn/analyzer/effect_imports";
+import { localize_imported_type_aliases } from "sfn/analyzer/typecheck/symbols";
+import { ImportedTypeAlias } from "sfn/analyzer/typecheck_imports";
+import { parse_program } from "sfn/syntax";
+
+test "re-exported pointer alias selects its provider and original name" {
+    let mutable_alias = parse_program("type Ptr = *i32;").statements[0];
+    let const_alias = parse_program("type Ptr = *const i32;").statements[0];
+    let aliases = [ImportedTypeAlias {
+        declaration: mutable_alias, provider_module: "sfn/example/a"
+    }, ImportedTypeAlias {
+        declaration: const_alias, provider_module: "sfn/example/z"
+    }];
+    let program = parse_program("import { ReadOnly } from \"sfn/example\";");
+    let providers = [ImportProviderBinding {
+        source: "sfn/example", provider_module: "sfn/example/mod", symbol_name: "", provider_symbol_name: ""
+    }, ImportProviderBinding {
+        source: "sfn/example", provider_module: "sfn/example/z", symbol_name: "ReadOnly", provider_symbol_name: "Ptr"
+    }];
+    let localized = localize_imported_type_aliases(program, [], aliases, providers);
+    assert localized.length == 1;
+    assert localized[0].variant == "TypeAliasDeclaration";
+    assert localized[0].name == "ReadOnly";
+    assert localized[0].aliased_type.text == "*const i32";
+}

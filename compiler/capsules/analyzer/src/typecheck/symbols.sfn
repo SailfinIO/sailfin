@@ -19,7 +19,7 @@ import {
     ImportProviderBinding,
     ImportSymbolTable,
     ImportedFunctionSignature,
-    provider_for_import_source
+    provider_binding_for_imported_symbol
 } from "../effect_imports";
 import { ImportedTypeAlias } from "../typecheck_imports";
 import { Diagnostic } from "../typecheck_types";
@@ -329,22 +329,22 @@ fn localize_imported_type_aliases(program: Program, declarations: Statement[], a
                 let spec = statement.import_specifiers[j];
                 let mut local_name = spec.name;
                 if spec.alias != null { local_name = spec.alias; }
-                let provider = provider_for_import_source(providers, statement.source);
-                let mut direct: boolean = false;
+                let binding = provider_binding_for_imported_symbol(providers, statement.source, spec.name);
+                let mut provider = "";
+                let mut provider_name = spec.name;
+                if binding != null {
+                    let selected: ImportProviderBinding? = binding;
+                    provider = selected.provider_module;
+                    if selected.provider_symbol_name.length > 0 {
+                        provider_name = selected.provider_symbol_name;
+                    }
+                }
                 let mut k: int = 0;
                 loop {
                     if k >= aliases.length { break; }
-                    if aliases[k].declaration.name == spec.name && provider.length > 0
-                        && aliases[k].provider_module == provider {
-                        direct = true;
-                    }
-                    k += 1;
-                }
-                k = 0;
-                loop {
-                    if k >= aliases.length { break; }
                     let declaration = aliases[k].declaration;
-                    if declaration.name == spec.name && (!direct || aliases[k].provider_module == provider) {
+                    if declaration.name == provider_name && (provider.length == 0
+                        || aliases[k].provider_module == provider) {
                         if declaration.variant == "TypeAliasDeclaration" {
                             localized.push(Statement.TypeAliasDeclaration {
                                 name: local_name, name_span: declaration.name_span, type_parameters: declaration.type_parameters, aliased_type: TypeAnnotation {

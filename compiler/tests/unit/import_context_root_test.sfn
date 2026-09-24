@@ -4,8 +4,13 @@
 // and passes the resulting loaded data into LLVM. No process-global reader
 // root remains in the lowering subtree.
 import { NativeImport } from "sfn/ir";
+import { ImportSpecifier, Program, Statement } from "sfn/syntax";
 
-import { import_context_root, load_imported_module_context } from "../../src/import_context";
+import {
+    import_context_root,
+    import_provider_bindings_for_program,
+    load_imported_module_context
+} from "../../src/import_context";
 
 test "import-context reader: empty work dir resolves the canonical shared default" {
     assert import_context_root("") == "build/compiler/import-context";
@@ -53,4 +58,24 @@ test "import-context reader: directory import follows a physical mod alias" ![io
     assert context.module_aliases.length == 1;
     assert context.module_aliases[0].import_slug == "compiler/src/capsule_resolver";
     assert context.module_aliases[0].provider_slug == "capsule_resolver/mod";
+}
+
+test "import-context reader: re-export binding names the selected member" ![io] {
+    let root = fs.mkdtemp("sfn-import-reexport-");
+    fs.createDirectory(root + "/sfn/example", true);
+    fs.writeFile(root + "/sfn/example/mod.sfn-asm", ".module sfn/example/mod\n.export \"./z\" { h as g }\n");
+    fs.writeFile(root + "/sfn/example/a.sfn-asm", ".module sfn/example/a\n.fn f(x: int) -> int\n.endfn\n");
+    fs.writeFile(root + "/sfn/example/z.sfn-asm", ".module sfn/example/z\n.fn f(x: int, y: int) -> int\n.endfn\n.export \"\" { f as h }\n");
+    let program = Program {
+        statements: [Statement.ImportDeclaration {
+            import_specifiers: [ImportSpecifier { name: "g", alias: null }], source: "sfn/example"
+        }]
+    };
+    let bindings = import_provider_bindings_for_program(program, "consumer/mod", root);
+    assert bindings.length == 2;
+    assert bindings[0].provider_module == "sfn/example/mod";
+    assert bindings[0].symbol_name == "";
+    assert bindings[1].provider_module == "sfn/example/z";
+    assert bindings[1].symbol_name == "g";
+    assert bindings[1].provider_symbol_name == "f";
 }

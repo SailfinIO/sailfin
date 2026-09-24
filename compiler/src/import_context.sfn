@@ -62,6 +62,46 @@ fn _resolve_artifact_slug(root: string, slug: string) -> string ![io] {
     return slug;
 }
 
+struct ExportedSymbolProvider {
+    provider_module: string;
+    provider_symbol_name: string;
+}
+
+// A capsule entry can re-export a symbol from another module. Resolve both
+// its defining module and original name through explicit export records.
+fn _exported_symbol_provider(root: string, provider_slug: string, name: string, depth: int) -> ExportedSymbolProvider ![io] {
+    let current = ExportedSymbolProvider {
+        provider_module: provider_slug,
+        provider_symbol_name: name
+    };
+    if depth >= 8 { return current; }
+    let path = _native_text_path(root, provider_slug);
+    if !fs.exists(path) { return current; }
+    let exports = parse_native_imports_for_import(fs.readFile(path));
+    for entry in exports {
+        if entry.kind != "export" { continue; }
+        for spec in entry.specifiers {
+            let mut exported_name = spec.name;
+            if spec.alias != null {
+                let alias: string? = spec.alias;
+                if alias.length > 0 { exported_name = alias; }
+            }
+            if exported_name != name { continue; }
+            if entry.module.length == 0 {
+                return ExportedSymbolProvider {
+                    provider_module: provider_slug,
+                    provider_symbol_name: spec.name
+                };
+            }
+            let target_slug = resolve_import_module_slug_for_module(entry.module, provider_slug);
+            let target_provider = _resolve_artifact_slug(root, target_slug);
+            return _exported_symbol_provider(root, target_provider, spec.name, depth
+                + 1);
+        }
+    }
+    return current;
+}
+
 fn import_provider_bindings_for_program(program: Program, current_module_slug: string, root: string) -> ImportProviderBinding[] ![io] {
     let mut bindings: ImportProviderBinding[] = [];
     let mut i: int = 0;
@@ -70,9 +110,16 @@ fn import_provider_bindings_for_program(program: Program, current_module_slug: s
         let statement = program.statements[i];
         if statement.variant == "ImportDeclaration" {
             let slug = resolve_import_module_slug_for_module(statement.source, current_module_slug);
+            let provider = _resolve_artifact_slug(root, slug);
             bindings.push(ImportProviderBinding {
-                source: statement.source, provider_module: _resolve_artifact_slug(root, slug)
+                source: statement.source, provider_module: provider, symbol_name: "", provider_symbol_name: ""
             });
+            for spec in statement.import_specifiers {
+                let resolved = _exported_symbol_provider(root, provider, spec.name, 0);
+                bindings.push(ImportProviderBinding {
+                    source: statement.source, provider_module: resolved.provider_module, symbol_name: spec.name, provider_symbol_name: resolved.provider_symbol_name
+                });
+            }
         }
         i += 1;
     }
