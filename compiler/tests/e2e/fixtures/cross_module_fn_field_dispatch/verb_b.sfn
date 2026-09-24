@@ -1,6 +1,6 @@
 // Same shape, but the field's signature takes a named struct parameter, so
 // this also covers the E0840 pointer-width relaxation (SFN-1161).
-import { Ctx, StructVerb } from "./registry";
+import { Ctx, Ctx as ContextAlias, StructVerb } from "./registry";
 
 fn b_run(c: Ctx) -> int ![io] {
     print("b-ok");

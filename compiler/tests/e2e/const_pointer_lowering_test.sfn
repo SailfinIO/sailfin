@@ -13,10 +13,10 @@
 // Native (no-bash) per `.claude/rules/no-bash-e2e.md`. Pins three contracts
 // on the shared fixture:
 //   1. IR types: `rd_const`/`rd_mut` take `i32*` parameters, not `i8*`.
-//   2. IR store: the `*const W` field assignment in `wr_const_field` emits a
+//   2. IR store: the `*mut W` field assignment in `wr_mut_field` emits a
 //      real `store`, not a silently dropped one.
 //   3. Runtime round-trip (`run`): every read path — plain, `*const`,
-//      `*mut`, cast-to-`*const`, cast-to-`*mut`, and a `*const` struct-field
+//      `*mut`, cast-to-`*const`, cast-to-`*mut`, and a writable struct-field
 //      write — observes the same 300/7 values.
 //
 // NOTE on matchers: the `sfn/test` `expect_*` matchers are `![pure]` and so
@@ -117,12 +117,12 @@ test "const-ptr-lowering: qualified pointer struct fields keep their pointee typ
     assert contains(ir, "%W = type { i32, %W*, i32* }");
 }
 
-// 2 — `wr_const_field` (`w.v = 7` through a `*const W` parameter) emits a
+// 2 — `wr_mut_field` (`w.v = 7` through a `*mut W` parameter) emits a
 // real GEP-and-store, not a silently dropped body. The stored value is a
 // register (`store i32 %t0, i32* %t1`) because the literal is trunc'd from
 // i64 first, so this pins the instruction pair rather than the immediate.
-test "const-ptr-lowering: *const W field assignment emits a store, not a dropped body" ![io] {
-    let ir = _emit_llvm("const-ptr-ir-wr-const-field");
+test "const-ptr-lowering: *mut W field assignment emits a store, not a dropped body" ![io] {
+    let ir = _emit_llvm("const-ptr-ir-wr-mut-field");
     assert ir.length > 0;
     let lines = split(ir, "\n");
 
@@ -159,7 +159,7 @@ test "const-ptr-lowering: *const W field assignment emits a store, not a dropped
 // 3 — Runtime round-trip: every read path observes the write. `plain`,
 // `const`, `mut` are the typed-parameter paths; `cast_const`/`cast_mut` are
 // the `as *const T`/`as *mut T` cast targets (pre-fix: E0818); `field` is
-// the `*const W` struct-field write.
+// the writable `*mut W` struct-field write.
 test "const-ptr-lowering: every read path observes the write at runtime" ![io] {
     let exit = process.run_capture([sfn_bin_path(), "run", _fixture()], _child_env("const-ptr-run"));
     let out = process.capture_take_stdout();

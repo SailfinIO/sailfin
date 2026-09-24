@@ -24,3 +24,30 @@ test "re-exported pointer alias selects its provider and original name" {
     assert localized[0].name == "ReadOnly";
     assert localized[0].aliased_type.text == "*const i32";
 }
+
+test "same-provider struct name survives an additional alias" {
+    let foreign_ctx = parse_program("struct Ctx { id: int; }").statements[0];
+    let ctx = parse_program("struct Ctx { id: int; }").statements[0];
+    let struct_verb = parse_program("struct StructVerb { run: fn (Ctx) -> int ![io]; }").statements[0];
+    let aliases = [ImportedTypeAlias {
+        declaration: foreign_ctx, provider_module: "sfn/other"
+    }, ImportedTypeAlias { declaration: ctx, provider_module: "sfn/registry" }, ImportedTypeAlias {
+        declaration: struct_verb, provider_module: "sfn/registry"
+    }];
+    let program = parse_program("import { Ctx as Alias, Ctx, StructVerb } from \"sfn/registry\";");
+    let providers = [ImportProviderBinding {
+        source: "sfn/registry", provider_module: "sfn/registry", symbol_name: "", provider_symbol_name: ""
+    }, ImportProviderBinding {
+        source: "sfn/registry", provider_module: "sfn/registry", symbol_name: "Ctx", provider_symbol_name: "Ctx"
+    }, ImportProviderBinding {
+        source: "sfn/registry", provider_module: "sfn/registry", symbol_name: "StructVerb", provider_symbol_name: "StructVerb"
+    }];
+    let localized = localize_imported_type_aliases(program, [], aliases, providers);
+    assert localized[2].name == "StructVerb";
+    assert localized[2].fields[0].type_annotation.text == "fn (Ctx) -> int ![io]";
+    assert localized[5].fields[0].type_annotation.text == "fn (__sfn_import_1_Ctx) -> int ![io]";
+
+    let renamed_only = parse_program("import { Ctx as Alias, StructVerb } from \"sfn/registry\";");
+    let renamed_localized = localize_imported_type_aliases(renamed_only, [], aliases, providers);
+    assert renamed_localized[1].fields[0].type_annotation.text == "fn (__sfn_import_1_Ctx) -> int ![io]";
+}

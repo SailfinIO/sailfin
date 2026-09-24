@@ -196,6 +196,39 @@ fn _imported_struct_substitution(aliases: ImportedTypeAlias[], provider: string)
     return TypeSubstitution { olds: olds, news: news };
 }
 
+// A visible imported struct may use a same-named struct in a field's
+// function signature when that exact provider's struct is also imported
+// without renaming. Keep private identities for all other references: the
+// function-value ABI does not yet equate renamed struct parameters.
+fn _visible_imported_struct_substitution(program: Program, aliases: ImportedTypeAlias[], providers: ImportProviderBinding[], provider: string) -> TypeSubstitution {
+    let base = _imported_struct_substitution(aliases, provider);
+    let mut news: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= base.olds.length { break; }
+        let mut visible_name = base.news[i];
+        for statement in program.statements {
+            if statement.variant != "ImportDeclaration" { continue; }
+            for spec in statement.import_specifiers {
+                if spec.name != base.olds[i] || spec.alias != null { continue; }
+                let binding = provider_binding_for_imported_symbol(providers, statement.source, spec.name);
+                if binding == null { continue; }
+                let selected: ImportProviderBinding? = binding;
+                let mut provider_name = spec.name;
+                if selected.provider_symbol_name.length > 0 {
+                    provider_name = selected.provider_symbol_name;
+                }
+                if selected.provider_module == provider && provider_name == base.olds[i] {
+                    visible_name = base.olds[i];
+                }
+            }
+        }
+        news.push(visible_name);
+        i += 1;
+    }
+    return TypeSubstitution { olds: base.olds, news: news };
+}
+
 fn _substitution_outside_type_parameters(substitution: TypeSubstitution, parameters: TypeParameter[]) -> TypeSubstitution {
     let mut olds: string[] = [];
     let mut news: string[] = [];
@@ -345,14 +378,15 @@ fn localize_imported_type_aliases(program: Program, declarations: Statement[], a
                     let declaration = aliases[k].declaration;
                     if declaration.name == provider_name && (provider.length == 0
                         || aliases[k].provider_module == provider) {
+                        let substitution = _visible_imported_struct_substitution(program, aliases, providers, aliases[k].provider_module);
                         if declaration.variant == "TypeAliasDeclaration" {
                             localized.push(Statement.TypeAliasDeclaration {
                                 name: local_name, name_span: declaration.name_span, type_parameters: declaration.type_parameters, aliased_type: TypeAnnotation {
-                                    text: apply_type_substitution(declaration.aliased_type.text, _substitution_outside_type_parameters(_imported_struct_substitution(aliases, aliases[k].provider_module), declaration.type_parameters))
+                                    text: apply_type_substitution(declaration.aliased_type.text, _substitution_outside_type_parameters(substitution, declaration.type_parameters))
                                 }, decorators: declaration.decorators
                             });
                         } else if declaration.variant == "StructDeclaration" {
-                            localized.push(_localized_imported_struct(declaration, local_name, _imported_struct_substitution(aliases, aliases[k].provider_module)));
+                            localized.push(_localized_imported_struct(declaration, local_name, substitution));
                         }
                     }
                     k += 1;
