@@ -2,31 +2,17 @@
 // the pinned seed can emit the scope walker within its memory budget.
 import { Statement } from "sfn/syntax";
 
-import {
-    check_bare_fn_type_annotation,
-    check_malformed_array_annotation,
-    check_unknown_type_annotation,
-    classify_declared_primitive,
-    declared_array_marker
-} from "../typecheck_types/annotation_shape_checks";
+import { classify_declared_primitive, declared_array_marker } from "../typecheck_types/annotation_shape_checks";
 import {
     channel_element_kind,
-    check_uninferable_generic_constructor,
     make_task_array_element_marker,
     task_array_element_kind
 } from "../typecheck_types/expr_type_rules";
 import { ScopeResult, register_local_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
-import { check_intersection_value_type_annotation, check_object_literal_target } from "../typecheck_types/value_and_object_checks";
-import { check_array_element_type } from "./array_element_rules";
-import { void_value_diagnostics } from "./call_signature";
-import { TypeckCtx, ctx_with_expected_type } from "./context";
-import {
-    pointer_coercion_diagnostics,
-    pointer_initializer_type,
-    walk_expression
-} from "./expression_walk";
-import { check_expected_primitive_type } from "./primitive_rules";
+import { TypeckCtx } from "./context";
+import { pointer_initializer_type } from "./expression_walk";
 import { _declared_struct_annotation, _find_symbol_with_kind } from "./symbols";
+import { variable_declaration_diagnostics } from "./variable_declaration_diagnostics";
 
 fn check_variable_declaration(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
     let bindings = ctx.bindings;
@@ -91,30 +77,9 @@ fn check_variable_declaration(statement: Statement, ctx: TypeckCtx) -> ScopeResu
         declared_type = pointer_initializer_type(statement.initializer, ctx);
     }
     let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim, declared_struct, declared_type);
-    let walk_diags = walk_expression(statement.initializer, ctx_with_expected_type(ctx, statement.type_annotation));
-    let const_diags = pointer_coercion_diagnostics(statement.initializer, declared_type, ctx, statement.span);
-    let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
-    let array_diags = check_malformed_array_annotation(statement.type_annotation, statement.name, statement.span);
-    let unknown_diags = check_unknown_type_annotation(statement.type_annotation, statement.name, statement.span, ctx.known_types, ctx.type_params);
-    let intersection_diags = check_intersection_value_type_annotation(statement.type_annotation, statement.name, statement.span);
-    let object_literal_diags = check_object_literal_target(statement.initializer, statement.type_annotation, statement.name, statement.span, top_level);
-    let uninferable_ctor_diags = check_uninferable_generic_constructor(statement, ctx.generic_struct_names);
-    let mut primitive_bindings = bindings;
-    if is_top_level { primitive_bindings = top_level; }
-    let primitive_diags = check_expected_primitive_type(statement.initializer, statement.type_annotation, primitive_bindings, "initializer for `"
-        + statement.name
-        + "`", statement.name, statement.initializer_span);
-    let array_element_diags = check_array_element_type(statement.initializer, statement.type_annotation, ctx, "initializer for `"
-        + statement.name
-        + "`", statement.name, statement.initializer_span);
-    // SFN-812: lowering already fails closed on a void initializer
-    // (E1002), but only after the whole module has lowered. Reject it at
-    // `sfn check` so the error names the callee rather than the slot type.
-    let void_diags = void_value_diagnostics(statement.initializer, ctx, "the initializer for `"
-        + statement.name
-        + "`");
+    let diagnostics = variable_declaration_diagnostics(statement, ctx, declared_type);
     return ScopeResult {
         bindings: registration.bindings,
-        diagnostics: registration.diagnostics.concat(walk_diags).concat(const_diags).concat(annotation_diags).concat(array_diags).concat(unknown_diags).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags).concat(primitive_diags).concat(array_element_diags).concat(void_diags)
+        diagnostics: registration.diagnostics.concat(diagnostics)
     };
 }
