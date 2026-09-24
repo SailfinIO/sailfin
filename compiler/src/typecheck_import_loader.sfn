@@ -128,6 +128,13 @@ struct ImplicitProviderSurfaceResult {
     diagnostics: string[];
 }
 
+struct ArtifactGenericHeader {
+    kind: string;
+    owner: string;
+    name: string;
+    declaration: string;
+}
+
 // Pure: parse a `.sfn-asm` text buffer and return its interface
 // declarations, the cross-module function-effect table contributed
 // by its top-level `NativeFunction` decls, and any diagnostics the
@@ -135,8 +142,10 @@ struct ImplicitProviderSurfaceResult {
 fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
     let parsed = parse_native_artifact_for_import_context(text);
     let interfaces = interfaces_from_native(parsed.interfaces);
-    let raw_aliases = _aliases_from_native_text(text);
-    let structs = _expand_artifact_structs(structs_from_native(parsed.structs), raw_aliases, text);
+    let lines = split_lines(text);
+    let headers = _artifact_generic_headers(lines);
+    let raw_aliases = _aliases_from_native_text(lines);
+    let structs = _expand_artifact_structs(structs_from_native(parsed.structs), raw_aliases, headers);
     let aliases = _expand_artifact_aliases(raw_aliases);
     let mut function_effects = empty_import_symbols();
     let mut i: int = 0;
@@ -165,7 +174,7 @@ fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
             // same `.sfn-asm` metadata channel — `NativeFunction.decorators`
             // already round-trips the `@decorator` marker — so no new artifact
             // plumbing is needed.
-            let type_parameters = _artifact_callable_type_parameters(function.name, "", text);
+            let type_parameters = _artifact_callable_type_parameters(function.name, "", headers);
             let visible_aliases = _aliases_outside_type_parameters(raw_aliases, type_parameters);
             function_effects = append_import_function_signature_from_module(function_effects, function.name, function.effects, _native_function_is_tier1_decorator(function), "", _expand_artifact_alias(function.return_type, visible_aliases), function.parameters.length, _native_function_required_arity(function), _expanded_native_parameter_types(function, visible_aliases), _type_parameter_names(type_parameters));
         }
@@ -320,38 +329,51 @@ fn _type_parameter_names(parameters: TypeParameter[]) -> string[] {
     return names;
 }
 
-fn _artifact_struct_type_parameters(name: string, text: string) -> TypeParameter[] {
-    for line in split_lines(text) {
+// SFN-1296: index generic declaration headers once per artifact. Rescanning and
+// splitting the full native text for every function and method retains
+// quadratic scratch allocations in the arena during compiler cross-builds.
+fn _artifact_generic_headers(lines: string[]) -> ArtifactGenericHeader[] {
+    let mut headers: ArtifactGenericHeader[] = [];
+    let mut current_struct = "";
+    for line in lines {
         let header = trim_text(line);
         if starts_with(header, ".struct ") {
             let declaration = trim_text(substring(header, 8, header.length));
-            if bound_base_name(declaration) == name {
-                return _artifact_type_parameters(declaration);
-            }
+            current_struct = bound_base_name(declaration);
+            headers.push(ArtifactGenericHeader {
+                kind: "struct", owner: "", name: current_struct, declaration: declaration
+            });
+        } else if header == ".endstruct" { current_struct = ""; } else if current_struct.length == 0
+            && starts_with(header, ".fn ") {
+            let declaration = trim_text(substring(header, 4, header.length));
+            headers.push(ArtifactGenericHeader {
+                kind: "function", owner: "", name: bound_base_name(declaration), declaration: declaration
+            });
+        } else if current_struct.length > 0 && starts_with(header, ".method ") {
+            let declaration = trim_text(substring(header, 8, header.length));
+            headers.push(ArtifactGenericHeader {
+                kind: "method", owner: current_struct, name: bound_base_name(declaration), declaration: declaration
+            });
+        }
+    }
+    return headers;
+}
+
+fn _artifact_struct_type_parameters(name: string, headers: ArtifactGenericHeader[]) -> TypeParameter[] {
+    for header in headers {
+        if header.kind == "struct" && header.name == name {
+            return _artifact_type_parameters(header.declaration);
         }
     }
     return [];
 }
 
-fn _artifact_callable_type_parameters(name: string, owner: string, text: string) -> TypeParameter[] {
-    let mut current_struct = "";
-    for line in split_lines(text) {
-        let header = trim_text(line);
-        if starts_with(header, ".struct ") {
-            current_struct = bound_base_name(trim_text(substring(header, 8, header.length)));
-        } else if header == ".endstruct" { current_struct = ""; } else if (owner.length == 0
-            && current_struct.length == 0
-            && starts_with(header, ".fn "))
-            || (owner.length > 0
-            && current_struct == owner
-            && starts_with(header, ".method ")) {
-            let mut declaration = trim_text(substring(header, 4, header.length));
-            if owner.length > 0 {
-                declaration = trim_text(substring(header, 8, header.length));
-            }
-            if bound_base_name(declaration) == name {
-                return _artifact_type_parameters(declaration);
-            }
+fn _artifact_callable_type_parameters(name: string, owner: string, headers: ArtifactGenericHeader[]) -> TypeParameter[] {
+    let mut kind = "function";
+    if owner.length > 0 { kind = "method"; }
+    for header in headers {
+        if header.kind == kind && header.owner == owner && header.name == name {
+            return _artifact_type_parameters(header.declaration);
         }
     }
     return [];
@@ -377,11 +399,11 @@ fn _expanded_annotation(annotation: TypeAnnotation?, aliases: Statement[]) -> Ty
     };
 }
 
-fn _expand_artifact_methods(methods: MethodDeclaration[], aliases: Statement[], owner: string, text: string) -> MethodDeclaration[] {
+fn _expand_artifact_methods(methods: MethodDeclaration[], aliases: Statement[], owner: string, headers: ArtifactGenericHeader[]) -> MethodDeclaration[] {
     let mut expanded: MethodDeclaration[] = [];
     for method in methods {
         let signature = method.signature;
-        let type_parameters = _artifact_callable_type_parameters(signature.name, owner, text);
+        let type_parameters = _artifact_callable_type_parameters(signature.name, owner, headers);
         let visible_aliases = _aliases_outside_type_parameters(aliases, type_parameters);
         let mut parameters: Parameter[] = [];
         for parameter in signature.parameters {
@@ -398,10 +420,10 @@ fn _expand_artifact_methods(methods: MethodDeclaration[], aliases: Statement[], 
     return expanded;
 }
 
-fn _expand_artifact_structs(structs: Statement[], aliases: Statement[], text: string) -> Statement[] {
+fn _expand_artifact_structs(structs: Statement[], aliases: Statement[], headers: ArtifactGenericHeader[]) -> Statement[] {
     let mut expanded: Statement[] = [];
     for declaration in structs {
-        let type_parameters = _artifact_struct_type_parameters(declaration.name, text);
+        let type_parameters = _artifact_struct_type_parameters(declaration.name, headers);
         let visible_aliases = _aliases_outside_type_parameters(aliases, type_parameters);
         let mut fields: FieldDeclaration[] = [];
         for field in declaration.fields {
@@ -412,7 +434,7 @@ fn _expand_artifact_structs(structs: Statement[], aliases: Statement[], text: st
             });
         }
         expanded.push(Statement.StructDeclaration {
-            name: bound_base_name(declaration.name), name_span: declaration.name_span, type_parameters: type_parameters, implements_types: declaration.implements_types, fields: fields, methods: _expand_artifact_methods(declaration.methods, visible_aliases, declaration.name, text), decorators: declaration.decorators
+            name: bound_base_name(declaration.name), name_span: declaration.name_span, type_parameters: type_parameters, implements_types: declaration.implements_types, fields: fields, methods: _expand_artifact_methods(declaration.methods, visible_aliases, declaration.name, headers), decorators: declaration.decorators
         });
     }
     return expanded;
@@ -432,8 +454,7 @@ fn _expanded_native_parameter_types(function: NativeFunction, aliases: Statement
 // Native artifacts emit aliases as `.type Name = T` lines, but the import
 // context parser does not retain them. Reparse only those declarations so
 // the type checker can enforce pointer qualifiers across module boundaries.
-fn _aliases_from_native_text(text: string) -> Statement[] {
-    let lines = split_lines(text);
+fn _aliases_from_native_text(lines: string[]) -> Statement[] {
     let mut aliases: Statement[] = [];
     let mut i: int = 0;
     loop {
