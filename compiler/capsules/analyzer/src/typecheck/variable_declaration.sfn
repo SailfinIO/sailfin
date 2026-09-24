@@ -1,0 +1,120 @@
+// Variable declarations are kept outside the large statement dispatcher so
+// the pinned seed can emit the scope walker within its memory budget.
+import { Statement } from "sfn/syntax";
+
+import {
+    check_bare_fn_type_annotation,
+    check_malformed_array_annotation,
+    check_unknown_type_annotation,
+    classify_declared_primitive,
+    declared_array_marker
+} from "../typecheck_types/annotation_shape_checks";
+import {
+    channel_element_kind,
+    check_uninferable_generic_constructor,
+    make_task_array_element_marker,
+    task_array_element_kind
+} from "../typecheck_types/expr_type_rules";
+import { ScopeResult, register_local_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
+import { check_intersection_value_type_annotation, check_object_literal_target } from "../typecheck_types/value_and_object_checks";
+import { check_array_element_type } from "./array_element_rules";
+import { void_value_diagnostics } from "./call_signature";
+import { TypeckCtx, ctx_with_expected_type } from "./context";
+import {
+    pointer_coercion_diagnostics,
+    pointer_initializer_type,
+    walk_expression
+} from "./expression_walk";
+import { check_expected_primitive_type } from "./primitive_rules";
+import { _declared_struct_annotation, _find_symbol_with_kind } from "./symbols";
+
+fn check_variable_declaration(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
+    let bindings = ctx.bindings;
+    let scope_start = ctx.scope_start;
+    let top_level = ctx.top_level;
+    let is_top_level = ctx.is_top_level;
+    // A `let x: Channel<T> = ...` binding records its element kind so
+    // `check_channel_send` can enforce element-type on a later `x.send(v)`
+    // (#1942). Every other binding records "". This is the primary
+    // (plain-function-body / top-level) path; the lambda-body twin lives
+    // in `walk_block_expressions`.
+    let mut elem_kind: string = "";
+    if statement.type_annotation != null {
+        let resolved = channel_element_kind(statement.type_annotation.text);
+        if resolved != null { elem_kind = resolved; }
+        // A `Task<T>[]` handle array records its element kind under a
+        // `taskarr:` marker so `push_spawn_handle_diagnostics` can enforce
+        // homogeneity (E0836) on a later `.push(spawn ...)` (SFEP-0055).
+        if elem_kind.length == 0 {
+            let task_kind = task_array_element_kind(statement.type_annotation.text);
+            if task_kind != null {
+                elem_kind = make_task_array_element_marker(task_kind);
+            }
+        }
+        if elem_kind.length == 0 {
+            elem_kind = declared_array_marker(statement.type_annotation.text);
+        }
+    }
+    // An unannotated `let mut hs = []` bakes the array's LLVM element type
+    // as `double` (empty literal, no inference target); tag it "empty_array"
+    // so `push_spawn_handle_diagnostics` can reject a later `.push(spawn ...)`
+    // before a future pointer is stored through that double slot (E0823,
+    // SFN-386). The lambda-body twin lives in `walk_block_expressions`.
+    if elem_kind.length == 0 {
+        if statement.type_annotation == null {
+            let init = statement.initializer;
+            if init != null && strings_equal(init.variant, "Array") {
+                if init.elements.length == 0 { elem_kind = "empty_array"; } else {
+                    elem_kind = "array";
+                }
+            }
+        }
+    }
+    let mut decl_prim: string = "";
+    if statement.type_annotation != null {
+        decl_prim = classify_declared_primitive(statement.type_annotation.text);
+    }
+    let mut declared_struct = _declared_struct_annotation(statement.type_annotation, bindings, ctx.type_params);
+    // The source-wide top-level collection resolves annotations against
+    // forward declarations. Preserve that proof when the sequential
+    // statement walk re-registers this global for initializer analysis.
+    if is_top_level {
+        let top_variable = _find_symbol_with_kind(top_level, statement.name, "variable");
+        if top_variable != null {
+            declared_struct = top_variable.declared_struct;
+        }
+    }
+    let mut declared_type: string = "";
+    if statement.type_annotation != null {
+        declared_type = statement.type_annotation.text;
+    } else {
+        declared_type = pointer_initializer_type(statement.initializer, ctx);
+    }
+    let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim, declared_struct, declared_type);
+    let walk_diags = walk_expression(statement.initializer, ctx_with_expected_type(ctx, statement.type_annotation));
+    let const_diags = pointer_coercion_diagnostics(statement.initializer, declared_type, ctx, statement.span);
+    let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
+    let array_diags = check_malformed_array_annotation(statement.type_annotation, statement.name, statement.span);
+    let unknown_diags = check_unknown_type_annotation(statement.type_annotation, statement.name, statement.span, ctx.known_types, ctx.type_params);
+    let intersection_diags = check_intersection_value_type_annotation(statement.type_annotation, statement.name, statement.span);
+    let object_literal_diags = check_object_literal_target(statement.initializer, statement.type_annotation, statement.name, statement.span, top_level);
+    let uninferable_ctor_diags = check_uninferable_generic_constructor(statement, ctx.generic_struct_names);
+    let mut primitive_bindings = bindings;
+    if is_top_level { primitive_bindings = top_level; }
+    let primitive_diags = check_expected_primitive_type(statement.initializer, statement.type_annotation, primitive_bindings, "initializer for `"
+        + statement.name
+        + "`", statement.name, statement.initializer_span);
+    let array_element_diags = check_array_element_type(statement.initializer, statement.type_annotation, ctx, "initializer for `"
+        + statement.name
+        + "`", statement.name, statement.initializer_span);
+    // SFN-812: lowering already fails closed on a void initializer
+    // (E1002), but only after the whole module has lowered. Reject it at
+    // `sfn check` so the error names the callee rather than the slot type.
+    let void_diags = void_value_diagnostics(statement.initializer, ctx, "the initializer for `"
+        + statement.name
+        + "`");
+    return ScopeResult {
+        bindings: registration.bindings,
+        diagnostics: registration.diagnostics.concat(walk_diags).concat(const_diags).concat(annotation_diags).concat(array_diags).concat(unknown_diags).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags).concat(primitive_diags).concat(array_element_diags).concat(void_diags)
+    };
+}
