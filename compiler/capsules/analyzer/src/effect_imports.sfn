@@ -30,7 +30,7 @@
 // rewrites). That keeps cross-module name collisions from emitting
 // spurious `E0402` against a same-named in-module function.
 import { IntrinsicEffectTable, empty_intrinsic_effects } from "sfn/ir";
-import { starts_with, substring } from "sfn/strings";
+import { ends_with, starts_with, substring } from "sfn/strings";
 import { Program } from "sfn/syntax";
 
 // Driver-resolved source import identity. The source spelling is kept so the
@@ -311,6 +311,24 @@ fn _lookup_explicit_imported_function(table: ImportSymbolTable, name: string, so
             return entry;
         }
         i += 1;
+    }
+    // A capsule root can re-export a function from one of its member
+    // modules. Its resolved provider is `.../mod`, while the callable row
+    // retains the defining module's slug. Prefer that capsule's subtree
+    // before considering an unrelated same-named function in the closure.
+    let mut provider_root = provider_module;
+    if ends_with(provider_root, "/mod") {
+        provider_root = substring(provider_root, 0, provider_root.length - 4);
+    }
+    if provider_root.length > 0 {
+        i = 0;
+        loop {
+            if i >= table.functions.length { break; }
+            let entry = table.functions[i];
+            if entry.name == name && entry.origin != "implicit" && starts_with(entry.provider_module, provider_root
+                + "/") { return entry; }
+            i += 1;
+        }
     }
     i = 0;
     loop {

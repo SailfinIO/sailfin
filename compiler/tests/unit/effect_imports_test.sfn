@@ -16,6 +16,7 @@
 import { validate_effects_with_imports } from "sfn/analyzer/effect_checker";
 import { EffectViolation } from "sfn/analyzer/effect_checker/types";
 import {
+    ImportProviderBinding,
     ImportSymbolTable,
     ImportedFunctionSignature,
     append_implicit_function_signature_from_module,
@@ -253,6 +254,22 @@ test "imported parameter types remain separate across providers" {
     let local = localize_import_symbols_for_program(program, global);
     assert local.functions.length == 1;
     assert local.functions[0].parameter_types[0] == "*i32";
+}
+
+test "localize: capsule re-export selects its defining module over a same-named wrapper" {
+    let mut global = empty_import_symbols();
+    global = append_import_function_signature_from_module(global, "emit_native", [], false, "codegen_driver", "EmitNativeResult", 1, 1, ["Program"]);
+    global = append_import_function_signature_from_module(global, "emit_native", [], false, "sfn/codegen/emit_native", "EmitNativeResult", 2, 2, ["Program", "LambdaCaptureRecord[]"]);
+    let program = Program {
+        statements: [_import_decl("emit_native", null, "sfn/codegen")]
+    };
+    let providers = [ImportProviderBinding {
+        source: "sfn/codegen", provider_module: "sfn/codegen/mod"
+    }];
+    let local = localize_import_symbols_for_program(program, global, providers);
+    assert local.functions.length == 1;
+    assert local.functions[0].provider_module == "sfn/codegen/emit_native";
+    assert local.functions[0].parameter_count == 2;
 }
 
 test "localize: an explicit import from the implicit provider ignores an unrelated ordinary collision" {
