@@ -66,8 +66,10 @@ import {
 } from "./concurrency_rules";
 import {
     const_pointer_assignment_diagnostics,
+    const_pointer_coercion_diagnostics,
     const_pointer_expected_diagnostics,
-    const_pointer_store_diagnostics
+    const_pointer_store_diagnostics,
+    inferred_known_type
 } from "./const_pointer_stores";
 import {
     TypeckCtx,
@@ -101,6 +103,17 @@ import { _declared_struct_annotation, _string_list_has } from "./symbols";
 import { _is_syscall_name, _syscall_call_diagnostics } from "./syscalls";
 import { _conditional_branch_type, check_conditional_types } from "./try_and_conditional";
 import { variadic_argument_diagnostics } from "./variadic_rules";
+
+// Statement and block walks already depend on this module. Route their
+// pointer checks through that edge to keep the seed's scope-walker import
+// graph smaller during cold module emission.
+fn pointer_initializer_type(expression: Expression?, ctx: TypeckCtx) -> string {
+    return inferred_known_type(expression, ctx);
+}
+
+fn pointer_coercion_diagnostics(value: Expression?, target_type: string, ctx: TypeckCtx, span: SourceSpan?) -> Diagnostic[] {
+    return const_pointer_coercion_diagnostics(value, target_type, ctx, span);
+}
 
 fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
     let bindings = ctx.bindings;
@@ -338,35 +351,12 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // Skip E0310 entirely for a generic struct's literal, matching the
         // E0833 `generic_struct_names` precedent (SFN-910).
         let is_generic_struct = _string_list_has(ctx.generic_struct_names, struct_name);
-        // SFN-1161. Capsule staging emits each module's `.sfn-asm` standalone,
-        // deliberately order-independent — `build/runtime_objs.sfn` and
-        // `main.sfn`'s `write_native_text_file_with_module_gated` header both
-        // state the invariant, and the parallel emit fan-out plus the
-        // source-only stage cache key depend on it. So a dependency module is
-        // typechecked with no import context: an imported struct's *name* is
-        // known (`_collect_imported_call_symbols` puts every import specifier
-        // in `ctx.known_types`) but its *shape* is not.
-        //
-        // In that state this pass cannot render the fn-value verdict, and
-        // guessing "reject" is what made a bare function name in an imported
-        // struct's field fail the build. Defer instead: drop E0808 for that
-        // one shape and let the pass that does have the shape decide —
-        // `main.sfn`'s per-module compile for build/run/test, or
-        // `check/engine.sfn` when the module is a named check entry. Both run
-        // over the same module before any binary exists.
-        //
-        // Deferring, not disabling: the guards below keep every other
-        // rejection intact, and the native resolve gate already defers to LLVM
-        // lowering on the same grounds.
-        // `imported_structs.length == 0` narrows the deferral to the pass it
-        // exists for: capsule staging, which loads no import context at all.
-        // Once a context IS loaded — the check engine for a named entry, or
-        // the per-module compile — an unresolvable shape is a real miss, not
-        // missing information, and keeps its normal verdict. That is what
-        // preserves the pre-existing rejection for an aliased import
-        // (`import { Verb as V }` registers `V` while the artifact declares
-        // `Verb`, so the shape never resolves): loud as before, rather than
-        // silently accepted forever.
+        // SFN-1161: capsule staging typechecks each dependency without import
+        // context. An imported struct name is known there, but its field shape
+        // is not, so defer E0808 for its fn-valued fields. The named check and
+        // per-module compile paths load the artifact and render the verdict
+        // before a binary exists. Once context is loaded, an unresolved shape
+        // keeps its normal rejection, including aliased imports.
         let no_import_context = ctx.imported_structs.length == 0;
         let shape_unresolvable = !_struct_shape_is_resolvable(expression.type_name, ctx);
         let name_is_imported = _struct_name_is_imported(expression.type_name, ctx);

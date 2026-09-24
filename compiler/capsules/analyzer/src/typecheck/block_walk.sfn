@@ -28,7 +28,6 @@ import {
 import { check_intersection_value_type_annotation, check_object_literal_target } from "../typecheck_types/value_and_object_checks";
 import { check_array_element_type } from "./array_element_rules";
 import { await_receive_result_kind } from "./concurrency_rules";
-import { const_pointer_coercion_diagnostics, inferred_known_type } from "./const_pointer_stores";
 import {
     TypeckCtx,
     ctx_enter_body,
@@ -36,7 +35,12 @@ import {
     ctx_with_expected_type,
     ctx_with_type_params
 } from "./context";
-import { walk_expression, walk_match_pattern } from "./expression_walk";
+import {
+    pointer_coercion_diagnostics,
+    pointer_initializer_type,
+    walk_expression,
+    walk_match_pattern
+} from "./expression_walk";
 import { _build_nested_fn_scope, _hoist_nested_fn_names } from "./function_scopes";
 import { register_match_pattern_bindings } from "./patterns";
 import { check_expected_primitive_type } from "./primitive_rules";
@@ -120,7 +124,7 @@ fn walk_block_expressions(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
             if statement.type_annotation != null {
                 declared_type = statement.type_annotation.text;
             } else {
-                declared_type = inferred_known_type(statement.initializer, ctx_with_bindings(ctx, bindings, scope_start));
+                declared_type = pointer_initializer_type(statement.initializer, ctx_with_bindings(ctx, bindings, scope_start));
             }
             let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim, declared_struct, declared_type);
             bindings = registration.bindings;
@@ -138,7 +142,7 @@ fn walk_statement_expressions(statement: Statement, ctx: TypeckCtx) -> Diagnosti
         let return_diags = walk_expression(statement.expression, ctx_with_expected_type(ctx, ctx.enclosing_return_type));
         let mut const_diags: Diagnostic[] = [];
         if ctx.enclosing_return_type != null {
-            const_diags = const_pointer_coercion_diagnostics(statement.expression, ctx.enclosing_return_type.text, ctx, statement.span);
+            const_diags = pointer_coercion_diagnostics(statement.expression, ctx.enclosing_return_type.text, ctx, statement.span);
         }
         // A lambda-body `return { ... }` is classified against the lambda's
         // declared return type (installed as `ctx.enclosing_return_type` by
@@ -155,7 +159,7 @@ fn walk_statement_expressions(statement: Statement, ctx: TypeckCtx) -> Diagnosti
         let init_diags = walk_expression(statement.initializer, ctx_with_expected_type(ctx, statement.type_annotation));
         let mut const_diags: Diagnostic[] = [];
         if statement.type_annotation != null {
-            const_diags = const_pointer_coercion_diagnostics(statement.initializer, statement.type_annotation.text, ctx, statement.span);
+            const_diags = pointer_coercion_diagnostics(statement.initializer, statement.type_annotation.text, ctx, statement.span);
         }
         let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
         let array_diags2 = check_malformed_array_annotation(statement.type_annotation, statement.name, statement.span);

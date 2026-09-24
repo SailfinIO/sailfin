@@ -50,7 +50,6 @@ import {
 } from "../typecheck_types/value_and_object_checks";
 import { check_array_element_type } from "./array_element_rules";
 import { void_value_diagnostics } from "./call_signature";
-import { const_pointer_coercion_diagnostics, inferred_known_type } from "./const_pointer_stores";
 import {
     TypeckCtx,
     ctx_with_bindings,
@@ -58,7 +57,12 @@ import {
     ctx_with_type_params,
     make_typeck_ctx
 } from "./context";
-import { walk_expression, walk_match_pattern } from "./expression_walk";
+import {
+    pointer_coercion_diagnostics,
+    pointer_initializer_type,
+    walk_expression,
+    walk_match_pattern
+} from "./expression_walk";
 import {
     _validate_main_signature,
     check_block,
@@ -169,11 +173,11 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         if statement.type_annotation != null {
             declared_type = statement.type_annotation.text;
         } else {
-            declared_type = inferred_known_type(statement.initializer, ctx);
+            declared_type = pointer_initializer_type(statement.initializer, ctx);
         }
         let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim, declared_struct, declared_type);
         let walk_diags = walk_expression(statement.initializer, ctx_with_expected_type(ctx, statement.type_annotation));
-        let const_diags = const_pointer_coercion_diagnostics(statement.initializer, declared_type, ctx, statement.span);
+        let const_diags = pointer_coercion_diagnostics(statement.initializer, declared_type, ctx, statement.span);
         let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
         let array_diags = check_malformed_array_annotation(statement.type_annotation, statement.name, statement.span);
         let unknown_diags = check_unknown_type_annotation(statement.type_annotation, statement.name, statement.span, ctx.known_types, ctx.type_params);
@@ -575,7 +579,7 @@ fn check_statement(statement: Statement, ctx: TypeckCtx) -> ScopeResult {
         let object_literal_diags = check_object_literal_target(statement.expression, enclosing_return_type, "return", statement.span, top_level);
         let mut const_diags: Diagnostic[] = [];
         if enclosing_return_type != null {
-            const_diags = const_pointer_coercion_diagnostics(statement.expression, enclosing_return_type.text, ctx, statement.span);
+            const_diags = pointer_coercion_diagnostics(statement.expression, enclosing_return_type.text, ctx, statement.span);
         }
         let primitive_diags = check_expected_primitive_type(statement.expression, enclosing_return_type, bindings, "return value", "return", statement.span);
         // SFN-812: `return print(x);` returns nothing to the caller, which
