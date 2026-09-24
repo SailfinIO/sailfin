@@ -71,12 +71,13 @@ fn check_variable_declaration(statement: Statement, ctx: TypeckCtx) -> ScopeResu
         }
     }
     let mut declared_type: string = "";
+    let mut inferred_type: string = "";
     if statement.type_annotation != null {
         declared_type = statement.type_annotation.text;
     } else {
-        declared_type = pointer_initializer_type(statement.initializer, ctx);
+        inferred_type = pointer_initializer_type(statement.initializer, ctx);
     }
-    let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim, declared_struct, declared_type);
+    let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim, declared_struct, declared_type, inferred_type);
     let diagnostics = variable_declaration_diagnostics(statement, ctx, declared_type);
     return ScopeResult {
         bindings: registration.bindings,

@@ -151,8 +151,10 @@ fn _call_argument_expected_type(expression: Expression, index: int, ctx: TypeckC
         if index >= entry.function_parameter_types.length { return null; }
         return _opaque_generic_expected(entry.function_parameter_types[index], _local_function_type_parameters(expression.callee.name, ctx));
     }
-    if entry.declared_type.length == 0 { return null; }
-    let fn_type = parse_fn_type_text(entry.declared_type);
+    let mut value_type = entry.declared_type;
+    if value_type.length == 0 { value_type = entry.inferred_type; }
+    if value_type.length == 0 { return null; }
+    let fn_type = parse_fn_type_text(value_type);
     if !fn_type.ok { return null; }
     if index >= fn_type.param_types.length { return null; }
     return TypeAnnotation { text: fn_type.param_types[index] };
@@ -165,8 +167,10 @@ fn _assignment_expected_type(target: Expression, ctx: TypeckCtx) -> TypeAnnotati
         entry = find_value_symbol(ctx.top_level, target.name);
     }
     if entry == null { return null; }
-    if entry.declared_type.length == 0 { return null; }
-    return TypeAnnotation { text: entry.declared_type };
+    let mut value_type = entry.declared_type;
+    if value_type.length == 0 { value_type = entry.inferred_type; }
+    if value_type.length == 0 { return null; }
+    return TypeAnnotation { text: value_type };
 }
 
 fn _array_element_expected_type(expected: TypeAnnotation?) -> TypeAnnotation? {

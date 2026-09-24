@@ -200,6 +200,11 @@ test "const pointer: function value return remains read-only" ![io] {
     assert expect_eq_bool(_count_const_store(source) == 1, true).ok;
 }
 
+test "const pointer: inferred function value return remains read-only" ![io] {
+    let source = "fn write(f: fn () -> *const i32) { let g = f; *g() = 7; }";
+    assert expect_eq_bool(_count_const_store(source) == 1, true).ok;
+}
+
 test "const pointer: generic field substitution preserves const" ![io] {
     let source = "struct Holder<T> { p: T; }\n"
         + "fn write(h: *Holder<*const i32>) { *h.p = 7; }";

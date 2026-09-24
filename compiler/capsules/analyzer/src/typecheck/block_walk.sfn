@@ -121,12 +121,13 @@ fn walk_block_expressions(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
             }
             let declared_struct = _declared_struct_annotation(statement.type_annotation, bindings, ctx.type_params);
             let mut declared_type: string = "";
+            let mut inferred_type: string = "";
             if statement.type_annotation != null {
                 declared_type = statement.type_annotation.text;
             } else {
-                declared_type = pointer_initializer_type(statement.initializer, ctx_with_bindings(ctx, bindings, scope_start));
+                inferred_type = pointer_initializer_type(statement.initializer, ctx_with_bindings(ctx, bindings, scope_start));
             }
-            let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim, declared_struct, declared_type);
+            let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim, declared_struct, declared_type, inferred_type);
             bindings = registration.bindings;
         }
         index += 1;

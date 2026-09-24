@@ -166,10 +166,10 @@ fn check_extern_callback_name(name: string, entry: SymbolEntry, expected_text: s
 }
 
 fn check_extern_callback_value(name: string, entry: SymbolEntry, expected_text: string, span: SourceSpan?) -> Diagnostic[] {
-    if is_extern_callback_type(entry.declared_type) {
-        if _c_callback_type_equal(entry.declared_type, expected_text) {
-            return [];
-        }
+    let mut value_type = entry.declared_type;
+    if value_type.length == 0 { value_type = entry.inferred_type; }
+    if is_extern_callback_type(value_type) {
+        if _c_callback_type_equal(value_type, expected_text) { return []; }
     }
     return [_make_extern_callback_diagnostic(name, "only a matching C function pointer or named function may fill this slot", span)];
 }
