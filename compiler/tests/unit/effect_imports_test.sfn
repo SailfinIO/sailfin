@@ -229,6 +229,32 @@ test "localize: an explicit import wins over the same-named implicit callable" {
     assert local.functions[0].parameter_count == 1;
 }
 
+test "localize: imported parameter types survive aliasing" {
+    let mut global = empty_import_symbols();
+    global = append_import_function_signature_from_module(global, "put", [], false, "demo/mod", "void", 1, 1, ["*i32"]);
+    let program = Program {
+        statements: [_import_decl("put", "write", "demo")]
+    };
+    let local = localize_import_symbols_for_program(program, global);
+    assert local.functions.length == 1;
+    assert local.functions[0].name == "write";
+    assert local.functions[0].parameter_types.length == 1;
+    assert local.functions[0].parameter_types[0] == "*i32";
+}
+
+test "imported parameter types remain separate across providers" {
+    let mut global = empty_import_symbols();
+    global = append_import_function_signature_from_module(global, "put", [], false, "a/mod", "void", 1, 1, ["*i32"]);
+    global = append_import_function_signature_from_module(global, "put", [], false, "b/mod", "void", 1, 1, ["*const i32"]);
+    assert global.functions.length == 2;
+    let program = Program {
+        statements: [_import_decl("put", null, "a")]
+    };
+    let local = localize_import_symbols_for_program(program, global);
+    assert local.functions.length == 1;
+    assert local.functions[0].parameter_types[0] == "*i32";
+}
+
 test "localize: an explicit import from the implicit provider ignores an unrelated ordinary collision" {
     let mut global = empty_import_symbols();
     global = append_implicit_function_signature_from_module(global, "shared", ["io"], "demo/implicit/mod", "int", 0, 0);

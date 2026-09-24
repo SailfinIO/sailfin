@@ -1,4 +1,5 @@
 // Driver-owned staged import-context discovery and artifact loading.
+import { ImportProviderBinding } from "sfn/analyzer/effect_imports";
 import { resolve_import_module_slug_for_module } from "sfn/codegen-llvm";
 import {
     ImplicitSymbol,
@@ -11,6 +12,7 @@ import {
 } from "sfn/ir";
 import { parse_layout_manifest, parse_native_imports_for_import } from "sfn/ir";
 import { ends_with, trim } from "sfn/strings";
+import { Program } from "sfn/syntax";
 
 fn import_context_root(work_dir: string) -> string {
     if work_dir.length == 0 { return "build/compiler/import-context"; }
@@ -58,6 +60,23 @@ fn _resolve_artifact_slug(root: string, slug: string) -> string ![io] {
         }
     }
     return slug;
+}
+
+fn import_provider_bindings_for_program(program: Program, current_module_slug: string, root: string) -> ImportProviderBinding[] ![io] {
+    let mut bindings: ImportProviderBinding[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let statement = program.statements[i];
+        if statement.variant == "ImportDeclaration" {
+            let slug = resolve_import_module_slug_for_module(statement.source, current_module_slug);
+            bindings.push(ImportProviderBinding {
+                source: statement.source, provider_module: _resolve_artifact_slug(root, slug)
+            });
+        }
+        i += 1;
+    }
+    return bindings;
 }
 
 fn _append_module_alias(aliases: ImportModuleAlias[], import_slug: string, provider_slug: string) -> ImportModuleAlias[] {
@@ -231,6 +250,7 @@ fn empty_imported_module_context() -> ImportedModuleContext {
 }
 
 export {
+    import_provider_bindings_for_program,
     empty_imported_module_context,
     import_context_root,
     imported_module_context_from_loaded_data_with_implicit,

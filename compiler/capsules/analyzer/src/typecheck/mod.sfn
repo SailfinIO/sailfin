@@ -22,11 +22,13 @@ import { ImplicitSymbol } from "sfn/ir";
 import { Program, Statement } from "sfn/syntax";
 
 import {
+    ImportProviderBinding,
     ImportSymbolTable,
     empty_import_symbols,
     localize_import_symbols_for_program,
     lookup_imported_function
 } from "../effect_imports";
+import { ImportedTypeAlias } from "../typecheck_imports";
 import { Diagnostic } from "../typecheck_types";
 import { check_program_scopes } from "./statement_checks";
 import {
@@ -40,7 +42,9 @@ import {
     check_generic_instantiation_sites,
     collect_interface_definitions,
     collect_struct_definitions,
-    collect_top_level_symbols
+    collect_top_level_symbols,
+    localize_imported_struct_signature_types,
+    localize_imported_type_aliases
 } from "./symbols";
 
 fn typecheck_diagnostics(program: Program) -> Diagnostic[] {
@@ -154,16 +158,16 @@ fn typecheck_diagnostics_with_import_symbols_prelude_implicit(program: Program, 
 // the parameter-position ABI relaxation; an empty list also marks the
 // capsule-staging pass, which loads no import context and therefore defers
 // its fn-value verdict rather than guessing.
-fn typecheck_diagnostics_with_import_symbols_prelude_implicit_structs(program: Program, imported_interfaces: Statement[], imported_structs: Statement[], imported_function_effects: ImportSymbolTable, prelude_globals: string[], implicit_symbols: ImplicitSymbol[]) -> Diagnostic[] {
-    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, prelude_globals, implicit_symbols, imported_structs);
+fn typecheck_diagnostics_with_import_symbols_prelude_implicit_structs(program: Program, imported_interfaces: Statement[], imported_structs: Statement[], imported_function_effects: ImportSymbolTable, prelude_globals: string[], implicit_symbols: ImplicitSymbol[], imported_aliases: ImportedTypeAlias[] = [], providers: ImportProviderBinding[] = []) -> Diagnostic[] {
+    return typecheck_diagnostics_full(program, imported_interfaces, imported_function_effects, prelude_globals, implicit_symbols, imported_structs, imported_aliases, providers);
 }
 
 // Full implementation behind every typecheck entry point.
 // `prelude_globals` carries the implicitly-available prelude/runtime
 // declaration names (#812); callers without `![io]` to load them pass
 // an empty list and fall back to import-specifier + builtin resolution.
-fn typecheck_diagnostics_full(program: Program, imported_interfaces: Statement[], imported_function_effects: ImportSymbolTable, prelude_globals: string[], implicit_symbols: ImplicitSymbol[], imported_structs: Statement[]) -> Diagnostic[] {
-    let local_imports = localize_import_symbols_for_program(program, imported_function_effects);
+fn typecheck_diagnostics_full(program: Program, imported_interfaces: Statement[], imported_function_effects: ImportSymbolTable, prelude_globals: string[], implicit_symbols: ImplicitSymbol[], imported_structs: Statement[], imported_aliases: ImportedTypeAlias[] = [], providers: ImportProviderBinding[] = []) -> Diagnostic[] {
+    let local_imports = localize_imported_struct_signature_types(localize_import_symbols_for_program(program, imported_function_effects, providers), imported_aliases);
     let top_level = collect_top_level_symbols(program);
     let local_interfaces = collect_interface_definitions(program);
     let filtered_imports = _filter_interface_declarations(imported_interfaces);
@@ -172,7 +176,7 @@ fn typecheck_diagnostics_full(program: Program, imported_interfaces: Statement[]
     // `local_structs` feeds `_generic_struct_names` and
     // `check_generic_instantiation_sites`, which own E0833, and imported
     // structs must not participate in that generic-instantiation check.
-    let filtered_imported_structs = _filter_struct_declarations(imported_structs);
+    let filtered_imported_structs = localize_imported_type_aliases(program, _filter_struct_declarations(imported_structs), imported_aliases, providers);
     // E0420 resolution scope (#812): every top-level declaration, the
     // program's own import-specifier names, and the implicitly-available
     // prelude/runtime globals. Threaded into function/method/test bodies

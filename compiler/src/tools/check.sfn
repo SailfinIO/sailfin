@@ -9,6 +9,7 @@
 import { AnalyzerInput, AnalyzerResult, analyze_program } from "sfn/analyzer";
 import { ImportSymbolTable, empty_import_symbols } from "sfn/analyzer/effect_imports";
 import { ClosureSymbolSet } from "sfn/analyzer/import_resolution_check";
+import { ImportedTypeAlias } from "sfn/analyzer/typecheck_imports";
 import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import { runtime_helper_call_names } from "sfn/codegen-llvm";
 import { ImplicitSymbol, intrinsic_effect_table } from "sfn/ir";
@@ -16,9 +17,11 @@ import { int_to_string } from "sfn/strings";
 import { Program, Statement } from "sfn/syntax";
 import { parse_program } from "sfn/syntax";
 
+import { module_name_for_source } from "../capsule_resolver/identity";
 import { resolve_import_context } from "../check/import_resolution";
 import { render_diagnostic, split_source_lines } from "../diagnostics_render";
 import { read_effect_enforcement_env, resolve_effect_enforcement } from "../effect_gate";
+import { import_context_root, import_provider_bindings_for_program } from "../import_context";
 import { load_prelude_global_names } from "../prelude_globals";
 
 struct CheckResult {
@@ -47,9 +50,10 @@ fn effect_severity_for_check(file_path: string) -> string ![io] {
 // Driver-side constructor for the facade contract. Parsed syntax and staged
 // interfaces arrive from the caller; all remaining authority-bearing inputs
 // are resolved here before the pure `analyze_program` call.
-fn analyzer_input_for_check(program: Program, file_path: string, imported_interfaces: Statement[], imported_symbols: ImportSymbolTable, capabilities_required: string[], capabilities_declared: boolean, capabilities_dev_required: string[], closure_symbols: ClosureSymbolSet, allow_bare_assert: boolean, implicit_symbols: ImplicitSymbol[] = [], resolved_capsule_specs: string[] = [], capsule_specs_known: boolean = false, imported_structs: Statement[] = []) -> AnalyzerInput ![io] {
+fn analyzer_input_for_check(program: Program, file_path: string, imported_interfaces: Statement[], imported_symbols: ImportSymbolTable, capabilities_required: string[], capabilities_declared: boolean, capabilities_dev_required: string[], closure_symbols: ClosureSymbolSet, allow_bare_assert: boolean, implicit_symbols: ImplicitSymbol[] = [], resolved_capsule_specs: string[] = [], capsule_specs_known: boolean = false, imported_structs: Statement[] = [], imported_aliases: ImportedTypeAlias[] = []) -> AnalyzerInput ![io] {
     let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
     let import_context = resolve_import_context(program, file_path, closure_symbols, resolved_capsule_specs, capsule_specs_known);
+    let import_providers = import_provider_bindings_for_program(program, module_name_for_source(file_path), import_context_root(""));
     return AnalyzerInput {
         program: program,
         file_path: file_path,
@@ -64,7 +68,9 @@ fn analyzer_input_for_check(program: Program, file_path: string, imported_interf
         allow_bare_assert: allow_bare_assert,
         effect_severity: effect_severity_for_check(file_path),
         implicit_symbols: implicit_symbols,
-        imported_structs: imported_structs
+        imported_structs: imported_structs,
+        imported_aliases: imported_aliases,
+        import_providers: import_providers
     };
 }
 

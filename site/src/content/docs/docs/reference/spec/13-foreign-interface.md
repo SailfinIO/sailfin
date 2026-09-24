@@ -8,10 +8,9 @@ sidebar:
 
 Sailfin reaches foreign code through `extern fn` declarations, raw pointers,
 and a validated `@repr(C)` struct layout. This chapter is normative for the
-surface that **ships today**. The broader interop contract — a read-only
-`*const T` — is
-designed in [SFEP-0079](/sfep/0079-systems-c-interop/) and is called out as
-**designed, not shipped** wherever it appears below.
+surface that **ships today**. The raw-pointer mutability contract follows
+[SFEP-0079](/sfep/0079-systems-c-interop/): `*T` and `*mut T` permit stores,
+while `*const T` permits loads but rejects stores.
 
 For the practical guide, see [Unsafe & FFI](/docs/advanced/ffi/).
 
@@ -152,8 +151,8 @@ pointer (C's `void*`); `*u8` is the conventional spelling for byte buffers and
 C strings.
 
 `*const T` and `*mut T` are accepted: the checker strips the `const ` or `mut `
-prefix and applies the same rule to the pointee. Neither prefix carries meaning
-today — see §13.4.
+prefix for the ABI accept-list and applies the same rule to the pointee.
+`*const T` is read-only at a store site; see §13.4.
 
 > **Not admissible:** `*opaque` is rejected with `E0805`. The opaque-pointee
 > rule requires an uppercase initial, so the lowercase `opaque` matches nothing.
@@ -292,8 +291,12 @@ not exposed as a value.
 
 ## 13.4 Raw pointer operations
 
-The following operate on any raw pointer and are specified here as shipped
-behavior. None of them requires an `unsafe` block.
+`*T` is a read-write raw pointer to `T`. `*const T` is read-only: a load is
+allowed, but a store through it receives `E0852`, including `*p = v`, `p.f = v`,
+and compound assignments. `*mut T` is an accepted synonym for `*T`.
+Implicitly placing a `*const T` in a writable pointer slot also receives
+`E0852`; an explicit pointer cast can change that view.
+None of the following operations requires an `unsafe` block.
 
 - **Load.** `*p` reads a `T`.
 - **Store.** `*p = v` writes a `T`.
@@ -321,10 +324,8 @@ behavior. None of them requires an `unsafe` block.
 > the call is elided and its result lowered to a null store, so the value reads
 > as unset. The runtime records this at `runtime/sfn/memory/arena.sfn:441`.
 
-**Mutability is not enforced.** `*T`, `*const T`, and `*mut T` produce the same
-pointer type and permit the same reads and writes. A read-only `*const T`, with
-stores through it rejected as `E0852`, is **designed, not shipped**
-(SFEP-0079 §3.2, leaf L3).
+The pointer qualifiers have the same C pointer representation; `const` governs
+which stores Sailfin accepts. `E0852` is raised during type checking.
 
 **Retention.** A pointer into Sailfin-managed storage is valid only for the
 duration of the foreign call it is passed to; Sailfin storage may be

@@ -26,6 +26,7 @@
 // docs/proposals/0006-build-architecture.md (Stage B PR2) for the design
 // rationale.
 import {
+    NativeFunction,
     NativeInterface,
     NativeInterfaceSignature,
     NativeParameter,
@@ -33,6 +34,7 @@ import {
     NativeStructField
 } from "sfn/ir";
 import {
+    Block,
     Decorator,
     FieldDeclaration,
     FunctionSignature,
@@ -43,6 +45,13 @@ import {
     TypeAnnotation,
     TypeParameter
 } from "sfn/syntax";
+
+// An artifact alias retains its defining module until source imports are
+// localized, so unrelated closure modules cannot shadow its qualifier.
+struct ImportedTypeAlias {
+    declaration: Statement;
+    provider_module: string;
+}
 
 // -------------------------------------------------------------------
 // Field-level converters
@@ -170,11 +179,9 @@ fn interfaces_from_native(natives: NativeInterface[]) -> Statement[] {
 // Struct converters
 // -------------------------------------------------------------------
 // Reconstructs imported struct declarations from `.sfn-asm` artifacts so
-// cross-module fn-value expected-type resolution (SFN-1161) can consult a
-// struct's field shape without re-parsing source. `methods: []` is
-// structural, not a placeholder: artifacts carry no method bodies, so
-// these reconstructed declarations must never feed method-existence
-// checks.
+// cross-module checks can consult field and method signature shapes without
+// re-parsing source. Imported method bodies are intentionally empty: these
+// declarations are metadata for lookups, never walked as source bodies.
 fn field_declaration_from_native(native: NativeStructField) -> FieldDeclaration {
     return FieldDeclaration {
         name: native.name,
@@ -195,18 +202,42 @@ fn field_declarations_from_native(natives: NativeStructField[]) -> FieldDeclarat
     return out;
 }
 
+fn _method_declarations_from_native(natives: NativeFunction[]) -> MethodDeclaration[] {
+    let mut methods: MethodDeclaration[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= natives.length { break; }
+        let native = natives[i];
+        let signature = FunctionSignature {
+            name: native.name,
+            is_async: native.is_async,
+            parameters: parameters_from_native(native.parameters),
+            return_type: _type_annotation_or_null_from_text(native.return_type),
+            effects: native.effects,
+            type_parameters: [],
+            name_span: null
+        };
+        methods.push(MethodDeclaration {
+            signature: signature, body: Block {
+                tokens: [], text: "", statements: []
+            }, decorators: []
+        });
+        i += 1;
+    }
+    return methods;
+}
+
 fn struct_statement_from_native(native: NativeStruct) -> Statement {
     let empty_decorators: Decorator[] = [];
     let empty_implements: TypeAnnotation[] = [];
     let empty_type_parameters: TypeParameter[] = [];
-    let empty_methods: MethodDeclaration[] = [];
     return Statement.StructDeclaration {
         name: native.name,
         name_span: null,
         type_parameters: empty_type_parameters,
         implements_types: empty_implements,
         fields: field_declarations_from_native(native.fields),
-        methods: empty_methods,
+        methods: _method_declarations_from_native(native.methods),
         decorators: empty_decorators
     };
 }

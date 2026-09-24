@@ -65,6 +65,11 @@ import {
     push_spawn_handle_diagnostics
 } from "./concurrency_rules";
 import {
+    const_pointer_assignment_diagnostics,
+    const_pointer_expected_diagnostics,
+    const_pointer_store_diagnostics
+} from "./const_pointer_stores";
+import {
     TypeckCtx,
     ctx_enter_body,
     ctx_in_callee_position,
@@ -117,14 +122,8 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
                 diagnostics = walk_expression(expression.callee, ctx_in_callee_position(ctx));
             }
         }
-        // #812: a bare-identifier callee that resolves to neither an
-        // in-scope binding (parameter / local / top-level declaration /
-        // import-specifier name) nor a builtin envelope name nor an
-        // imported free function in the localized effect table is an
-        // undefined function — emit E0420 caret-ed at the callee.
-        // Member callees (`obj.method()`) never reach this branch: they
-        // recurse through the Member arm, which only descends into
-        // `.object` and never inspects the member name.
+        // #812: diagnose unresolved bare callees here; member calls follow
+        // the Member arm, whose receiver has separate resolution rules.
         if expression.callee != null {
             if expression.callee.variant == "Identifier" {
                 let callee_name = expression.callee.name;
@@ -207,6 +206,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
             if !callback_handled {
                 diagnostics = diagnostics.concat(walk_expression(argument, ctx_with_expected_type(ctx, expected)));
             }
+            diagnostics = diagnostics.concat(const_pointer_expected_diagnostics(argument, expected, ctx, expression.span));
             // Reject void arguments before lowering fabricates a zero (SFN-812).
             diagnostics = diagnostics.concat(void_argument_diagnostics(expression, index, ctx));
             index += 1;
@@ -310,6 +310,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         loop {
             if index >= expression.elements.length { break; }
             diagnostics = diagnostics.concat(walk_expression(expression.elements[index], ctx_with_expected_type(ctx, element_expected)));
+            diagnostics = diagnostics.concat(const_pointer_expected_diagnostics(expression.elements[index], element_expected, ctx, expression.span));
             index += 1;
         }
         return diagnostics;
@@ -381,6 +382,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
                 field_expected = _imported_struct_field_expected_type(expression.type_name, field.name, ctx);
             }
             let field_diagnostics = walk_expression(field.value, ctx_with_expected_type(ctx, field_expected));
+            diagnostics = diagnostics.concat(const_pointer_expected_diagnostics(field.value, field_expected, ctx, expression.span));
             if defer_fn_value_verdict && field.value.variant == "Identifier" {
                 diagnostics = diagnostics.concat(_without_code(field_diagnostics, "E0808"));
             } else { diagnostics = diagnostics.concat(field_diagnostics); }
@@ -505,14 +507,12 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         let mut diagnostics = walk_expression(expression.target, ctx_with_expected_type(ctx, null));
         let rhs_expected = _assignment_expected_type(expression.target, ctx);
         diagnostics = diagnostics.concat(walk_expression(expression.rhs, ctx_with_expected_type(ctx, rhs_expected)));
-        // E0310: `_assignment_expected_type` above stays `Identifier`-only on
-        // purpose — widening it to `Member` targets would install
-        // `ctx.expected_type` on the RHS of every `x.f = v` tree-wide,
-        // affecting two unrelated consumers (the array-literal element
-        // recursion above and `check_named_fn_value_compatibility`). Route
-        // the Member-target array-element check through its own narrow path
-        // instead (SFN-910).
+        // E0310: keep RHS expected-type propagation Identifier-only; Member
+        // targets use a narrow array check so other consumers stay unchanged
+        // (SFN-910).
         diagnostics = diagnostics.concat(check_array_element_assignment(expression, ctx));
+        diagnostics = diagnostics.concat(const_pointer_store_diagnostics(expression, ctx));
+        diagnostics = diagnostics.concat(const_pointer_assignment_diagnostics(expression, ctx));
         // SFN-812: `s.a = print(...)` / `arr[0] = print(...)` / `*p = print(...)`
         // compiled clean and dropped the store entirely — the complex-lvalue
         // arms of `statement_assignment.sfn` emit no store when the value

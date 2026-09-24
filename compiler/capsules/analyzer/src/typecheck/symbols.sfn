@@ -3,13 +3,25 @@
 // Top-level symbol collection: gathering struct, interface, and global
 // declarations into the `SymbolEntry` tables the scope checks run against.
 import { ImplicitSymbol } from "sfn/ir";
+import { int_to_string } from "sfn/strings";
 import {
+    FieldDeclaration,
+    FunctionSignature,
+    MethodDeclaration,
+    Parameter,
     Program,
     Statement,
     TypeAnnotation,
     TypeParameter
 } from "sfn/syntax";
 
+import {
+    ImportProviderBinding,
+    ImportSymbolTable,
+    ImportedFunctionSignature,
+    provider_for_import_source
+} from "../effect_imports";
+import { ImportedTypeAlias } from "../typecheck_imports";
 import { Diagnostic } from "../typecheck_types";
 import {
     classify_declared_primitive,
@@ -18,7 +30,12 @@ import {
 } from "../typecheck_types/annotation_shape_checks";
 import { make_thread_local_requires_mut_diagnostic } from "../typecheck_types/declaration_and_statement_checks";
 import { bound_base_name, check_generic_instantiation } from "../typecheck_types/generic_bounds";
-import { parse_type_arguments, resolve_interface_annotation } from "../typecheck_types/interface_and_generics";
+import {
+    TypeSubstitution,
+    apply_type_substitution,
+    parse_type_arguments,
+    resolve_interface_annotation
+} from "../typecheck_types/interface_and_generics";
 import {
     SymbolCollectionResult,
     SymbolEntry,
@@ -144,21 +161,236 @@ fn _filter_interface_declarations(statements: Statement[]) -> Statement[] {
     return out;
 }
 
-// Defensive variant filter mirroring `_filter_interface_declarations`
-// (SFN-1161): the only producer of `imported_structs` today is
-// `struct_statement_from_native`, which only emits
-// `Statement.StructDeclaration`, but filtering at the API boundary keeps
-// the contract enforceable for future callers.
+// Keep only imported struct shapes and type aliases used by pointer-store
+// resolution. Other imported declarations have separate context channels.
 fn _filter_struct_declarations(statements: Statement[]) -> Statement[] {
     let mut out: Statement[] = [];
     let mut i: int = 0;
     loop {
         if i >= statements.length { break; }
         let s = statements[i];
-        if strings_equal(s.variant, "StructDeclaration") { out.push(s); }
+        if strings_equal(s.variant, "StructDeclaration") || strings_equal(s.variant, "TypeAliasDeclaration") {
+            out.push(s);
+        }
         i += 1;
     }
     return out;
+}
+
+fn _imported_struct_internal_name(index: int, name: string) -> string {
+    return "__sfn_import_" + int_to_string(index) + "_" + name;
+}
+
+fn _imported_struct_substitution(aliases: ImportedTypeAlias[], provider: string) -> TypeSubstitution {
+    let mut olds: string[] = [];
+    let mut news: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= aliases.length { break; }
+        if aliases[i].provider_module == provider && aliases[i].declaration.variant == "StructDeclaration" {
+            olds.push(aliases[i].declaration.name);
+            news.push(_imported_struct_internal_name(i, aliases[i].declaration.name));
+        }
+        i += 1;
+    }
+    return TypeSubstitution { olds: olds, news: news };
+}
+
+fn _substitution_outside_type_parameters(substitution: TypeSubstitution, parameters: TypeParameter[]) -> TypeSubstitution {
+    let mut olds: string[] = [];
+    let mut news: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= substitution.olds.length { break; }
+        let mut shadowed = false;
+        for parameter in parameters {
+            if substitution.olds[i] == parameter.name { shadowed = true; }
+        }
+        if !shadowed {
+            olds.push(substitution.olds[i]);
+            news.push(substitution.news[i]);
+        }
+        i += 1;
+    }
+    return TypeSubstitution { olds: olds, news: news };
+}
+
+fn _substitution_outside_parameter_names(substitution: TypeSubstitution, names: string[]) -> TypeSubstitution {
+    let mut olds: string[] = [];
+    let mut news: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= substitution.olds.length { break; }
+        let mut shadowed = false;
+        for name in names {
+            if substitution.olds[i] == name { shadowed = true; }
+        }
+        if !shadowed {
+            olds.push(substitution.olds[i]);
+            news.push(substitution.news[i]);
+        }
+        i += 1;
+    }
+    return TypeSubstitution { olds: olds, news: news };
+}
+
+// Imported signatures retain provider spellings even when the source imports
+// only a function or renames its struct. Resolve those spellings to the same
+// private struct names used by imported field and method metadata.
+fn localize_imported_struct_signature_types(table: ImportSymbolTable, aliases: ImportedTypeAlias[]) -> ImportSymbolTable {
+    let mut functions: ImportedFunctionSignature[] = [];
+    for entry in table.functions {
+        let substitution = _substitution_outside_parameter_names(_imported_struct_substitution(aliases, entry.provider_module), entry.type_parameters);
+        let mut parameter_types: string[] = [];
+        for parameter_type in entry.parameter_types {
+            parameter_types.push(apply_type_substitution(parameter_type, substitution));
+        }
+        functions.push(ImportedFunctionSignature {
+            name: entry.name, effects: entry.effects, origin: entry.origin, is_decorator: entry.is_decorator, provider_module: entry.provider_module, return_type: apply_type_substitution(entry.return_type, substitution), parameter_count: entry.parameter_count, required_parameter_count: entry.required_parameter_count, parameter_types: parameter_types, type_parameters: entry.type_parameters
+        });
+    }
+    return ImportSymbolTable {
+        functions: functions,
+        intrinsic_effects: table.intrinsic_effects
+    };
+}
+
+fn _localized_struct_method(method: MethodDeclaration, substitution: TypeSubstitution) -> MethodDeclaration {
+    let signature = method.signature;
+    let visible_substitution = _substitution_outside_type_parameters(substitution, signature.type_parameters);
+    let mut parameters: Parameter[] = [];
+    for parameter in signature.parameters {
+        let mut annotation: TypeAnnotation? = null;
+        if parameter.type_annotation != null {
+            annotation = TypeAnnotation {
+                text: apply_type_substitution(parameter.type_annotation.text, visible_substitution)
+            };
+        }
+        parameters.push(Parameter {
+            name: parameter.name, type_annotation: annotation, default_value: parameter.default_value, mutable: parameter.mutable, span: parameter.span
+        });
+    }
+    let mut return_type: TypeAnnotation? = null;
+    if signature.return_type != null {
+        return_type = TypeAnnotation {
+            text: apply_type_substitution(signature.return_type.text, visible_substitution)
+        };
+    }
+    return MethodDeclaration {
+        signature: FunctionSignature {
+            name: signature.name,
+            is_async: signature.is_async,
+            parameters: parameters,
+            return_type: return_type,
+            effects: signature.effects,
+            type_parameters: signature.type_parameters,
+            name_span: signature.name_span
+        },
+        body: method.body,
+        decorators: method.decorators
+    };
+}
+
+fn _localized_imported_struct(declaration: Statement, name: string, substitution: TypeSubstitution) -> Statement {
+    let visible_substitution = _substitution_outside_type_parameters(substitution, declaration.type_parameters);
+    let mut fields: FieldDeclaration[] = [];
+    for field in declaration.fields {
+        fields.push(FieldDeclaration {
+            name: field.name, type_annotation: TypeAnnotation {
+                text: apply_type_substitution(field.type_annotation.text, visible_substitution)
+            }, mutable: field.mutable, name_span: field.name_span
+        });
+    }
+    let mut methods: MethodDeclaration[] = [];
+    for method in declaration.methods {
+        methods.push(_localized_struct_method(method, visible_substitution));
+    }
+    return Statement.StructDeclaration {
+        name: name,
+        name_span: declaration.name_span,
+        type_parameters: declaration.type_parameters,
+        implements_types: declaration.implements_types,
+        fields: fields,
+        methods: methods,
+        decorators: declaration.decorators
+    };
+}
+
+fn localize_imported_type_aliases(program: Program, declarations: Statement[], aliases: ImportedTypeAlias[], providers: ImportProviderBinding[]) -> Statement[] {
+    let mut localized: Statement[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let statement = program.statements[i];
+        if statement.variant == "ImportDeclaration" {
+            let mut j: int = 0;
+            loop {
+                if j >= statement.import_specifiers.length { break; }
+                let spec = statement.import_specifiers[j];
+                let mut local_name = spec.name;
+                if spec.alias != null { local_name = spec.alias; }
+                let provider = provider_for_import_source(providers, statement.source);
+                let mut direct: boolean = false;
+                let mut k: int = 0;
+                loop {
+                    if k >= aliases.length { break; }
+                    if aliases[k].declaration.name == spec.name && provider.length > 0
+                        && aliases[k].provider_module == provider {
+                        direct = true;
+                    }
+                    k += 1;
+                }
+                k = 0;
+                loop {
+                    if k >= aliases.length { break; }
+                    let declaration = aliases[k].declaration;
+                    if declaration.name == spec.name && (!direct || aliases[k].provider_module == provider) {
+                        if declaration.variant == "TypeAliasDeclaration" {
+                            localized.push(Statement.TypeAliasDeclaration {
+                                name: local_name, name_span: declaration.name_span, type_parameters: declaration.type_parameters, aliased_type: TypeAnnotation {
+                                    text: apply_type_substitution(declaration.aliased_type.text, _substitution_outside_type_parameters(_imported_struct_substitution(aliases, aliases[k].provider_module), declaration.type_parameters))
+                                }, decorators: declaration.decorators
+                            });
+                        } else if declaration.variant == "StructDeclaration" {
+                            localized.push(_localized_imported_struct(declaration, local_name, _imported_struct_substitution(aliases, aliases[k].provider_module)));
+                        }
+                    }
+                    k += 1;
+                }
+                j += 1;
+            }
+        }
+        i += 1;
+    }
+    let mut k: int = 0;
+    loop {
+        if k >= aliases.length { break; }
+        if aliases[k].declaration.variant == "StructDeclaration" {
+            localized.push(_localized_imported_struct(aliases[k].declaration, _imported_struct_internal_name(k, aliases[k].declaration.name), _imported_struct_substitution(aliases, aliases[k].provider_module)));
+        }
+        k += 1;
+    }
+    let mut initial: int = 0;
+    loop {
+        if initial >= declarations.length { break; }
+        let declaration = declarations[initial];
+        if declaration.variant == "StructDeclaration" {
+            let mut present = false;
+            for selected in localized {
+                if selected.variant == "StructDeclaration" && selected.name == declaration.name {
+                    present = true;
+                }
+            }
+            for item in aliases {
+                if item.declaration.variant == "StructDeclaration" && item.declaration.name == declaration.name {
+                    present = true;
+                }
+            }
+            if !present { localized.push(declaration); }
+        }
+        initial += 1;
+    }
+    return localized;
 }
 
 fn collect_interface_definitions(program: Program) -> Statement[] {
