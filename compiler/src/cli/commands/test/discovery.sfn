@@ -1,4 +1,5 @@
 import { ImportSymbolTable, empty_import_symbols } from "sfn/analyzer/effect_imports";
+import { ImportedTypeAlias } from "sfn/analyzer/typecheck_imports";
 import { ImplicitSymbol } from "sfn/ir";
 import { int_to_string } from "sfn/strings";
 import { Program, Statement } from "sfn/syntax";
@@ -147,6 +148,7 @@ struct TestGroup {
     // populates `interfaces`. Trailing for pinned-seed positional layout
     // stability.
     structs: Statement[];
+    aliases: ImportedTypeAlias[];
     // SFN-1269: the group's root capsule's declared `[build] link-libs`,
     // empty when the group's files sit outside any capsule (or that
     // capsule declares none). Threaded to the test link route so `sfn
@@ -354,9 +356,10 @@ fn _resolve_test_groups(test_files: string[], runtime_root: string, binary_dir: 
             let empty_lls: string[] = [];
             let empty_caps: string[] = [];
             let empty_implicit: ImplicitSymbol[] = [];
+            let empty_aliases: ImportedTypeAlias[] = [];
             let empty_root_link_libs: string[] = [];
             groups.push(TestGroup {
-                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, native_texts: empty_texts, dep_ll_paths: empty_lls, function_effects: empty_import_symbols(), implicit_symbols: empty_implicit, capabilities_required: empty_caps, capabilities_declared: false, capabilities_dev_required: empty_caps, runtime_demand: runtime_demand_all(), structs: empty_interfaces, root_link_libs: empty_root_link_libs
+                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, native_texts: empty_texts, dep_ll_paths: empty_lls, function_effects: empty_import_symbols(), implicit_symbols: empty_implicit, capabilities_required: empty_caps, capabilities_declared: false, capabilities_dev_required: empty_caps, runtime_demand: runtime_demand_all(), structs: empty_interfaces, aliases: empty_aliases, root_link_libs: empty_root_link_libs
             });
             idx = groups.length - 1;
         }
@@ -452,6 +455,7 @@ fn _resolve_test_groups(test_files: string[], runtime_root: string, binary_dir: 
         }
         groups[gi].interfaces = load.interfaces;
         groups[gi].structs = load.structs;
+        groups[gi].aliases = load.aliases;
         groups[gi].implicit_symbols = load.implicit_symbols;
         groups[gi].native_texts = load.native_texts;
         groups[gi].dep_ll_paths = resolution.ll_paths;

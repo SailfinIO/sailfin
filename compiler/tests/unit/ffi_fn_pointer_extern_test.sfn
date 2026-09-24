@@ -61,6 +61,11 @@ test "extern callback: a casted pointer retains its declared signature" ![io] {
     assert _count_code(invalid_target, "E0808") == 1;
 }
 
+test "extern callback: inferred cast pointer retains its signature" ![io] {
+    let source = "extern fn install(cb: * fn (*u8) -> i32) -> void; fn good(p: *u8) -> i32 { return 1; } fn main() { let cb = good as * fn (*u8) -> i32; install(cb); }";
+    assert _count_code(source, "E0850") == 0;
+}
+
 test "extern callback: a nested function cannot capture an outer local pointer" ![io] {
     let source = "extern fn install(cb: * fn (*u8) -> i32) -> void; fn good(p: *u8) -> i32 { return 1; } fn outer() { let cb: * fn (*u8) -> i32 = good as * fn (*u8) -> i32; fn inner() { install(cb); } inner(); }";
     assert _count_code(source, "E0421") == 1;

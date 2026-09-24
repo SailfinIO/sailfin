@@ -353,14 +353,18 @@ runs:
     # change, and entries emitted by a different seed are keyed on a
     # compiler identity this build cannot reproduce, so they were dead
     # weight in the restore rather than useful warmth.
+    # SFN-1296 changes analyzer import metadata layouts. The pinned seed can
+    # reuse IR emitted against the old layout across a content-only change,
+    # producing a compiler that crashes while staging runtime imports. Start
+    # a new cache epoch so this build and its test shards share cold-built IR.
     - name: Restore build cache (content-addressed module IR)
       if: ${{ inputs.mode != 'skip-build' }}
       uses: actions/cache@v4
       with:
         path: build/cache
-        key: sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-${{ steps.layout.outputs.fp }}-${{ steps.layout.outputs.freshness }}
+        key: sailfin-buildcache-abi3-${{ inputs.target }}-${{ inputs.seed_version }}-${{ steps.layout.outputs.fp }}-${{ steps.layout.outputs.freshness }}
         restore-keys: |
-          sailfin-buildcache-${{ inputs.target }}-${{ inputs.seed_version }}-${{ steps.layout.outputs.fp }}-
+          sailfin-buildcache-abi3-${{ inputs.target }}-${{ inputs.seed_version }}-${{ steps.layout.outputs.fp }}-
 
     # Restore the per-test linked-binary cache (`build/cache/test-bin`,
     # #1230/#1233) under its OWN key prefix, separate from the module-IR

@@ -65,6 +65,13 @@ import {
     push_spawn_handle_diagnostics
 } from "./concurrency_rules";
 import {
+    const_pointer_assignment_diagnostics,
+    const_pointer_coercion_diagnostics,
+    const_pointer_expected_diagnostics,
+    const_pointer_store_diagnostics,
+    inferred_known_type
+} from "./const_pointer_stores";
+import {
     TypeckCtx,
     ctx_enter_body,
     ctx_in_callee_position,
@@ -97,6 +104,17 @@ import { _is_syscall_name, _syscall_call_diagnostics } from "./syscalls";
 import { _conditional_branch_type, check_conditional_types } from "./try_and_conditional";
 import { variadic_argument_diagnostics } from "./variadic_rules";
 
+// Statement and block walks already depend on this module. Route their
+// pointer checks through that edge to keep the seed's scope-walker import
+// graph smaller during cold module emission.
+fn pointer_initializer_type(expression: Expression?, ctx: TypeckCtx) -> string {
+    return inferred_known_type(expression, ctx);
+}
+
+fn pointer_coercion_diagnostics(value: Expression?, target_type: string, ctx: TypeckCtx, span: SourceSpan?) -> Diagnostic[] {
+    return const_pointer_coercion_diagnostics(value, target_type, ctx, span);
+}
+
 fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
     let bindings = ctx.bindings;
     let imports = ctx.imports;
@@ -117,14 +135,8 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
                 diagnostics = walk_expression(expression.callee, ctx_in_callee_position(ctx));
             }
         }
-        // #812: a bare-identifier callee that resolves to neither an
-        // in-scope binding (parameter / local / top-level declaration /
-        // import-specifier name) nor a builtin envelope name nor an
-        // imported free function in the localized effect table is an
-        // undefined function — emit E0420 caret-ed at the callee.
-        // Member callees (`obj.method()`) never reach this branch: they
-        // recurse through the Member arm, which only descends into
-        // `.object` and never inspects the member name.
+        // #812: diagnose unresolved bare callees here; member calls follow
+        // the Member arm, whose receiver has separate resolution rules.
         if expression.callee != null {
             if expression.callee.variant == "Identifier" {
                 let callee_name = expression.callee.name;
@@ -207,6 +219,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
             if !callback_handled {
                 diagnostics = diagnostics.concat(walk_expression(argument, ctx_with_expected_type(ctx, expected)));
             }
+            diagnostics = diagnostics.concat(const_pointer_expected_diagnostics(argument, expected, ctx, expression.span));
             // Reject void arguments before lowering fabricates a zero (SFN-812).
             diagnostics = diagnostics.concat(void_argument_diagnostics(expression, index, ctx));
             index += 1;
@@ -310,6 +323,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         loop {
             if index >= expression.elements.length { break; }
             diagnostics = diagnostics.concat(walk_expression(expression.elements[index], ctx_with_expected_type(ctx, element_expected)));
+            diagnostics = diagnostics.concat(const_pointer_expected_diagnostics(expression.elements[index], element_expected, ctx, expression.span));
             index += 1;
         }
         return diagnostics;
@@ -337,35 +351,12 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         // Skip E0310 entirely for a generic struct's literal, matching the
         // E0833 `generic_struct_names` precedent (SFN-910).
         let is_generic_struct = _string_list_has(ctx.generic_struct_names, struct_name);
-        // SFN-1161. Capsule staging emits each module's `.sfn-asm` standalone,
-        // deliberately order-independent — `build/runtime_objs.sfn` and
-        // `main.sfn`'s `write_native_text_file_with_module_gated` header both
-        // state the invariant, and the parallel emit fan-out plus the
-        // source-only stage cache key depend on it. So a dependency module is
-        // typechecked with no import context: an imported struct's *name* is
-        // known (`_collect_imported_call_symbols` puts every import specifier
-        // in `ctx.known_types`) but its *shape* is not.
-        //
-        // In that state this pass cannot render the fn-value verdict, and
-        // guessing "reject" is what made a bare function name in an imported
-        // struct's field fail the build. Defer instead: drop E0808 for that
-        // one shape and let the pass that does have the shape decide —
-        // `main.sfn`'s per-module compile for build/run/test, or
-        // `check/engine.sfn` when the module is a named check entry. Both run
-        // over the same module before any binary exists.
-        //
-        // Deferring, not disabling: the guards below keep every other
-        // rejection intact, and the native resolve gate already defers to LLVM
-        // lowering on the same grounds.
-        // `imported_structs.length == 0` narrows the deferral to the pass it
-        // exists for: capsule staging, which loads no import context at all.
-        // Once a context IS loaded — the check engine for a named entry, or
-        // the per-module compile — an unresolvable shape is a real miss, not
-        // missing information, and keeps its normal verdict. That is what
-        // preserves the pre-existing rejection for an aliased import
-        // (`import { Verb as V }` registers `V` while the artifact declares
-        // `Verb`, so the shape never resolves): loud as before, rather than
-        // silently accepted forever.
+        // SFN-1161: capsule staging typechecks each dependency without import
+        // context. An imported struct name is known there, but its field shape
+        // is not, so defer E0808 for its fn-valued fields. The named check and
+        // per-module compile paths load the artifact and render the verdict
+        // before a binary exists. Once context is loaded, an unresolved shape
+        // keeps its normal rejection, including aliased imports.
         let no_import_context = ctx.imported_structs.length == 0;
         let shape_unresolvable = !_struct_shape_is_resolvable(expression.type_name, ctx);
         let name_is_imported = _struct_name_is_imported(expression.type_name, ctx);
@@ -381,6 +372,7 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
                 field_expected = _imported_struct_field_expected_type(expression.type_name, field.name, ctx);
             }
             let field_diagnostics = walk_expression(field.value, ctx_with_expected_type(ctx, field_expected));
+            diagnostics = diagnostics.concat(const_pointer_expected_diagnostics(field.value, field_expected, ctx, expression.span));
             if defer_fn_value_verdict && field.value.variant == "Identifier" {
                 diagnostics = diagnostics.concat(_without_code(field_diagnostics, "E0808"));
             } else { diagnostics = diagnostics.concat(field_diagnostics); }
@@ -505,14 +497,12 @@ fn walk_expression(expression: Expression?, ctx: TypeckCtx) -> Diagnostic[] {
         let mut diagnostics = walk_expression(expression.target, ctx_with_expected_type(ctx, null));
         let rhs_expected = _assignment_expected_type(expression.target, ctx);
         diagnostics = diagnostics.concat(walk_expression(expression.rhs, ctx_with_expected_type(ctx, rhs_expected)));
-        // E0310: `_assignment_expected_type` above stays `Identifier`-only on
-        // purpose — widening it to `Member` targets would install
-        // `ctx.expected_type` on the RHS of every `x.f = v` tree-wide,
-        // affecting two unrelated consumers (the array-literal element
-        // recursion above and `check_named_fn_value_compatibility`). Route
-        // the Member-target array-element check through its own narrow path
-        // instead (SFN-910).
+        // E0310: keep RHS expected-type propagation Identifier-only; Member
+        // targets use a narrow array check so other consumers stay unchanged
+        // (SFN-910).
         diagnostics = diagnostics.concat(check_array_element_assignment(expression, ctx));
+        diagnostics = diagnostics.concat(const_pointer_store_diagnostics(expression, ctx));
+        diagnostics = diagnostics.concat(const_pointer_assignment_diagnostics(expression, ctx));
         // SFN-812: `s.a = print(...)` / `arr[0] = print(...)` / `*p = print(...)`
         // compiled clean and dropped the store entirely — the complex-lvalue
         // arms of `statement_assignment.sfn` emit no store when the value

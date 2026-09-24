@@ -35,6 +35,14 @@ import {
 } from "sfn/analyzer/effect_imports";
 import { ClosureSymbolSet } from "sfn/analyzer/import_resolution_check";
 import { interfaces_from_native, structs_from_native } from "sfn/analyzer/typecheck_imports";
+import { ImportedTypeAlias } from "sfn/analyzer/typecheck_imports";
+import { bound_base_name } from "sfn/analyzer/typecheck_types/generic_bounds";
+import {
+    apply_type_substitution,
+    build_type_substitution,
+    parse_type_arguments
+} from "sfn/analyzer/typecheck_types/interface_and_generics";
+import { trim_text } from "sfn/analyzer/typecheck_types/text_utils";
 import {
     ImplicitSymbol,
     LoweringDiagnostic,
@@ -44,12 +52,28 @@ import {
     NativeInterface,
     NativeStruct
 } from "sfn/ir";
+import { parse_fn_type_text } from "sfn/ir";
 import {
     parse_native_artifact_for_import_context,
-    parse_native_artifact_for_import_with_bindings
+    parse_native_artifact_for_import_with_bindings,
+    split_lines
 } from "sfn/ir";
-import { char_code_at } from "sfn/strings";
-import { Statement } from "sfn/syntax";
+import {
+    char_code_at,
+    ends_with,
+    starts_with,
+    substring
+} from "sfn/strings";
+import {
+    FieldDeclaration,
+    FunctionSignature,
+    MethodDeclaration,
+    Parameter,
+    Statement,
+    TypeAnnotation,
+    TypeParameter,
+    parse_program
+} from "sfn/syntax";
 
 // Result of parsing a single `.sfn-asm` buffer. `diagnostics` is
 // non-empty only when the native-IR parser flagged a real problem;
@@ -60,6 +84,7 @@ struct ArtifactInterfaceParse {
     function_effects: ImportSymbolTable;
     diags: LoweringDiagnostic[];
     structs: Statement[];
+    aliases: Statement[];
 }
 
 // Result of loading a batch of `.sfn-asm` artifacts. The path lists
@@ -95,11 +120,19 @@ struct ImportedInterfaceLoadResult {
     implicit_symbols: ImplicitSymbol[];
     implicit_diagnostics: string[];
     structs: Statement[];
+    aliases: ImportedTypeAlias[];
 }
 
 struct ImplicitProviderSurfaceResult {
     symbols: ImplicitSymbol[];
     diagnostics: string[];
+}
+
+struct ArtifactGenericHeader {
+    kind: string;
+    owner: string;
+    name: string;
+    declaration: string;
 }
 
 // Pure: parse a `.sfn-asm` text buffer and return its interface
@@ -109,7 +142,11 @@ struct ImplicitProviderSurfaceResult {
 fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
     let parsed = parse_native_artifact_for_import_context(text);
     let interfaces = interfaces_from_native(parsed.interfaces);
-    let structs = structs_from_native(parsed.structs);
+    let lines = split_lines(text);
+    let headers = _artifact_generic_headers(lines);
+    let raw_aliases = _aliases_from_native_text(lines);
+    let structs = _expand_artifact_structs(structs_from_native(parsed.structs), raw_aliases, headers);
+    let aliases = _expand_artifact_aliases(raw_aliases);
     let mut function_effects = empty_import_symbols();
     let mut i: int = 0;
     loop {
@@ -137,7 +174,9 @@ fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
             // same `.sfn-asm` metadata channel — `NativeFunction.decorators`
             // already round-trips the `@decorator` marker — so no new artifact
             // plumbing is needed.
-            function_effects = append_import_function_signature_from_module(function_effects, function.name, function.effects, _native_function_is_tier1_decorator(function), "", function.return_type, function.parameters.length, _native_function_required_arity(function));
+            let type_parameters = _artifact_callable_type_parameters(function.name, "", headers);
+            let visible_aliases = _aliases_outside_type_parameters(raw_aliases, type_parameters);
+            function_effects = append_import_function_signature_from_module(function_effects, function.name, function.effects, _native_function_is_tier1_decorator(function), "", _expand_artifact_alias(function.return_type, visible_aliases), function.parameters.length, _native_function_required_arity(function), _expanded_native_parameter_types(function, visible_aliases), _type_parameter_names(type_parameters));
         }
         i += 1;
     }
@@ -145,8 +184,294 @@ fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
         interfaces: interfaces,
         function_effects: function_effects,
         diags: parsed.diags,
-        structs: structs
+        structs: structs,
+        aliases: aliases
     };
+}
+
+fn _expand_artifact_alias_nested(type_text: string, aliases: Statement[], depth: int) -> string {
+    if depth >= 16 { return trim_text(type_text); }
+    let mut resolved = trim_text(type_text);
+    if ends_with(resolved, "[]") {
+        let element = trim_text(substring(resolved, 0, resolved.length - 2));
+        if starts_with(element, "(") && ends_with(element, ")") {
+            return "(" + _expand_artifact_alias_nested(substring(element, 1, element.length - 1), aliases, depth
+                + 1)
+                + ")[]";
+        }
+        let expanded_element = _expand_artifact_alias_nested(element, aliases, depth
+            + 1);
+        if starts_with(expanded_element, "*") {
+            return "(" + expanded_element + ")[]";
+        }
+        return expanded_element + "[]";
+    }
+    let mut alias_depth: int = 0;
+    loop {
+        if alias_depth >= 16 { break; }
+        let mut next: string = "";
+        let mut i: int = 0;
+        loop {
+            if i >= aliases.length { break; }
+            let declaration = aliases[i];
+            if declaration.name == bound_base_name(resolved) {
+                next = trim_text(apply_type_substitution(declaration.aliased_type.text, build_type_substitution(declaration.type_parameters, parse_type_arguments(resolved))));
+                break;
+            }
+            i += 1;
+        }
+        if next.length == 0 || next == resolved { break; }
+        resolved = next;
+        alias_depth += 1;
+    }
+    let function_type = parse_fn_type_text(resolved);
+    if function_type.ok {
+        let mut text = "fn (";
+        let mut i: int = 0;
+        loop {
+            if i >= function_type.param_types.length { break; }
+            if i > 0 { text = text + ", "; }
+            text = text + _expand_artifact_alias_nested(function_type.param_types[i], aliases, depth
+                + 1);
+            i += 1;
+        }
+        text = text + ")";
+        if function_type.return_type.length > 0 {
+            text = text + " -> " + _expand_artifact_alias_nested(function_type.return_type, aliases, depth
+                + 1);
+        }
+        i = 0;
+        if function_type.effects.length > 0 { text = text + " !["; }
+        loop {
+            if i >= function_type.effects.length { break; }
+            if i > 0 { text = text + ", "; }
+            text = text + function_type.effects[i];
+            i += 1;
+        }
+        if function_type.effects.length > 0 { text = text + "]"; }
+        return text;
+    }
+    if starts_with(resolved, "*") {
+        let mut prefix = "*";
+        let mut pointee = trim_text(substring(resolved, 1, resolved.length));
+        if starts_with(pointee, "const ") {
+            prefix = "*const ";
+            pointee = trim_text(substring(pointee, 6, pointee.length));
+        } else if starts_with(pointee, "mut ") {
+            prefix = "*mut ";
+            pointee = trim_text(substring(pointee, 4, pointee.length));
+        }
+        return prefix + _expand_artifact_alias_nested(pointee, aliases, depth
+            + 1);
+    }
+    let arguments = parse_type_arguments(resolved);
+    if arguments.length > 0 {
+        let mut result = bound_base_name(resolved) + "<";
+        let mut i: int = 0;
+        loop {
+            if i >= arguments.length { break; }
+            if i > 0 { result = result + ", "; }
+            result = result + _expand_artifact_alias_nested(arguments[i], aliases, depth
+                + 1);
+            i += 1;
+        }
+        return result + ">";
+    }
+    return resolved;
+}
+
+fn _expand_artifact_alias(type_text: string, aliases: Statement[]) -> string {
+    return _expand_artifact_alias_nested(type_text, aliases, 0);
+}
+
+fn _aliases_outside_type_parameters(aliases: Statement[], parameters: TypeParameter[]) -> Statement[] {
+    let mut visible: Statement[] = [];
+    for declaration in aliases {
+        let mut shadowed = false;
+        for parameter in parameters {
+            if declaration.name == parameter.name { shadowed = true; }
+        }
+        if !shadowed { visible.push(declaration); }
+    }
+    return visible;
+}
+
+// The native-IR parser keeps the base struct name but discards the generic
+// header. Recover its parameter list from the same artifact text so field
+// metadata can substitute a consumer's concrete type arguments.
+fn _artifact_type_parameters(header: string) -> TypeParameter[] {
+    let mut parameters: TypeParameter[] = [];
+    for argument in parse_type_arguments(header) {
+        let mut colon: int = -1;
+        let mut i: int = 0;
+        loop {
+            if i >= argument.length { break; }
+            if argument[i] == ":" {
+                colon = i;
+                break;
+            }
+            i += 1;
+        }
+        let mut name = trim_text(argument);
+        if colon >= 0 {
+            name = trim_text(substring(argument, 0, colon));
+        }
+        parameters.push(TypeParameter {
+            name: name, bound: null, span: null
+        });
+    }
+    return parameters;
+}
+
+fn _type_parameter_names(parameters: TypeParameter[]) -> string[] {
+    let mut names: string[] = [];
+    for parameter in parameters { names.push(parameter.name); }
+    return names;
+}
+
+// SFN-1296: index generic declaration headers once per artifact. Rescanning and
+// splitting the full native text for every function and method retains
+// quadratic scratch allocations in the arena during compiler cross-builds.
+fn _artifact_generic_headers(lines: string[]) -> ArtifactGenericHeader[] {
+    let mut headers: ArtifactGenericHeader[] = [];
+    let mut current_struct = "";
+    for line in lines {
+        let header = trim_text(line);
+        if starts_with(header, ".struct ") {
+            let declaration = trim_text(substring(header, 8, header.length));
+            current_struct = bound_base_name(declaration);
+            headers.push(ArtifactGenericHeader {
+                kind: "struct", owner: "", name: current_struct, declaration: declaration
+            });
+        } else if header == ".endstruct" { current_struct = ""; } else if current_struct.length == 0
+            && starts_with(header, ".fn ") {
+            let declaration = trim_text(substring(header, 4, header.length));
+            headers.push(ArtifactGenericHeader {
+                kind: "function", owner: "", name: bound_base_name(declaration), declaration: declaration
+            });
+        } else if current_struct.length > 0 && starts_with(header, ".method ") {
+            let declaration = trim_text(substring(header, 8, header.length));
+            headers.push(ArtifactGenericHeader {
+                kind: "method", owner: current_struct, name: bound_base_name(declaration), declaration: declaration
+            });
+        }
+    }
+    return headers;
+}
+
+fn _artifact_struct_type_parameters(name: string, headers: ArtifactGenericHeader[]) -> TypeParameter[] {
+    for header in headers {
+        if header.kind == "struct" && header.name == name {
+            return _artifact_type_parameters(header.declaration);
+        }
+    }
+    return [];
+}
+
+fn _artifact_callable_type_parameters(name: string, owner: string, headers: ArtifactGenericHeader[]) -> TypeParameter[] {
+    let mut kind = "function";
+    if owner.length > 0 { kind = "method"; }
+    for header in headers {
+        if header.kind == kind && header.owner == owner && header.name == name {
+            return _artifact_type_parameters(header.declaration);
+        }
+    }
+    return [];
+}
+
+fn _expand_artifact_aliases(aliases: Statement[]) -> Statement[] {
+    let mut expanded: Statement[] = [];
+    for declaration in aliases {
+        let visible_aliases = _aliases_outside_type_parameters(aliases, declaration.type_parameters);
+        expanded.push(Statement.TypeAliasDeclaration {
+            name: declaration.name, name_span: declaration.name_span, type_parameters: declaration.type_parameters, aliased_type: TypeAnnotation {
+                text: _expand_artifact_alias(declaration.aliased_type.text, visible_aliases)
+            }, decorators: declaration.decorators
+        });
+    }
+    return expanded;
+}
+
+fn _expanded_annotation(annotation: TypeAnnotation?, aliases: Statement[]) -> TypeAnnotation? {
+    if annotation == null { return null; }
+    return TypeAnnotation {
+        text: _expand_artifact_alias(annotation.text, aliases)
+    };
+}
+
+fn _expand_artifact_methods(methods: MethodDeclaration[], aliases: Statement[], owner: string, headers: ArtifactGenericHeader[]) -> MethodDeclaration[] {
+    let mut expanded: MethodDeclaration[] = [];
+    for method in methods {
+        let signature = method.signature;
+        let type_parameters = _artifact_callable_type_parameters(signature.name, owner, headers);
+        let visible_aliases = _aliases_outside_type_parameters(aliases, type_parameters);
+        let mut parameters: Parameter[] = [];
+        for parameter in signature.parameters {
+            parameters.push(Parameter {
+                name: parameter.name, type_annotation: _expanded_annotation(parameter.type_annotation, visible_aliases), default_value: parameter.default_value, mutable: parameter.mutable, span: parameter.span
+            });
+        }
+        expanded.push(MethodDeclaration {
+            signature: FunctionSignature {
+                name: signature.name, is_async: signature.is_async, parameters: parameters, return_type: _expanded_annotation(signature.return_type, visible_aliases), effects: signature.effects, type_parameters: type_parameters, name_span: signature.name_span
+            }, body: method.body, decorators: method.decorators
+        });
+    }
+    return expanded;
+}
+
+fn _expand_artifact_structs(structs: Statement[], aliases: Statement[], headers: ArtifactGenericHeader[]) -> Statement[] {
+    let mut expanded: Statement[] = [];
+    for declaration in structs {
+        let type_parameters = _artifact_struct_type_parameters(declaration.name, headers);
+        let visible_aliases = _aliases_outside_type_parameters(aliases, type_parameters);
+        let mut fields: FieldDeclaration[] = [];
+        for field in declaration.fields {
+            fields.push(FieldDeclaration {
+                name: field.name, type_annotation: TypeAnnotation {
+                    text: _expand_artifact_alias(field.type_annotation.text, visible_aliases)
+                }, mutable: field.mutable, name_span: field.name_span
+            });
+        }
+        expanded.push(Statement.StructDeclaration {
+            name: bound_base_name(declaration.name), name_span: declaration.name_span, type_parameters: type_parameters, implements_types: declaration.implements_types, fields: fields, methods: _expand_artifact_methods(declaration.methods, visible_aliases, declaration.name, headers), decorators: declaration.decorators
+        });
+    }
+    return expanded;
+}
+
+fn _expanded_native_parameter_types(function: NativeFunction, aliases: Statement[]) -> string[] {
+    let mut types: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= function.parameters.length { break; }
+        types.push(_expand_artifact_alias(function.parameters[i].type_annotation, aliases));
+        i += 1;
+    }
+    return types;
+}
+
+// Native artifacts emit aliases as `.type Name = T` lines, but the import
+// context parser does not retain them. Reparse only those declarations so
+// the type checker can enforce pointer qualifiers across module boundaries.
+fn _aliases_from_native_text(lines: string[]) -> Statement[] {
+    let mut aliases: Statement[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = lines[i];
+        if starts_with(line, ".type ") {
+            let declaration = substring(line, 1, line.length) + ";";
+            let parsed = parse_program(declaration);
+            if parsed.statements.length == 1 {
+                if parsed.statements[0].variant == "TypeAliasDeclaration" {
+                    aliases.push(parsed.statements[0]);
+                }
+            }
+        }
+        i += 1;
+    }
+    return aliases;
 }
 
 // Smallest argument count a cross-module call may supply: the index of the
@@ -716,6 +1041,7 @@ fn _interface_path_contains(paths: string[], target: string) -> boolean {
 fn load_imported_interfaces_with_implicit_paths(paths: string[], implicit_paths: string[]) -> ImportedInterfaceLoadResult ![io] {
     let mut interfaces: Statement[] = [];
     let mut structs: Statement[] = [];
+    let mut aliases: ImportedTypeAlias[] = [];
     let mut function_effects = empty_import_symbols();
     let mut missing: string[] = [];
     let mut parse_failures: string[] = [];
@@ -779,13 +1105,13 @@ fn load_imported_interfaces_with_implicit_paths(paths: string[], implicit_paths:
             // it to false, defeating the metadata channel before it reaches
             // `localize_import_symbols_for_program`.
             if is_implicit {
-                function_effects = append_implicit_function_signature_from_module(function_effects, entry.name, entry.effects, _provider_module_from_native_text(text), entry.return_type, entry.parameter_count, entry.required_parameter_count);
+                function_effects = append_implicit_function_signature_from_module(function_effects, entry.name, entry.effects, _provider_module_from_native_text(text), entry.return_type, entry.parameter_count, entry.required_parameter_count, entry.parameter_types, entry.type_parameters);
             } else {
-                function_effects = append_import_function_signature_from_module(function_effects, entry.name, entry.effects, entry.is_decorator, _provider_module_from_artifact_path(path), entry.return_type, entry.parameter_count, entry.required_parameter_count);
+                function_effects = append_import_function_signature_from_module(function_effects, entry.name, entry.effects, entry.is_decorator, _provider_module_from_artifact_path(path), entry.return_type, entry.parameter_count, entry.required_parameter_count, entry.parameter_types, entry.type_parameters);
             }
             k += 1;
         }
-        if parsed.interfaces.length == 0 && parsed.structs.length == 0 {
+        if parsed.interfaces.length == 0 && parsed.structs.length == 0 && parsed.aliases.length == 0 {
             skipped.push(path);
         } else {
             let mut j: int = 0;
@@ -798,6 +1124,17 @@ fn load_imported_interfaces_with_implicit_paths(paths: string[], implicit_paths:
             loop {
                 if m >= parsed.structs.length { break; }
                 structs.push(parsed.structs[m]);
+                aliases.push(ImportedTypeAlias {
+                    declaration: parsed.structs[m], provider_module: _provider_module_from_artifact_path(path)
+                });
+                m += 1;
+            }
+            m = 0;
+            loop {
+                if m >= parsed.aliases.length { break; }
+                aliases.push(ImportedTypeAlias {
+                    declaration: parsed.aliases[m], provider_module: _provider_module_from_artifact_path(path)
+                });
                 m += 1;
             }
         }
@@ -814,7 +1151,8 @@ fn load_imported_interfaces_with_implicit_paths(paths: string[], implicit_paths:
         native_texts: native_texts,
         implicit_symbols: implicit_surface.symbols,
         implicit_diagnostics: implicit_surface.diagnostics,
-        structs: structs
+        structs: structs,
+        aliases: aliases
     };
 }
 

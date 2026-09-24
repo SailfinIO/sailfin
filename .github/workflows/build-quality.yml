@@ -268,7 +268,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: build/cache
-          key: sailfin-buildcache-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ steps.layout.outputs.fp }}-${{ steps.layout.outputs.freshness }}
+          key: sailfin-buildcache-abi3-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ steps.layout.outputs.fp }}-${{ steps.layout.outputs.freshness }}
 
       # Failure-mode wiring (issue #782). Identifying which gate failed
       # has to happen in the gate job (only it can see per-step
@@ -458,9 +458,9 @@ jobs:
         uses: actions/cache@v6
         with:
           path: build/cache
-          key: sailfin-buildcache-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ steps.layout.outputs.fp }}-${{ steps.layout.outputs.freshness }}
+          key: sailfin-buildcache-abi3-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ steps.layout.outputs.fp }}-${{ steps.layout.outputs.freshness }}
           restore-keys: |
-            sailfin-buildcache-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ steps.layout.outputs.fp }}-
+            sailfin-buildcache-abi3-linux-x86_64-${{ steps.seed.outputs.seed_version }}-${{ steps.layout.outputs.fp }}-
 
       # Restore this job's OWN prior test-bin cache so the warm step below
       # recompiles only test binaries whose source changed and hits the rest

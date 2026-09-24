@@ -10,6 +10,12 @@
 import { Statement, TypeAnnotation } from "sfn/syntax";
 
 import { Diagnostic } from "../typecheck_types";
+import { bound_base_name } from "../typecheck_types/generic_bounds";
+import {
+    apply_type_substitution,
+    build_type_substitution,
+    parse_type_arguments
+} from "../typecheck_types/interface_and_generics";
 import { TypeckCtx } from "./context";
 import { _string_list_has } from "./symbols";
 
@@ -38,7 +44,9 @@ fn _struct_shape_is_resolvable(type_name: string[], ctx: TypeckCtx) -> boolean {
     loop {
         if index >= ctx.declarations.length { break; }
         if ctx.declarations[index].variant == "StructDeclaration" {
-            if ctx.declarations[index].name == name { return true; }
+            if ctx.declarations[index].name == bound_base_name(name) {
+                return true;
+            }
         }
         index += 1;
     }
@@ -46,7 +54,9 @@ fn _struct_shape_is_resolvable(type_name: string[], ctx: TypeckCtx) -> boolean {
     loop {
         if index >= ctx.imported_structs.length { break; }
         if ctx.imported_structs[index].variant == "StructDeclaration" {
-            if ctx.imported_structs[index].name == name { return true; }
+            if ctx.imported_structs[index].name == bound_base_name(name) {
+                return true;
+            }
         }
         index += 1;
     }
@@ -72,7 +82,7 @@ fn _struct_shape_is_resolvable(type_name: string[], ctx: TypeckCtx) -> boolean {
 // struct — those keep their normal verdict too.
 fn _struct_name_is_imported(type_name: string[], ctx: TypeckCtx) -> boolean {
     if type_name.length != 1 { return false; }
-    let name = type_name[0];
+    let name = bound_base_name(type_name[0]);
     let mut found_import: boolean = false;
     let mut index: int = 0;
     loop {
@@ -135,12 +145,14 @@ fn _struct_field_expected_type(type_name: string[], field_name: string, ctx: Typ
         if declaration_index >= ctx.declarations.length { break; }
         let declaration = ctx.declarations[declaration_index];
         if declaration.variant == "StructDeclaration" {
-            if declaration.name == name {
+            if declaration.name == bound_base_name(name) {
                 let mut field_index: int = 0;
                 loop {
                     if field_index >= declaration.fields.length { break; }
                     if declaration.fields[field_index].name == field_name {
-                        return declaration.fields[field_index].type_annotation;
+                        return TypeAnnotation {
+                            text: apply_type_substitution(declaration.fields[field_index].type_annotation.text, build_type_substitution(declaration.type_parameters, parse_type_arguments(name)))
+                        };
                     }
                     field_index += 1;
                 }
@@ -156,11 +168,9 @@ fn _struct_field_expected_type(type_name: string[], field_name: string, ctx: Typ
 // always wins a name collision — the same precedence the interface merge in
 // `typecheck/mod.sfn` gives locals.
 //
-// These declarations are reconstructed from `.sfn-asm` artifacts, so they
-// carry field names and annotation text but no method bodies and no type
-// parameters. That is sufficient here (the field's `fn(...)` annotation
-// round-trips verbatim) and is precisely why the result must not reach any
-// check that reasons about methods or generic substitution.
+// These declarations are reconstructed from `.sfn-asm` artifacts. Their
+// generic parameters are recovered from the struct header; method bodies
+// remain absent. The field's `fn(...)` annotation round-trips verbatim.
 fn _imported_struct_field_expected_type(type_name: string[], field_name: string, ctx: TypeckCtx) -> TypeAnnotation? {
     if type_name.length == 0 { return null; }
     let name = type_name[type_name.length - 1];
@@ -169,12 +179,14 @@ fn _imported_struct_field_expected_type(type_name: string[], field_name: string,
         if declaration_index >= ctx.imported_structs.length { break; }
         let declaration = ctx.imported_structs[declaration_index];
         if declaration.variant == "StructDeclaration" {
-            if declaration.name == name {
+            if declaration.name == bound_base_name(name) {
                 let mut field_index: int = 0;
                 loop {
                     if field_index >= declaration.fields.length { break; }
                     if declaration.fields[field_index].name == field_name {
-                        return declaration.fields[field_index].type_annotation;
+                        return TypeAnnotation {
+                            text: apply_type_substitution(declaration.fields[field_index].type_annotation.text, build_type_substitution(declaration.type_parameters, parse_type_arguments(name)))
+                        };
                     }
                     field_index += 1;
                 }

@@ -30,7 +30,43 @@
 // rewrites). That keeps cross-module name collisions from emitting
 // spurious `E0402` against a same-named in-module function.
 import { IntrinsicEffectTable, empty_intrinsic_effects } from "sfn/ir";
+import { starts_with, substring } from "sfn/strings";
 import { Program } from "sfn/syntax";
+
+// Driver-resolved source import identity. The source spelling is kept so the
+// pure analyzer can select the staged provider without path or I/O authority.
+struct ImportProviderBinding {
+    source: string;
+    provider_module: string;
+    symbol_name: string;
+    provider_symbol_name: string;
+}
+
+fn provider_for_import_source(bindings: ImportProviderBinding[], source: string) -> string {
+    let mut i: int = 0;
+    loop {
+        if i >= bindings.length { break; }
+        if bindings[i].source == source && bindings[i].symbol_name.length == 0 {
+            return bindings[i].provider_module;
+        }
+        i += 1;
+    }
+    return "";
+}
+
+fn provider_binding_for_imported_symbol(bindings: ImportProviderBinding[], source: string, name: string) -> ImportProviderBinding? {
+    for binding in bindings {
+        if binding.source == source && binding.symbol_name == name {
+            return binding;
+        }
+    }
+    for binding in bindings {
+        if binding.source == source && binding.symbol_name.length == 0 {
+            return binding;
+        }
+    }
+    return null;
+}
 
 // One callable signature exposed to a downstream caller. `name` is
 // the identifier the importing module sees after alias resolution
@@ -86,6 +122,12 @@ struct ImportedFunctionSignature {
     // must not shift the offset of an existing one.
     parameter_count: int;
     required_parameter_count: int;
+    // Declared parameter types for pointer qualifier checks. Empty when the
+    // artifact carries no signature or colliding declarations disagree.
+    parameter_types: string[];
+    // Binder names keep generic parameters distinct from unrelated aliases
+    // of the same spelling in the importing module.
+    type_parameters: string[];
 }
 
 // Aggregate of imported callable signatures exposed to a single
@@ -149,12 +191,12 @@ fn append_import_function_from_module(table: ImportSymbolTable, name: string, ef
 
 // `parameter_count`/`required_parameter_count` default to -1 so the callers
 // that only carry effect metadata keep the SFN-812 arity check fail-open.
-fn append_import_function_signature_from_module(table: ImportSymbolTable, name: string, effects: string[], is_decorator: boolean, provider_module: string, return_type: string, parameter_count: int = -1, required_parameter_count: int = -1) -> ImportSymbolTable {
-    return _append_function_with_origin(table, name, effects, "import", is_decorator, provider_module, return_type, parameter_count, required_parameter_count);
+fn append_import_function_signature_from_module(table: ImportSymbolTable, name: string, effects: string[], is_decorator: boolean, provider_module: string, return_type: string, parameter_count: int = -1, required_parameter_count: int = -1, parameter_types: string[] = [], type_parameters: string[] = []) -> ImportSymbolTable {
+    return _append_function_with_origin(table, name, effects, "import", is_decorator, provider_module, return_type, parameter_count, required_parameter_count, parameter_types, type_parameters);
 }
 
-fn append_implicit_function_signature_from_module(table: ImportSymbolTable, name: string, effects: string[], provider_module: string, return_type: string, parameter_count: int = -1, required_parameter_count: int = -1) -> ImportSymbolTable {
-    return _append_function_with_origin(table, name, effects, "implicit", false, provider_module, return_type, parameter_count, required_parameter_count);
+fn append_implicit_function_signature_from_module(table: ImportSymbolTable, name: string, effects: string[], provider_module: string, return_type: string, parameter_count: int = -1, required_parameter_count: int = -1, parameter_types: string[] = [], type_parameters: string[] = []) -> ImportSymbolTable {
+    return _append_function_with_origin(table, name, effects, "implicit", false, provider_module, return_type, parameter_count, required_parameter_count, parameter_types, type_parameters);
 }
 
 // G1b (#1184): record a same-module top-level `fn` (name, effects) in the
@@ -167,7 +209,7 @@ fn append_local_function(table: ImportSymbolTable, name: string, effects: string
     return _append_function_with_origin(table, name, effects, "local", false, "", "");
 }
 
-fn _append_function_with_origin(table: ImportSymbolTable, name: string, effects: string[], origin: string, is_decorator: boolean, provider_module: string, return_type: string, parameter_count: int = -1, required_parameter_count: int = -1) -> ImportSymbolTable {
+fn _append_function_with_origin(table: ImportSymbolTable, name: string, effects: string[], origin: string, is_decorator: boolean, provider_module: string, return_type: string, parameter_count: int = -1, required_parameter_count: int = -1, parameter_types: string[] = [], type_parameters: string[] = []) -> ImportSymbolTable {
     if name.length == 0 { return table; }
     let mut updated = table;
     let mut existing_index: int = -1;
@@ -176,7 +218,8 @@ fn _append_function_with_origin(table: ImportSymbolTable, name: string, effects:
         if i >= updated.functions.length { break; }
         let existing_is_implicit = updated.functions[i].origin == "implicit";
         let incoming_is_implicit = origin == "implicit";
-        if updated.functions[i].name == name && existing_is_implicit == incoming_is_implicit {
+        if updated.functions[i].name == name && existing_is_implicit == incoming_is_implicit
+            && updated.functions[i].provider_module == provider_module {
             existing_index = i;
             break;
         }
@@ -189,24 +232,14 @@ fn _append_function_with_origin(table: ImportSymbolTable, name: string, effects:
         effects_copy.push(effects[j]);
         j += 1;
     }
-    // This table is keyed by bare name with no module qualification, so two
-    // dependencies exporting the same name collide and the last one staged
-    // wins. That is harmless for effects — the checker only needs a superset
-    // — but unsound for a signature contract: `find_matching_paren` is
-    // declared with one parameter in `typecheck_types/text_utils.sfn` and two
-    // in `ir/native_ir_utils_text.sfn`, so whichever staged last would reject
-    // every correct call to the other (SFN-812).
-    //
-    // Resolving the collision properly means qualifying the table by
-    // exporting module and threading each file's actual import statements
-    // through, which is a larger change than this check needs. Until then a
-    // disagreeing collision poisons the contract fields to their existing
-    // fail-open sentinels, so the arity and void checks fall silent for that
-    // name rather than guessing which declaration the caller meant. Effects,
-    // `origin`, and the decorator bit keep their last-wins behaviour.
+    // Keep different providers separate until source imports choose one.
+    // Rows with the same provider can still disagree, so their signature
+    // fields stay unproven instead of selecting one by artifact order.
     let mut effective_count = parameter_count;
     let mut effective_required = required_parameter_count;
     let mut effective_return = return_type;
+    let mut effective_types = parameter_types;
+    let mut effective_type_parameters = type_parameters;
     if existing_index >= 0 {
         let previous = updated.functions[existing_index];
         if previous.parameter_count != parameter_count {
@@ -220,6 +253,12 @@ fn _append_function_with_origin(table: ImportSymbolTable, name: string, effects:
         if !strings_equal(previous.return_type, return_type) {
             effective_return = "";
         }
+        if !_same_parameter_types(previous.parameter_types, parameter_types) {
+            effective_types = [];
+        }
+        if !_same_parameter_types(previous.type_parameters, type_parameters) {
+            effective_type_parameters = [];
+        }
     }
     let entry = ImportedFunctionSignature {
         name: name,
@@ -229,7 +268,9 @@ fn _append_function_with_origin(table: ImportSymbolTable, name: string, effects:
         provider_module: provider_module,
         return_type: effective_return,
         parameter_count: effective_count,
-        required_parameter_count: effective_required
+        required_parameter_count: effective_required,
+        parameter_types: effective_types,
+        type_parameters: effective_type_parameters
     };
     if existing_index >= 0 {
         updated.functions[existing_index] = entry;
@@ -237,6 +278,17 @@ fn _append_function_with_origin(table: ImportSymbolTable, name: string, effects:
     }
     updated.functions.push(entry);
     return updated;
+}
+
+fn _same_parameter_types(left: string[], right: string[]) -> boolean {
+    if left.length != right.length { return false; }
+    let mut i: int = 0;
+    loop {
+        if i >= left.length { break; }
+        if left[i] != right[i] { return false; }
+        i += 1;
+    }
+    return true;
 }
 
 // O(N) name lookup. Returns null when the name is not an imported
@@ -256,20 +308,27 @@ fn lookup_imported_function(table: ImportSymbolTable, name: string) -> ImportedF
 }
 
 fn _provider_matches_import_source(provider_module: string, source: string) -> boolean {
-    if provider_module == source { return true; }
-    return provider_module == source + "/mod";
+    let mut path = source;
+    if starts_with(path, "./") { path = substring(path, 2, path.length); }
+    if provider_module == path { return true; }
+    return provider_module == path + "/mod";
 }
 
-fn _lookup_explicit_imported_function(table: ImportSymbolTable, name: string, source: string) -> ImportedFunctionSignature? {
+fn _lookup_explicit_imported_function(table: ImportSymbolTable, name: string, source: string, provider_module: string) -> ImportedFunctionSignature? {
     let mut i: int = 0;
     loop {
         if i >= table.functions.length { break; }
         let entry = table.functions[i];
-        if entry.name == name && _provider_matches_import_source(entry.provider_module, source) {
+        if entry.name == name && provider_module.length > 0 && entry.provider_module == provider_module {
+            return entry;
+        }
+        if entry.name == name && provider_module.length == 0
+            && _provider_matches_import_source(entry.provider_module, source) {
             return entry;
         }
         i += 1;
     }
+    if provider_module.length > 0 { return null; }
     i = 0;
     loop {
         if i >= table.functions.length { break; }
@@ -300,7 +359,7 @@ fn _lookup_explicit_imported_function(table: ImportSymbolTable, name: string, so
 //
 // The function is pure — no I/O — so unit tests can synthesize a
 // global table + program in-memory and assert the localized result.
-fn localize_import_symbols_for_program(program: Program, table: ImportSymbolTable) -> ImportSymbolTable {
+fn localize_import_symbols_for_program(program: Program, table: ImportSymbolTable, providers: ImportProviderBinding[] = []) -> ImportSymbolTable {
     let mut local = with_intrinsic_effects(empty_import_symbols(), table.intrinsic_effects);
     // Resolve source imports before adding the implicit namespace. The global
     // loader retains same-named ordinary and implicit declarations as separate
@@ -316,10 +375,20 @@ fn localize_import_symbols_for_program(program: Program, table: ImportSymbolTabl
             loop {
                 if s >= statement.import_specifiers.length { break; }
                 let spec = statement.import_specifiers[s];
-                let mut entry_opt = _lookup_explicit_imported_function(table, spec.name, statement.source);
+                let binding = provider_binding_for_imported_symbol(providers, statement.source, spec.name);
+                let mut provider = "";
+                let mut provider_name = spec.name;
+                if binding != null {
+                    let selected: ImportProviderBinding? = binding;
+                    provider = selected.provider_module;
+                    if selected.provider_symbol_name.length > 0 {
+                        provider_name = selected.provider_symbol_name;
+                    }
+                }
+                let mut entry_opt = _lookup_explicit_imported_function(table, provider_name, statement.source, provider);
                 // A provider may be both implicit and explicitly depended on;
                 // resolver deduplication leaves only its implicit-origin row.
-                if entry_opt == null {
+                if entry_opt == null && provider.length == 0 {
                     entry_opt = lookup_imported_function(table, spec.name);
                 }
                 if entry_opt != null {
@@ -330,7 +399,7 @@ fn localize_import_symbols_for_program(program: Program, table: ImportSymbolTabl
                         let alias_str: string? = alias;
                         if alias_str.length > 0 { local_name = alias_str; }
                     }
-                    local = append_import_function_signature_from_module(local, local_name, entry.effects, entry.is_decorator, entry.provider_module, entry.return_type, entry.parameter_count, entry.required_parameter_count);
+                    local = append_import_function_signature_from_module(local, local_name, entry.effects, entry.is_decorator, entry.provider_module, entry.return_type, entry.parameter_count, entry.required_parameter_count, entry.parameter_types, entry.type_parameters);
                 }
                 s += 1;
             }
@@ -345,7 +414,7 @@ fn localize_import_symbols_for_program(program: Program, table: ImportSymbolTabl
         if implicit_index >= table.functions.length { break; }
         let implicit_entry = table.functions[implicit_index];
         if implicit_entry.origin == "implicit" && lookup_imported_function(local, implicit_entry.name) == null {
-            local = append_implicit_function_signature_from_module(local, implicit_entry.name, implicit_entry.effects, implicit_entry.provider_module, implicit_entry.return_type, implicit_entry.parameter_count, implicit_entry.required_parameter_count);
+            local = append_implicit_function_signature_from_module(local, implicit_entry.name, implicit_entry.effects, implicit_entry.provider_module, implicit_entry.return_type, implicit_entry.parameter_count, implicit_entry.required_parameter_count, implicit_entry.parameter_types, implicit_entry.type_parameters);
         }
         implicit_index += 1;
     }
@@ -353,6 +422,7 @@ fn localize_import_symbols_for_program(program: Program, table: ImportSymbolTabl
 }
 
 export {
+    ImportProviderBinding,
     ImportSymbolTable,
     ImportedFunctionSignature,
     append_import_function,
@@ -364,5 +434,7 @@ export {
     empty_import_symbols,
     localize_import_symbols_for_program,
     lookup_imported_function,
+    provider_for_import_source,
+    provider_binding_for_imported_symbol,
     with_intrinsic_effects
 };

@@ -1,4 +1,5 @@
 // Driver-owned staged import-context discovery and artifact loading.
+import { ImportProviderBinding } from "sfn/analyzer/effect_imports";
 import { resolve_import_module_slug_for_module } from "sfn/codegen-llvm";
 import {
     ImplicitSymbol,
@@ -11,6 +12,7 @@ import {
 } from "sfn/ir";
 import { parse_layout_manifest, parse_native_imports_for_import } from "sfn/ir";
 import { ends_with, trim } from "sfn/strings";
+import { Program } from "sfn/syntax";
 
 fn import_context_root(work_dir: string) -> string {
     if work_dir.length == 0 { return "build/compiler/import-context"; }
@@ -58,6 +60,70 @@ fn _resolve_artifact_slug(root: string, slug: string) -> string ![io] {
         }
     }
     return slug;
+}
+
+struct ExportedSymbolProvider {
+    provider_module: string;
+    provider_symbol_name: string;
+}
+
+// A capsule entry can re-export a symbol from another module. Resolve both
+// its defining module and original name through explicit export records.
+fn _exported_symbol_provider(root: string, provider_slug: string, name: string, depth: int) -> ExportedSymbolProvider ![io] {
+    let current = ExportedSymbolProvider {
+        provider_module: provider_slug,
+        provider_symbol_name: name
+    };
+    if depth >= 8 { return current; }
+    let path = _native_text_path(root, provider_slug);
+    if !fs.exists(path) { return current; }
+    let exports = parse_native_imports_for_import(fs.readFile(path));
+    for entry in exports {
+        if entry.kind != "export" { continue; }
+        for spec in entry.specifiers {
+            let mut exported_name = spec.name;
+            if spec.alias != null {
+                let alias: string? = spec.alias;
+                if alias.length > 0 { exported_name = alias; }
+            }
+            if exported_name != name { continue; }
+            if entry.module.length == 0 {
+                return ExportedSymbolProvider {
+                    provider_module: provider_slug,
+                    provider_symbol_name: spec.name
+                };
+            }
+            let target_slug = resolve_import_module_slug_for_module(entry.module, provider_slug);
+            let target_provider = _resolve_artifact_slug(root, target_slug);
+            return _exported_symbol_provider(root, target_provider, spec.name, depth
+                + 1);
+        }
+    }
+    return current;
+}
+
+fn import_provider_bindings_for_program(program: Program, current_module_slug: string, root: string) -> ImportProviderBinding[] ![io] {
+    let mut bindings: ImportProviderBinding[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let statement = program.statements[i];
+        if statement.variant == "ImportDeclaration" {
+            let slug = resolve_import_module_slug_for_module(statement.source, current_module_slug);
+            let provider = _resolve_artifact_slug(root, slug);
+            bindings.push(ImportProviderBinding {
+                source: statement.source, provider_module: provider, symbol_name: "", provider_symbol_name: ""
+            });
+            for spec in statement.import_specifiers {
+                let resolved = _exported_symbol_provider(root, provider, spec.name, 0);
+                bindings.push(ImportProviderBinding {
+                    source: statement.source, provider_module: resolved.provider_module, symbol_name: spec.name, provider_symbol_name: resolved.provider_symbol_name
+                });
+            }
+        }
+        i += 1;
+    }
+    return bindings;
 }
 
 fn _append_module_alias(aliases: ImportModuleAlias[], import_slug: string, provider_slug: string) -> ImportModuleAlias[] {
@@ -231,6 +297,7 @@ fn empty_imported_module_context() -> ImportedModuleContext {
 }
 
 export {
+    import_provider_bindings_for_program,
     empty_imported_module_context,
     import_context_root,
     imported_module_context_from_loaded_data_with_implicit,

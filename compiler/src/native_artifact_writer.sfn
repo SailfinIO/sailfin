@@ -1,68 +1,15 @@
-// Driver-owned native-text validation and publication used by capsule staging.
-// LLVM lowering and the compiler entry module are deliberately absent from
-// this module's import closure.
+// Driver-owned native-text publication used by capsule staging. Validation
+// lives separately so cross-target emission can compile each closure within
+// the native compiler's memory budget.
 import { Diag } from "sfn/analyzer/diagnostic";
-import { empty_import_symbols } from "sfn/analyzer/effect_imports";
-import { collect_reexport_violations } from "sfn/analyzer/reexport_check";
-import { typecheck_diagnostics_with_prelude, typecheck_has_errors_with_prelude } from "sfn/analyzer/typecheck";
-import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import { emit_native_diag_lines } from "sfn/codegen";
-import { runtime_helper_call_names } from "sfn/codegen-llvm";
 import { native_lines_have_text } from "sfn/ir";
-import { Program } from "sfn/syntax";
-import { parse_program } from "sfn/syntax";
+import { Program, parse_program } from "sfn/syntax";
 
 import { _publish_lines_atomic } from "./build/fs";
 import { _env_flag } from "./build_flags";
-import { run_ownership_checker } from "./check/ownership";
 import { emit_native_lines_with_module_name } from "./codegen_driver";
-import { report_reexport_violations, split_source_lines } from "./diagnostics_render";
-import { validate_and_render_effects } from "./effect_gate";
-import { load_prelude_global_names } from "./prelude_globals";
-import { render_terminal_diagnostic } from "./terminal_output";
-
-fn _staging_emit_typecheck_diagnostics(entries: Diagnostic[], source: string, file_path: string) ![io] {
-    let lines = split_source_lines(source);
-    let mut index: int = 0;
-    loop {
-        if index >= entries.length { break; }
-        entries[index].file_path = file_path;
-        let rendered = render_terminal_diagnostic(diagnostic_to_diag(entries[index], "typecheck"), lines, "typecheck");
-        print.err(rendered);
-        index += 1;
-    }
-}
-
-fn _staging_reject_parse_errors(program: Program) -> boolean ![io] {
-    let mut found: boolean = false;
-    let mut index: int = 0;
-    loop {
-        if index >= program.statements.length { break; }
-        let statement = program.statements[index];
-        if statement.variant == "Unknown" {
-            if statement.code.length > 0 {
-                print.err("error[" + statement.code + "]: " + statement.message);
-            } else {
-                let mut near = "";
-                if statement.tokens.length > 0 {
-                    near = " near `" + statement.tokens[0].lexeme + "`";
-                }
-                print.err("error[E0500]: parse error: unrecognized syntax"
-                    + near);
-            }
-            found = true;
-        }
-        index += 1;
-    }
-    return found;
-}
-
-fn _staging_reject_reexport_violations(program: Program) -> boolean ![io] {
-    let violations = collect_reexport_violations(program);
-    if violations.length == 0 { return false; }
-    report_reexport_violations(violations);
-    return true;
-}
+import { validate_staged_program } from "./native_artifact_validation";
 
 fn _staging_report_emit_diags(diags: Diag[], file_path: string) ![io] {
     if !_env_flag("SAILFIN_DEBUG_LOWERING") { return; }
@@ -83,18 +30,7 @@ fn _staging_report_emit_diags(diags: Diag[], file_path: string) ![io] {
 
 fn write_staged_native_text_file(source: string, module_name: string, out_path: string) -> boolean ![io] {
     let program: Program = parse_program(source);
-    let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
-    if typecheck_has_errors_with_prelude(program, prelude_globals) {
-        let diagnostics = typecheck_diagnostics_with_prelude(program, prelude_globals);
-        _staging_emit_typecheck_diagnostics(diagnostics, source, module_name);
-        return false;
-    }
-    if _staging_reject_parse_errors(program) { return false; }
-    if _staging_reject_reexport_violations(program) { return false; }
-    if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
-        return false;
-    }
-    if run_ownership_checker(program) > 0 { return false; }
+    if !validate_staged_program(program, source, module_name) { return false; }
     let emitted = emit_native_lines_with_module_name(program, module_name);
     _staging_report_emit_diags(emitted.diags, module_name);
     if !native_lines_have_text(emitted.lines) { return false; }

@@ -18,6 +18,7 @@
 import { analyze_program } from "sfn/analyzer";
 import { ImportSymbolTable, empty_import_symbols } from "sfn/analyzer/effect_imports";
 import { ClosureSymbolSet } from "sfn/analyzer/import_resolution_check";
+import { ImportedTypeAlias } from "sfn/analyzer/typecheck_imports";
 import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
 import { ImplicitSymbol } from "sfn/ir";
 import { Statement } from "sfn/syntax";
@@ -91,6 +92,7 @@ struct CheckGroup {
     // populates `interfaces`. Trailing for pinned-seed positional layout
     // stability.
     structs: Statement[];
+    aliases: ImportedTypeAlias[];
 }
 
 fn _emit_check_header(path: string, quiet: boolean) ![io] {
@@ -283,8 +285,9 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
             };
             let empty_specs: string[] = [];
             let empty_structs: Statement[] = [];
+            let empty_aliases: ImportedTypeAlias[] = [];
             groups.push(CheckGroup {
-                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, function_effects: empty_import_symbols(), implicit_symbols: empty_implicit, capabilities_required: empty_caps, capabilities_declared: false, capabilities_dev_required: empty_caps, closure_symbols: empty_closure, resolved_capsule_specs: empty_specs, capsule_specs_known: false, structs: empty_structs
+                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, function_effects: empty_import_symbols(), implicit_symbols: empty_implicit, capabilities_required: empty_caps, capabilities_declared: false, capabilities_dev_required: empty_caps, closure_symbols: empty_closure, resolved_capsule_specs: empty_specs, capsule_specs_known: false, structs: empty_structs, aliases: empty_aliases
             });
             idx = groups.length - 1;
         }
@@ -368,6 +371,7 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
         }
         groups[gi].interfaces = load.interfaces;
         groups[gi].structs = load.structs;
+        groups[gi].aliases = load.aliases;
         groups[gi].implicit_symbols = load.implicit_symbols;
         // Phase E: stash the cross-module function-effect table so
         // the per-file analysis loop below can hand it to
@@ -455,7 +459,7 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
         let group_idx = file_group_index[fi];
         let source = fs.readFile(path);
         let program = parse_program(source);
-        let analyzer_input = analyzer_input_for_check(program, path, groups[group_idx].interfaces, groups[group_idx].function_effects, groups[group_idx].capabilities_required, groups[group_idx].capabilities_declared, groups[group_idx].capabilities_dev_required, groups[group_idx].closure_symbols, allow_bare_assert, groups[group_idx].implicit_symbols, groups[group_idx].resolved_capsule_specs, groups[group_idx].capsule_specs_known, groups[group_idx].structs);
+        let analyzer_input = analyzer_input_for_check(program, path, groups[group_idx].interfaces, groups[group_idx].function_effects, groups[group_idx].capabilities_required, groups[group_idx].capabilities_declared, groups[group_idx].capabilities_dev_required, groups[group_idx].closure_symbols, allow_bare_assert, groups[group_idx].implicit_symbols, groups[group_idx].resolved_capsule_specs, groups[group_idx].capsule_specs_known, groups[group_idx].structs, groups[group_idx].aliases);
         let result = check_result_from_analysis(analyze_program(analyzer_input), source);
         // Emit any diagnostic — error or warning — so contributors
         // running `sfn check` under Phase B (warning default) actually
@@ -496,7 +500,8 @@ fn handle_check_command(args: string[], binary_dir: string) -> int ![io] {
         native_texts: empty_texts,
         implicit_symbols: empty_implicit,
         implicit_diagnostics: [],
-        structs: empty_interfaces
+        structs: empty_interfaces,
+        aliases: []
     };
 
     if json {

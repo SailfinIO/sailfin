@@ -6,29 +6,155 @@
 // by SFN-1291 to keep that module under the line budget enforced by
 // `typecheck_line_budget_test.sfn`.
 import { parse_fn_type_text } from "sfn/ir";
-import { ends_with, substring } from "sfn/strings";
-import { Expression, TypeAnnotation } from "sfn/syntax";
+import { ends_with, starts_with, substring } from "sfn/strings";
+import {
+    Expression,
+    Statement,
+    TypeAnnotation,
+    TypeParameter
+} from "sfn/syntax";
 
+import { lookup_imported_function } from "../effect_imports";
+import { bound_base_name } from "../typecheck_types/generic_bounds";
+import {
+    TypeSubstitution,
+    apply_type_substitution,
+    build_type_substitution,
+    parse_type_arguments
+} from "../typecheck_types/interface_and_generics";
 import { find_value_symbol, is_function_kind } from "../typecheck_types/symbol_table_and_raw_exprs";
 import { trim_text } from "../typecheck_types/text_utils";
+import {
+    _expression_type_text,
+    _field_type,
+    _pointer_pointee,
+    _resolve_type_alias
+} from "./const_pointer_stores";
 import { TypeckCtx } from "./context";
+
+// A callable's type parameters bind within its signature. Keep their names
+// opaque to the pointer-qualifier pass so an unrelated module alias cannot
+// turn a generic `T` into a writable pointer expectation.
+fn _opaque_generic_expected(text: string, names: string[]) -> TypeAnnotation {
+    let mut olds: string[] = [];
+    let mut news: string[] = [];
+    for name in names {
+        olds.push(name);
+        news.push("__sfn_unbound_generic_" + name);
+    }
+    return TypeAnnotation {
+        text: apply_type_substitution(text, TypeSubstitution {
+            olds: olds, news: news
+        })
+    };
+}
+
+fn _type_parameter_names(parameters: TypeParameter[]) -> string[] {
+    let mut names: string[] = [];
+    for parameter in parameters { names.push(parameter.name); }
+    return names;
+}
+
+fn _local_function_type_parameters(name: string, ctx: TypeckCtx) -> string[] {
+    for declaration in ctx.declarations {
+        if declaration.variant == "FunctionDeclaration" && declaration.signature.name == name {
+            return _type_parameter_names(declaration.signature.type_parameters);
+        }
+    }
+    return [];
+}
+
+fn _owner_substitution_outside_method(declaration: Statement, owner: string, method_parameters: TypeParameter[]) -> TypeSubstitution {
+    let original = build_type_substitution(declaration.type_parameters, parse_type_arguments(owner));
+    let mut olds: string[] = [];
+    let mut news: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= original.olds.length { break; }
+        let mut shadowed = false;
+        for parameter in method_parameters {
+            if original.olds[i] == parameter.name { shadowed = true; }
+        }
+        if !shadowed {
+            olds.push(original.olds[i]);
+            news.push(original.news[i]);
+        }
+        i += 1;
+    }
+    return TypeSubstitution { olds: olds, news: news };
+}
+
+fn _method_parameter_type(declarations: Statement[], owner: string, method: string, index: int) -> TypeAnnotation? {
+    let mut i: int = 0;
+    loop {
+        if i >= declarations.length { break; }
+        let declaration = declarations[i];
+        if declaration.variant == "StructDeclaration" && declaration.name == bound_base_name(owner) {
+            let mut j: int = 0;
+            loop {
+                if j >= declaration.methods.length { break; }
+                let signature = declaration.methods[j].signature;
+                if signature.name == method {
+                    let argument_index = index + 1;
+                    if argument_index >= signature.parameters.length {
+                        return null;
+                    }
+                    let expected = apply_type_substitution(signature.parameters[argument_index].type_annotation.text, _owner_substitution_outside_method(declaration, owner, signature.type_parameters));
+                    return _opaque_generic_expected(expected, _type_parameter_names(signature.type_parameters));
+                }
+                j += 1;
+            }
+        }
+        i += 1;
+    }
+    return null;
+}
 
 fn _call_argument_expected_type(expression: Expression, index: int, ctx: TypeckCtx) -> TypeAnnotation? {
     if expression.callee == null { return null; }
+    if expression.callee.variant == "Member" {
+        let callee = expression.callee;
+        let mut owner = _expression_type_text(callee.object, ctx);
+        if callee.member == "push" && index == 0 {
+            let element = _array_element_expected_type(TypeAnnotation {
+                text: owner
+            });
+            if element != null { return element; }
+        }
+        if starts_with(trim_text(owner), "*") {
+            owner = _pointer_pointee(owner);
+        }
+        owner = _resolve_type_alias(owner, ctx);
+        let local = _method_parameter_type(ctx.declarations, owner, callee.member, index);
+        if local != null { return local; }
+        let imported = _method_parameter_type(ctx.imported_structs, owner, callee.member, index);
+        if imported != null { return imported; }
+        let field_fn = parse_fn_type_text(_field_type(owner, callee.member, ctx));
+        if field_fn.ok && index < field_fn.param_types.length {
+            return TypeAnnotation { text: field_fn.param_types[index] };
+        }
+        return null;
+    }
     if expression.callee.variant != "Identifier" { return null; }
     let mut entry = find_value_symbol(ctx.bindings, expression.callee.name);
     if entry == null {
         entry = find_value_symbol(ctx.top_level, expression.callee.name);
     }
     if entry == null { return null; }
+    if entry.kind == "import" {
+        let imported = lookup_imported_function(ctx.imports, expression.callee.name);
+        if imported == null { return null; }
+        if index >= imported.parameter_types.length { return null; }
+        return _opaque_generic_expected(imported.parameter_types[index], imported.type_parameters);
+    }
     if is_function_kind(entry.kind) {
         if index >= entry.function_parameter_types.length { return null; }
-        return TypeAnnotation {
-            text: entry.function_parameter_types[index]
-        };
+        return _opaque_generic_expected(entry.function_parameter_types[index], _local_function_type_parameters(expression.callee.name, ctx));
     }
-    if entry.declared_type.length == 0 { return null; }
-    let fn_type = parse_fn_type_text(entry.declared_type);
+    let mut value_type = entry.declared_type;
+    if value_type.length == 0 { value_type = entry.inferred_type; }
+    if value_type.length == 0 { return null; }
+    let fn_type = parse_fn_type_text(value_type);
     if !fn_type.ok { return null; }
     if index >= fn_type.param_types.length { return null; }
     return TypeAnnotation { text: fn_type.param_types[index] };
@@ -41,8 +167,10 @@ fn _assignment_expected_type(target: Expression, ctx: TypeckCtx) -> TypeAnnotati
         entry = find_value_symbol(ctx.top_level, target.name);
     }
     if entry == null { return null; }
-    if entry.declared_type.length == 0 { return null; }
-    return TypeAnnotation { text: entry.declared_type };
+    let mut value_type = entry.declared_type;
+    if value_type.length == 0 { value_type = entry.inferred_type; }
+    if value_type.length == 0 { return null; }
+    return TypeAnnotation { text: value_type };
 }
 
 fn _array_element_expected_type(expected: TypeAnnotation?) -> TypeAnnotation? {

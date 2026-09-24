@@ -842,9 +842,9 @@ fn _fs_name_is_dot(name: *u8) -> bool {
 // `SfnArray` `arr` ascending by byte order (libc `strcmp`), in place.
 // Selection sort (directory entry counts are small) swapping
 // pointer-sized slots via `memcpy` through an 8-byte scratch —
-// `memcpy` is the only pointer-store primitive Sailfin exposes (there
-// is no `pointer_write` intrinsic, only the special-cased
-// `pointer_read_i64` load). Each slot's `char*` is read as an `i64`
+// `memcpy` copies complete pointer-sized slots through byte pointers;
+// this avoids depending on the slot's pointee type. Each slot's `char*`
+// is read as an `i64`
 // address via `sailfin_intrinsic_pointer_read_i64` (the same overlay
 // trick `sfn_fs_write_lines` uses). A `malloc` failure for the scratch
 // leaves the array unsorted rather than corrupting it.

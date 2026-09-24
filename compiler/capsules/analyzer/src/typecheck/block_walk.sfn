@@ -35,7 +35,12 @@ import {
     ctx_with_expected_type,
     ctx_with_type_params
 } from "./context";
-import { walk_expression, walk_match_pattern } from "./expression_walk";
+import {
+    pointer_coercion_diagnostics,
+    pointer_initializer_type,
+    walk_expression,
+    walk_match_pattern
+} from "./expression_walk";
 import { _build_nested_fn_scope, _hoist_nested_fn_names } from "./function_scopes";
 import { register_match_pattern_bindings } from "./patterns";
 import { check_expected_primitive_type } from "./primitive_rules";
@@ -116,10 +121,13 @@ fn walk_block_expressions(block: Block, ctx: TypeckCtx) -> Diagnostic[] {
             }
             let declared_struct = _declared_struct_annotation(statement.type_annotation, bindings, ctx.type_params);
             let mut declared_type: string = "";
+            let mut inferred_type: string = "";
             if statement.type_annotation != null {
                 declared_type = statement.type_annotation.text;
+            } else {
+                inferred_type = pointer_initializer_type(statement.initializer, ctx_with_bindings(ctx, bindings, scope_start));
             }
-            let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim, declared_struct, declared_type);
+            let registration = register_local_symbol(bindings, statement.name, "variable", statement.span, scope_start, false, false, elem_kind, decl_prim, declared_struct, declared_type, inferred_type);
             bindings = registration.bindings;
         }
         index += 1;
@@ -133,19 +141,27 @@ fn walk_statement_expressions(statement: Statement, ctx: TypeckCtx) -> Diagnosti
     }
     if statement.variant == "ReturnStatement" {
         let return_diags = walk_expression(statement.expression, ctx_with_expected_type(ctx, ctx.enclosing_return_type));
+        let mut const_diags: Diagnostic[] = [];
+        if ctx.enclosing_return_type != null {
+            const_diags = pointer_coercion_diagnostics(statement.expression, ctx.enclosing_return_type.text, ctx, statement.span);
+        }
         // A lambda-body `return { ... }` is classified against the lambda's
         // declared return type (installed as `ctx.enclosing_return_type` by
         // the `Lambda` branch's `ctx_enter_body`) — the #1905 lambda-return
         // twin of the #1904 function-return check.
         let object_literal_diags = check_object_literal_target(statement.expression, ctx.enclosing_return_type, "return", statement.span, ctx.top_level);
         let primitive_diags = check_expected_primitive_type(statement.expression, ctx.enclosing_return_type, ctx.bindings, "return value", "return", statement.span);
-        return return_diags.concat(object_literal_diags).concat(primitive_diags);
+        return return_diags.concat(object_literal_diags).concat(const_diags).concat(primitive_diags);
     }
     if statement.variant == "ThrowStatement" {
         return walk_expression(statement.expression, ctx);
     }
     if statement.variant == "VariableDeclaration" {
         let init_diags = walk_expression(statement.initializer, ctx_with_expected_type(ctx, statement.type_annotation));
+        let mut const_diags: Diagnostic[] = [];
+        if statement.type_annotation != null {
+            const_diags = pointer_coercion_diagnostics(statement.initializer, statement.type_annotation.text, ctx, statement.span);
+        }
         let annotation_diags = check_bare_fn_type_annotation(statement.type_annotation, statement.name, statement.span);
         let array_diags2 = check_malformed_array_annotation(statement.type_annotation, statement.name, statement.span);
         let unknown_diags2 = check_unknown_type_annotation(statement.type_annotation, statement.name, statement.span, ctx.known_types, ctx.type_params);
@@ -160,7 +176,7 @@ fn walk_statement_expressions(statement: Statement, ctx: TypeckCtx) -> Diagnosti
         let array_element_diags = check_array_element_type(statement.initializer, statement.type_annotation, ctx, "initializer for `"
             + statement.name
             + "`", statement.name, statement.initializer_span);
-        return init_diags.concat(annotation_diags).concat(array_diags2).concat(unknown_diags2).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags).concat(primitive_diags).concat(array_element_diags);
+        return init_diags.concat(const_diags).concat(annotation_diags).concat(array_diags2).concat(unknown_diags2).concat(intersection_diags).concat(object_literal_diags).concat(uninferable_ctor_diags).concat(primitive_diags).concat(array_element_diags);
     }
     if statement.variant == "IfStatement" {
         let mut diagnostics = walk_expression(statement.condition, ctx);

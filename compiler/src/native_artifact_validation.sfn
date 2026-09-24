@@ -1,0 +1,74 @@
+// Validate staged native sources before emitting or publishing their text.
+import { empty_import_symbols } from "sfn/analyzer/effect_imports";
+import { collect_reexport_violations } from "sfn/analyzer/reexport_check";
+import { typecheck_diagnostics_with_prelude, typecheck_has_errors_with_prelude } from "sfn/analyzer/typecheck";
+import { Diagnostic, diagnostic_to_diag } from "sfn/analyzer/typecheck_types";
+import { runtime_helper_call_names } from "sfn/codegen-llvm";
+import { Program } from "sfn/syntax";
+
+import { run_ownership_checker } from "./check/ownership";
+import { report_reexport_violations, split_source_lines } from "./diagnostics_render";
+import { validate_and_render_effects } from "./effect_gate";
+import { load_prelude_global_names } from "./prelude_globals";
+import { render_terminal_diagnostic } from "./terminal_output";
+
+fn _staging_emit_typecheck_diagnostics(entries: Diagnostic[], source: string, file_path: string) ![io] {
+    let lines = split_source_lines(source);
+    let mut index: int = 0;
+    loop {
+        if index >= entries.length { break; }
+        entries[index].file_path = file_path;
+        let rendered = render_terminal_diagnostic(diagnostic_to_diag(entries[index], "typecheck"), lines, "typecheck");
+        print.err(rendered);
+        index += 1;
+    }
+}
+
+fn _staging_reject_parse_errors(program: Program) -> boolean ![io] {
+    let mut found: boolean = false;
+    let mut index: int = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        if statement.variant == "Unknown" {
+            if statement.code.length > 0 {
+                print.err("error[" + statement.code + "]: " + statement.message);
+            } else {
+                let mut near = "";
+                if statement.tokens.length > 0 {
+                    near = " near `" + statement.tokens[0].lexeme + "`";
+                }
+                print.err("error[E0500]: parse error: unrecognized syntax"
+                    + near);
+            }
+            found = true;
+        }
+        index += 1;
+    }
+    return found;
+}
+
+fn _staging_reject_reexport_violations(program: Program) -> boolean ![io] {
+    let violations = collect_reexport_violations(program);
+    if violations.length == 0 { return false; }
+    report_reexport_violations(violations);
+    return true;
+}
+
+fn validate_staged_program(program: Program, source: string, module_name: string) -> boolean ![io] {
+    let prelude_globals = load_prelude_global_names(runtime_helper_call_names());
+    if typecheck_has_errors_with_prelude(program, prelude_globals) {
+        let diagnostics = typecheck_diagnostics_with_prelude(program, prelude_globals);
+        _staging_emit_typecheck_diagnostics(diagnostics, source, module_name);
+        return false;
+    }
+    if _staging_reject_parse_errors(program) { return false; }
+    if _staging_reject_reexport_violations(program) { return false; }
+    if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
+        return false;
+    }
+    if run_ownership_checker(program) > 0 { return false; }
+    return true;
+}
+
+export { validate_staged_program };

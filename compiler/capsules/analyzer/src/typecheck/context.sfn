@@ -65,9 +65,10 @@ struct TypeckCtx {
     //
     // Empty on the capsule-staging path, which typechecks each module
     // standalone by design — the `Struct` arm defers its fn-value verdict
-    // there rather than guessing. Carries no methods and no type parameters
-    // (artifacts record neither), so it must never feed a check that reasons
-    // about either.
+    // there rather than guessing. Method signatures are reconstructed for
+    // pointer qualifier checks; imported method bodies remain empty. The
+    // loader recovers struct parameters from artifact headers for field
+    // substitution, while generic-instantiation checks stay local.
     imported_structs: Statement[];
 }
 

@@ -24,7 +24,6 @@ import {
     trace_lowering
 } from "sfn/codegen-llvm/lowering_debug_state";
 import { contains } from "sfn/strings";
-import { parse_program } from "sfn/syntax";
 import { expect_eq_bool, expect_eq_str, expect_eq_str_array } from "sfn/test";
 
 import {
@@ -75,7 +74,6 @@ import {
     set_build_target,
     set_static_link
 } from "../../src/build/target_state";
-import { emit_native_text_with_module_name } from "../../src/codegen_driver";
 import {
     RuntimeCapsuleArtifacts,
     RuntimeTargetArtifacts,
@@ -153,7 +151,16 @@ test "target: runtime cache identity and linker share the effective target input
 // invocation. This guards in-process compiler/test runs from inheriting a
 // previous target, debug toggle, or test-runner state.
 test "target: provider entrypoint overwrites its complete context" ![io] {
-    let native = emit_native_text_with_module_name(parse_program("fn profile_probe() -> int { return 1; }"), "provider_context_probe");
+    // Keep this provider-context fixture small so the target test binary does
+    // not pull in the entire native emitter just to lower one trivial body.
+    let native = "; Sailfin Native Prototype\n"
+        + ".module provider_context_probe\n\n"
+        + ".fn profile_probe() -> int\n"
+        + ".meta return int\n"
+        + ".meta effects none\n"
+        + "    .span 1 29 1 38\n"
+        + "    ret 1\n"
+        + ".endfn\n\n";
     let first = LLVMProviderContext {
         target_os: "Darwin",
         target_arch: "aarch64",

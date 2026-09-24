@@ -16,6 +16,7 @@
 import { validate_effects_with_imports } from "sfn/analyzer/effect_checker";
 import { EffectViolation } from "sfn/analyzer/effect_checker/types";
 import {
+    ImportProviderBinding,
     ImportSymbolTable,
     ImportedFunctionSignature,
     append_implicit_function_signature_from_module,
@@ -227,6 +228,69 @@ test "localize: an explicit import wins over the same-named implicit callable" {
     assert local.functions[0].effects[0] == "net";
     assert local.functions[0].return_type == "string";
     assert local.functions[0].parameter_count == 1;
+}
+
+test "localize: imported parameter types survive aliasing" {
+    let mut global = empty_import_symbols();
+    global = append_import_function_signature_from_module(global, "put", [], false, "demo/mod", "void", 1, 1, ["*i32"]);
+    let program = Program {
+        statements: [_import_decl("put", "write", "demo")]
+    };
+    let local = localize_import_symbols_for_program(program, global);
+    assert local.functions.length == 1;
+    assert local.functions[0].name == "write";
+    assert local.functions[0].parameter_types.length == 1;
+    assert local.functions[0].parameter_types[0] == "*i32";
+}
+
+test "imported parameter types remain separate across providers" {
+    let mut global = empty_import_symbols();
+    global = append_import_function_signature_from_module(global, "put", [], false, "a/mod", "void", 1, 1, ["*i32"]);
+    global = append_import_function_signature_from_module(global, "put", [], false, "b/mod", "void", 1, 1, ["*const i32"]);
+    assert global.functions.length == 2;
+    let program = Program {
+        statements: [_import_decl("put", null, "a")]
+    };
+    let local = localize_import_symbols_for_program(program, global);
+    assert local.functions.length == 1;
+    assert local.functions[0].parameter_types[0] == "*i32";
+}
+
+test "localize: capsule re-export selects its defining module across same-named members" {
+    let mut global = empty_import_symbols();
+    global = append_import_function_signature_from_module(global, "emit_native", [], false, "codegen_driver", "EmitNativeResult", 1, 1, ["Program"]);
+    global = append_import_function_signature_from_module(global, "emit_native", [], false, "sfn/codegen/other", "EmitNativeResult", 3, 3, ["Program", "int", "int"]);
+    global = append_import_function_signature_from_module(global, "emit_native", [], false, "sfn/codegen/emit_native", "EmitNativeResult", 2, 2, ["Program", "LambdaCaptureRecord[]"]);
+    let program = Program {
+        statements: [_import_decl("emit_native", null, "sfn/codegen")]
+    };
+    let providers = [ImportProviderBinding {
+        source: "sfn/codegen", provider_module: "sfn/codegen/mod", symbol_name: "", provider_symbol_name: ""
+    }, ImportProviderBinding {
+        source: "sfn/codegen", provider_module: "sfn/codegen/emit_native", symbol_name: "emit_native", provider_symbol_name: "emit_native"
+    }];
+    let local = localize_import_symbols_for_program(program, global, providers);
+    assert local.functions.length == 1;
+    assert local.functions[0].provider_module == "sfn/codegen/emit_native";
+    assert local.functions[0].parameter_count == 2;
+}
+
+test "localize: aliased re-export retains the defining function name" {
+    let mut global = empty_import_symbols();
+    global = append_import_function_signature_from_module(global, "g", [], false, "sfn/example/a", "int", 1, 1, ["int"]);
+    global = append_import_function_signature_from_module(global, "f", ["io"], false, "sfn/example/z", "int", 2, 2, ["int", "int"]);
+    let program = Program {
+        statements: [_import_decl("g", null, "sfn/example")]
+    };
+    let providers = [ImportProviderBinding {
+        source: "sfn/example", provider_module: "sfn/example/z", symbol_name: "g", provider_symbol_name: "f"
+    }];
+    let local = localize_import_symbols_for_program(program, global, providers);
+    assert local.functions.length == 1;
+    assert local.functions[0].name == "g";
+    assert local.functions[0].provider_module == "sfn/example/z";
+    assert local.functions[0].parameter_count == 2;
+    assert local.functions[0].effects[0] == "io";
 }
 
 test "localize: an explicit import from the implicit provider ignores an unrelated ordinary collision" {

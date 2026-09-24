@@ -1,0 +1,653 @@
+// SFN-1296: a raw `*const T` is a read-only view of its pointee.
+import { parse_fn_type_text } from "sfn/ir";
+import { ends_with, starts_with, substring } from "sfn/strings";
+import {
+    Expression,
+    SourceSpan,
+    Statement,
+    TypeAnnotation,
+    TypeParameter
+} from "sfn/syntax";
+
+import { lookup_imported_function } from "../effect_imports";
+import { Diagnostic } from "../typecheck_types";
+import { bound_base_name } from "../typecheck_types/generic_bounds";
+import {
+    TypeSubstitution,
+    apply_type_substitution,
+    build_type_substitution,
+    parse_type_arguments
+} from "../typecheck_types/interface_and_generics";
+import { find_value_symbol } from "../typecheck_types/symbol_table_and_raw_exprs";
+import { token_from_name, trim_text } from "../typecheck_types/text_utils";
+import { TypeckCtx } from "./context";
+
+fn _pointer_pointee(type_text: string) -> string {
+    let text = trim_text(type_text);
+    if !starts_with(text, "*") { return ""; }
+    let mut pointee = trim_text(substring(text, 1, text.length));
+    if starts_with(pointee, "const ") {
+        pointee = trim_text(substring(pointee, 6, pointee.length));
+    } else if starts_with(pointee, "mut ") {
+        pointee = trim_text(substring(pointee, 4, pointee.length));
+    }
+    return pointee;
+}
+
+fn _is_const_pointer(type_text: string) -> boolean {
+    let text = trim_text(type_text);
+    if !starts_with(text, "*") { return false; }
+    return starts_with(trim_text(substring(text, 1, text.length)), "const ");
+}
+
+fn _array_element(type_text: string) -> string {
+    let text = trim_text(type_text);
+    if !ends_with(text, "[]") { return ""; }
+    let mut element = trim_text(substring(text, 0, text.length - 2));
+    if starts_with(element, "(") && ends_with(element, ")") {
+        element = trim_text(substring(element, 1, element.length - 1));
+    }
+    return element;
+}
+
+fn _drops_const_qualifier(source: string, target: string) -> boolean {
+    let from = trim_text(source);
+    let to = trim_text(target);
+    let from_fn = parse_fn_type_text(from);
+    let to_fn = parse_fn_type_text(to);
+    if from_fn.ok && to_fn.ok {
+        if _drops_const_qualifier(from_fn.return_type, to_fn.return_type) {
+            return true;
+        }
+        if from_fn.param_types.length == to_fn.param_types.length {
+            let mut parameter: int = 0;
+            loop {
+                if parameter >= from_fn.param_types.length { break; }
+                // Arguments flow from the destination caller into the source
+                // callable, so parameter variance reverses.
+                if _drops_const_qualifier(to_fn.param_types[parameter], from_fn.param_types[parameter]) {
+                    return true;
+                }
+                parameter += 1;
+            }
+        }
+        return false;
+    }
+    if starts_with(from, "*") && starts_with(to, "*") {
+        if _is_const_pointer(from) && !_is_const_pointer(to) { return true; }
+        return _drops_const_qualifier(_pointer_pointee(from), _pointer_pointee(to));
+    }
+    let from_element = _array_element(from);
+    let to_element = _array_element(to);
+    if from_element.length > 0 && to_element.length > 0 {
+        return _drops_const_qualifier(from_element, to_element);
+    }
+    if bound_base_name(from) == bound_base_name(to) {
+        let from_args = parse_type_arguments(from);
+        let to_args = parse_type_arguments(to);
+        if from_args.length == to_args.length {
+            let mut i: int = 0;
+            loop {
+                if i >= from_args.length { break; }
+                if _drops_const_qualifier(from_args[i], to_args[i]) {
+                    return true;
+                }
+                i += 1;
+            }
+        }
+    }
+    return false;
+}
+
+// A conditional can produce either branch. Keep the stricter pointer view
+// at each matching type position so a later store cannot assume writability.
+fn _join_qualifier_types(left_type: string, right_type: string, prefer_const: boolean) -> string {
+    let left = trim_text(left_type);
+    let right = trim_text(right_type);
+    if left == right { return left; }
+    let left_fn = parse_fn_type_text(left);
+    let right_fn = parse_fn_type_text(right);
+    if left_fn.ok && right_fn.ok {
+        if left_fn.param_types.length != right_fn.param_types.length || left_fn.effects.length != right_fn.effects.length {
+            return "";
+        }
+        let mut text = "fn (";
+        let mut i: int = 0;
+        loop {
+            if i >= left_fn.param_types.length { break; }
+            let parameter = _join_qualifier_types(left_fn.param_types[i], right_fn.param_types[i], !prefer_const);
+            if parameter.length == 0 { return ""; }
+            if i > 0 { text = text + ", "; }
+            text = text + parameter;
+            i += 1;
+        }
+        text = text + ")";
+        if left_fn.return_type.length > 0 || right_fn.return_type.length > 0 {
+            let result = _join_qualifier_types(left_fn.return_type, right_fn.return_type, prefer_const);
+            if result.length == 0 { return ""; }
+            text = text + " -> " + result;
+        }
+        i = 0;
+        if left_fn.effects.length > 0 { text = text + " !["; }
+        loop {
+            if i >= left_fn.effects.length { break; }
+            if left_fn.effects[i] != right_fn.effects[i] { return ""; }
+            if i > 0 { text = text + ", "; }
+            text = text + left_fn.effects[i];
+            i += 1;
+        }
+        if left_fn.effects.length > 0 { text = text + "]"; }
+        return text;
+    }
+    if starts_with(left, "*") && starts_with(right, "*") {
+        let pointee = _join_qualifier_types(_pointer_pointee(left), _pointer_pointee(right), prefer_const);
+        if pointee.length == 0 { return ""; }
+        let mut is_const = _is_const_pointer(left) && _is_const_pointer(right);
+        if prefer_const {
+            is_const = _is_const_pointer(left) || _is_const_pointer(right);
+        }
+        if is_const { return "*const " + pointee; }
+        return "*" + pointee;
+    }
+    let left_element = _array_element(left);
+    let right_element = _array_element(right);
+    if left_element.length > 0 && right_element.length > 0 {
+        let element = _join_qualifier_types(left_element, right_element, prefer_const);
+        if element.length == 0 { return ""; }
+        if starts_with(element, "*") { return "(" + element + ")[]"; }
+        return element + "[]";
+    }
+    if bound_base_name(left) == bound_base_name(right) {
+        let left_args = parse_type_arguments(left);
+        let right_args = parse_type_arguments(right);
+        if left_args.length > 0 && left_args.length == right_args.length {
+            let mut text = bound_base_name(left) + "<";
+            let mut i: int = 0;
+            loop {
+                if i >= left_args.length { break; }
+                let argument = _join_qualifier_types(left_args[i], right_args[i], prefer_const);
+                if argument.length == 0 { return ""; }
+                if i > 0 { text = text + ", "; }
+                text = text + argument;
+                i += 1;
+            }
+            return text + ">";
+        }
+    }
+    return "";
+}
+
+fn _resolve_type_alias_head(type_text: string, ctx: TypeckCtx) -> string {
+    let mut resolved = trim_text(type_text);
+    let mut depth: int = 0;
+    loop {
+        if depth >= 16 { break; }
+        let mut next: string = "";
+        let mut i: int = 0;
+        loop {
+            if i >= ctx.declarations.length { break; }
+            let declaration = ctx.declarations[i];
+            if declaration.variant == "TypeAliasDeclaration" && declaration.name == bound_base_name(resolved) {
+                next = trim_text(apply_type_substitution(declaration.aliased_type.text, build_type_substitution(declaration.type_parameters, parse_type_arguments(resolved))));
+                break;
+            }
+            i += 1;
+        }
+        if next.length == 0 {
+            i = 0;
+            let mut ambiguous = false;
+            loop {
+                if i >= ctx.imported_structs.length { break; }
+                let declaration = ctx.imported_structs[i];
+                if declaration.variant == "TypeAliasDeclaration" && declaration.name == bound_base_name(resolved) {
+                    let candidate = trim_text(apply_type_substitution(declaration.aliased_type.text, build_type_substitution(declaration.type_parameters, parse_type_arguments(resolved))));
+                    if next.length == 0 { next = candidate; } else if next != candidate {
+                        ambiguous = true;
+                    }
+                }
+                i += 1;
+            }
+            if ambiguous { return resolved; }
+        }
+        if next.length == 0 || next == resolved { break; }
+        resolved = next;
+        depth += 1;
+    }
+    return resolved;
+}
+
+fn _resolve_type_alias_nested(type_text: string, ctx: TypeckCtx, depth: int) -> string {
+    if depth >= 16 { return trim_text(type_text); }
+    let resolved = _resolve_type_alias_head(type_text, ctx);
+    let function_type = parse_fn_type_text(resolved);
+    if function_type.ok {
+        let mut text = "fn (";
+        let mut i: int = 0;
+        loop {
+            if i >= function_type.param_types.length { break; }
+            if i > 0 { text = text + ", "; }
+            text = text + _resolve_type_alias_nested(function_type.param_types[i], ctx, depth
+                + 1);
+            i += 1;
+        }
+        text = text + ")";
+        if function_type.return_type.length > 0 {
+            text = text + " -> " + _resolve_type_alias_nested(function_type.return_type, ctx, depth
+                + 1);
+        }
+        i = 0;
+        if function_type.effects.length > 0 { text = text + " !["; }
+        loop {
+            if i >= function_type.effects.length { break; }
+            if i > 0 { text = text + ", "; }
+            text = text + function_type.effects[i];
+            i += 1;
+        }
+        if function_type.effects.length > 0 { text = text + "]"; }
+        return text;
+    }
+    if starts_with(resolved, "*") {
+        let mut prefix = "*";
+        if _is_const_pointer(resolved) { prefix = "*const "; } else if starts_with(trim_text(substring(resolved, 1, resolved.length)), "mut ") {
+            prefix = "*mut ";
+        }
+        return prefix + _resolve_type_alias_nested(_pointer_pointee(resolved), ctx, depth
+            + 1);
+    }
+    let element = _array_element(resolved);
+    if element.length > 0 {
+        let nested = _resolve_type_alias_nested(element, ctx, depth + 1);
+        if starts_with(nested, "*") { return "(" + nested + ")[]"; }
+        return nested + "[]";
+    }
+    let arguments = parse_type_arguments(resolved);
+    if arguments.length > 0 {
+        let mut result = bound_base_name(resolved) + "<";
+        let mut i: int = 0;
+        loop {
+            if i >= arguments.length { break; }
+            if i > 0 { result = result + ", "; }
+            result = result + _resolve_type_alias_nested(arguments[i], ctx, depth
+                + 1);
+            i += 1;
+        }
+        return result + ">";
+    }
+    return resolved;
+}
+
+fn _resolve_type_alias(type_text: string, ctx: TypeckCtx) -> string {
+    return _resolve_type_alias_nested(type_text, ctx, 0);
+}
+
+fn _field_type_in(declarations: Statement[], owner: string, member: string) -> string {
+    let name = bound_base_name(owner);
+    let mut i: int = 0;
+    loop {
+        if i >= declarations.length { break; }
+        let declaration = declarations[i];
+        if declaration.variant == "StructDeclaration" && declaration.name == name {
+            let mut j: int = 0;
+            loop {
+                if j >= declaration.fields.length { break; }
+                if declaration.fields[j].name == member {
+                    return apply_type_substitution(declaration.fields[j].type_annotation.text, build_type_substitution(declaration.type_parameters, parse_type_arguments(owner)));
+                }
+                j += 1;
+            }
+            return "";
+        }
+        i += 1;
+    }
+    return "";
+}
+
+fn _field_type(type_text: string, member: string, ctx: TypeckCtx) -> string {
+    let mut owner = trim_text(type_text);
+    if starts_with(owner, "*") { owner = _pointer_pointee(owner); }
+    owner = _resolve_type_alias(owner, ctx);
+    let local = _field_type_in(ctx.declarations, owner, member);
+    if local.length > 0 { return _resolve_type_alias(local, ctx); }
+    return _resolve_type_alias(_field_type_in(ctx.imported_structs, owner, member), ctx);
+}
+
+// Infer a bound generic return from an argument's matching type position.
+// An unbound parameter stays opaque, so an unrelated alias cannot supply a
+// pointer qualifier for it.
+fn _generic_argument_in_type(pattern_text: string, actual_text: string, parameter: string, depth: int) -> string {
+    if depth >= 12 { return ""; }
+    let pattern = trim_text(pattern_text);
+    let actual = trim_text(actual_text);
+    if pattern == parameter { return actual; }
+    if starts_with(pattern, "*") && starts_with(actual, "*") {
+        if _is_const_pointer(pattern) != _is_const_pointer(actual) { return ""; }
+        return _generic_argument_in_type(_pointer_pointee(pattern), _pointer_pointee(actual), parameter, depth
+            + 1);
+    }
+    let pattern_element = _array_element(pattern);
+    let actual_element = _array_element(actual);
+    if pattern_element.length > 0 && actual_element.length > 0 {
+        return _generic_argument_in_type(pattern_element, actual_element, parameter, depth
+            + 1);
+    }
+    let pattern_base = bound_base_name(pattern);
+    let actual_base = bound_base_name(actual);
+    if pattern_base != actual_base {
+        if !starts_with(pattern_base, "__sfn_import_") || !ends_with(pattern_base, "_"
+            + actual_base) { return ""; }
+    }
+    let pattern_arguments = parse_type_arguments(pattern);
+    let actual_arguments = parse_type_arguments(actual);
+    if pattern_arguments.length != actual_arguments.length { return ""; }
+    let mut inferred = "";
+    let mut i: int = 0;
+    loop {
+        if i >= pattern_arguments.length { break; }
+        let candidate = _generic_argument_in_type(pattern_arguments[i], actual_arguments[i], parameter, depth
+            + 1);
+        if candidate.length > 0 {
+            if inferred.length > 0 && inferred != candidate { return ""; }
+            inferred = candidate;
+        }
+        i += 1;
+    }
+    return inferred;
+}
+
+fn _generic_call_return(return_type: string, parameter_types: string[], type_parameters: string[], arguments: Expression[], ctx: TypeckCtx) -> string {
+    let mut olds: string[] = [];
+    let mut news: string[] = [];
+    for type_parameter in type_parameters {
+        let mut inferred = "__sfn_unbound_generic_" + type_parameter;
+        let mut i: int = 0;
+        loop {
+            if i >= parameter_types.length || i >= arguments.length { break; }
+            let candidate = _generic_argument_in_type(parameter_types[i], _expression_type_text(arguments[i], ctx), type_parameter, 0);
+            if candidate.length > 0 {
+                inferred = candidate;
+                break;
+            }
+            i += 1;
+        }
+        olds.push(type_parameter);
+        news.push(inferred);
+    }
+    return _resolve_type_alias(apply_type_substitution(return_type, TypeSubstitution {
+        olds: olds, news: news
+    }), ctx);
+}
+
+fn _method_owner_substitution(declaration: Statement, owner: string, method_parameters: TypeParameter[]) -> TypeSubstitution {
+    let original = build_type_substitution(declaration.type_parameters, parse_type_arguments(owner));
+    let mut olds: string[] = [];
+    let mut news: string[] = [];
+    let mut i: int = 0;
+    loop {
+        if i >= original.olds.length { break; }
+        let mut shadowed = false;
+        for parameter in method_parameters {
+            if original.olds[i] == parameter.name { shadowed = true; }
+        }
+        if !shadowed {
+            olds.push(original.olds[i]);
+            news.push(original.news[i]);
+        }
+        i += 1;
+    }
+    return TypeSubstitution { olds: olds, news: news };
+}
+
+fn _method_call_return_type(declarations: Statement[], owner: string, method: string, arguments: Expression[], ctx: TypeckCtx) -> string {
+    for declaration in declarations {
+        if declaration.variant == "StructDeclaration" && declaration.name == bound_base_name(owner) {
+            for member in declaration.methods {
+                let signature = member.signature;
+                if signature.name == method {
+                    if signature.return_type == null { return ""; }
+                    let owner_substitution = _method_owner_substitution(declaration, owner, signature.type_parameters);
+                    let substituted = apply_type_substitution(signature.return_type.text, owner_substitution);
+                    let mut parameter_types: string[] = [];
+                    let mut i: int = 1;
+                    loop {
+                        if i >= signature.parameters.length { break; }
+                        let annotation = signature.parameters[i].type_annotation;
+                        if annotation == null { parameter_types.push(""); } else {
+                            parameter_types.push(apply_type_substitution(annotation.text, owner_substitution));
+                        }
+                        i += 1;
+                    }
+                    let mut type_parameters: string[] = [];
+                    for parameter in signature.type_parameters {
+                        type_parameters.push(parameter.name);
+                    }
+                    return _generic_call_return(substituted, parameter_types, type_parameters, arguments, ctx);
+                }
+            }
+        }
+    }
+    return "";
+}
+
+fn _local_call_return_type(name: string, arguments: Expression[], ctx: TypeckCtx) -> string {
+    for declaration in ctx.declarations {
+        if declaration.variant == "FunctionDeclaration" && declaration.signature.name == name {
+            let signature = declaration.signature;
+            if signature.return_type == null { return ""; }
+            let mut parameter_types: string[] = [];
+            for parameter in signature.parameters {
+                if parameter.type_annotation == null {
+                    parameter_types.push("");
+                } else {
+                    parameter_types.push(parameter.type_annotation.text);
+                }
+            }
+            let mut type_parameters: string[] = [];
+            for parameter in signature.type_parameters {
+                type_parameters.push(parameter.name);
+            }
+            return _generic_call_return(signature.return_type.text, parameter_types, type_parameters, arguments, ctx);
+        }
+    }
+    return "";
+}
+
+fn _array_literal_element_type(expression: Expression, ctx: TypeckCtx) -> string {
+    if expression.elements.length == 0 { return ""; }
+    let mut candidate = _expression_type_text(expression.elements[0], ctx);
+    if candidate.length == 0 { return ""; }
+    let mut i: int = 1;
+    loop {
+        if i >= expression.elements.length { break; }
+        let next = _expression_type_text(expression.elements[i], ctx);
+        if next != candidate {
+            if _drops_const_qualifier(next, candidate) { candidate = next; } else if !_drops_const_qualifier(candidate, next) {
+                return "";
+            }
+        }
+        i += 1;
+    }
+    return candidate;
+}
+
+// SFN-1296: resolve explicit annotations, casts, and known initializer types.
+// An unproven expression stays silent; guessing would reject valid writes.
+fn _expression_type_text(expression: Expression, ctx: TypeckCtx) -> string {
+    if expression.variant == "Identifier" {
+        let mut entry = find_value_symbol(ctx.bindings, expression.name);
+        if entry == null {
+            entry = find_value_symbol(ctx.top_level, expression.name);
+        }
+        if entry == null { return ""; }
+        if entry.declared_type.length > 0 {
+            return _resolve_type_alias(entry.declared_type, ctx);
+        }
+        return _resolve_type_alias(entry.inferred_type, ctx);
+    }
+    if expression.variant == "Cast" {
+        return _resolve_type_alias(expression.target_type.text, ctx);
+    }
+    if expression.variant == "Struct" {
+        if expression.type_name.length == 0 { return ""; }
+        return _resolve_type_alias(expression.type_name[expression.type_name.length - 1], ctx);
+    }
+    if expression.variant == "Array" {
+        let candidate = _array_literal_element_type(expression, ctx);
+        if candidate.length == 0 { return ""; }
+        if starts_with(candidate, "*") { return "(" + candidate + ")[]"; }
+        return candidate + "[]";
+    }
+    if expression.variant == "Unary" {
+        if expression.operator == "*" {
+            return _resolve_type_alias(_pointer_pointee(_expression_type_text(expression.operand, ctx)), ctx);
+        }
+    }
+    if expression.variant == "Member" {
+        return _field_type(_expression_type_text(expression.object, ctx), expression.member, ctx);
+    }
+    if expression.variant == "Index" {
+        let sequence_type = _expression_type_text(expression.sequence, ctx);
+        let element = _array_element(sequence_type);
+        if element.length > 0 { return _resolve_type_alias(element, ctx); }
+        if starts_with(trim_text(sequence_type), "*") {
+            return _resolve_type_alias(_pointer_pointee(sequence_type), ctx);
+        }
+        if expression.sequence.variant == "Array" {
+            return _array_literal_element_type(expression.sequence, ctx);
+        }
+        return "";
+    }
+    if expression.variant == "Binary" {
+        if expression.operator == "+" || expression.operator == "-" {
+            let left = _expression_type_text(expression.left, ctx);
+            if starts_with(trim_text(left), "*") { return left; }
+            if expression.operator == "+" {
+                let right = _expression_type_text(expression.right, ctx);
+                if starts_with(trim_text(right), "*") { return right; }
+            }
+        }
+    }
+    if expression.variant == "Conditional" {
+        let then_type = _expression_type_text(expression.then_value, ctx);
+        let else_type = _expression_type_text(expression.else_value, ctx);
+        return _join_qualifier_types(then_type, else_type, true);
+    }
+    if expression.variant == "Call" {
+        if expression.callee.variant == "Member" {
+            let callee = expression.callee;
+            let mut owner = _expression_type_text(callee.object, ctx);
+            if starts_with(trim_text(owner), "*") {
+                owner = _pointer_pointee(owner);
+            }
+            owner = _resolve_type_alias(owner, ctx);
+            let local_return = _method_call_return_type(ctx.declarations, owner, callee.member, expression.arguments, ctx);
+            if local_return.length > 0 {
+                return _resolve_type_alias(local_return, ctx);
+            }
+            let imported_return = _method_call_return_type(ctx.imported_structs, owner, callee.member, expression.arguments, ctx);
+            if imported_return.length > 0 {
+                return _resolve_type_alias(imported_return, ctx);
+            }
+            let field_fn = parse_fn_type_text(_field_type(owner, callee.member, ctx));
+            if field_fn.ok {
+                return _resolve_type_alias(field_fn.return_type, ctx);
+            }
+            return "";
+        }
+        if expression.callee.variant != "Identifier" { return ""; }
+        let mut entry = find_value_symbol(ctx.bindings, expression.callee.name);
+        if entry == null {
+            entry = find_value_symbol(ctx.top_level, expression.callee.name);
+        }
+        if entry == null { return ""; }
+        if entry.kind == "import" {
+            let imported = lookup_imported_function(ctx.imports, expression.callee.name);
+            if imported != null {
+                return _generic_call_return(imported.return_type, imported.parameter_types, imported.type_parameters, expression.arguments, ctx);
+            }
+        }
+        let mut callable_type = entry.declared_type;
+        if callable_type.length == 0 { callable_type = entry.inferred_type; }
+        if entry.function_return_type.length == 0 && callable_type.length > 0 {
+            let signature = parse_fn_type_text(callable_type);
+            if signature.ok {
+                return _resolve_type_alias(signature.return_type, ctx);
+            }
+        }
+        let local_return = _local_call_return_type(expression.callee.name, expression.arguments, ctx);
+        if local_return.length > 0 { return local_return; }
+        return _resolve_type_alias(entry.function_return_type, ctx);
+    }
+    return "";
+}
+
+// Preserve a type proved by an initializer when an unannotated local enters
+// the symbol table. This keeps qualifiers reachable through later aliases,
+// fields, and calls; unknown expressions still contribute no type.
+fn inferred_known_type(initializer: Expression?, ctx: TypeckCtx) -> string {
+    if initializer == null { return ""; }
+    return _expression_type_text(initializer, ctx);
+}
+
+// A read-only pointer cannot flow implicitly into a writable pointer slot.
+// An explicit `as *T` cast is the spelling that changes the pointer view.
+fn const_pointer_coercion_diagnostics(value: Expression?, target_type: string, ctx: TypeckCtx, span: SourceSpan?) -> Diagnostic[] {
+    if value == null { return []; }
+    // Array literal elements are checked against the destination element
+    // type by the expression walker; report each bad element only once.
+    if value.variant == "Array" { return []; }
+    if value.variant == "Conditional" {
+        let then_diagnostics = const_pointer_coercion_diagnostics(value.then_value, target_type, ctx, span);
+        if then_diagnostics.length > 0 { return then_diagnostics; }
+        return const_pointer_coercion_diagnostics(value.else_value, target_type, ctx, span);
+    }
+    let source_type = _expression_type_text(value, ctx);
+    let destination = _resolve_type_alias(target_type, ctx);
+    if !_drops_const_qualifier(source_type, destination) { return []; }
+    return [Diagnostic {
+        code: "E0852", severity: "error", message: "cannot implicitly convert read-only `*const T` to a writable pointer", file_path: "", primary: token_from_name(target_type, span), suggestion: null
+    }];
+}
+
+fn const_pointer_expected_diagnostics(value: Expression?, expected: TypeAnnotation?, ctx: TypeckCtx, span: SourceSpan?) -> Diagnostic[] {
+    if expected == null { return []; }
+    return const_pointer_coercion_diagnostics(value, expected.text, ctx, span);
+}
+
+fn const_pointer_assignment_diagnostics(expression: Expression, ctx: TypeckCtx) -> Diagnostic[] {
+    let target_type = _expression_type_text(expression.target, ctx);
+    return const_pointer_coercion_diagnostics(expression.rhs, target_type, ctx, expression.span);
+}
+
+fn _store_through_const(target: Expression, ctx: TypeckCtx) -> boolean {
+    if target.variant == "Unary" {
+        if target.operator == "*" {
+            return _is_const_pointer(_expression_type_text(target.operand, ctx));
+        }
+    }
+    if target.variant == "Member" {
+        let object_type = trim_text(_expression_type_text(target.object, ctx));
+        if starts_with(object_type, "*") {
+            return _is_const_pointer(object_type);
+        }
+        return _store_through_const(target.object, ctx);
+    }
+    if target.variant == "Index" {
+        let sequence_type = _expression_type_text(target.sequence, ctx);
+        if starts_with(trim_text(sequence_type), "*") {
+            return _is_const_pointer(sequence_type);
+        }
+        return _store_through_const(target.sequence, ctx);
+    }
+    return false;
+}
+
+fn const_pointer_store_diagnostics(expression: Expression, ctx: TypeckCtx) -> Diagnostic[] {
+    if !_store_through_const(expression.target, ctx) { return []; }
+    let mut span: SourceSpan? = expression.span;
+    if expression.target.variant == "Member" {
+        span = expression.target.span;
+    }
+    return [Diagnostic {
+        code: "E0852", severity: "error", message: "cannot store through read-only `*const T` pointer", file_path: "", primary: token_from_name(expression.operator, span), suggestion: null
+    }];
+}

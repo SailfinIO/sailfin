@@ -5,7 +5,7 @@
 // and `x as *mut T` failed to parse and died closed at E0818. This fixture
 // writes a 4-byte `i32` (300 = 0x12C) through a plain `*i32` and reads it
 // back through `*const i32`/`*mut i32` parameters and casts, plus a
-// `*const W` struct-field store. 300 is load-bearing: it does not fit in one
+// writable `*mut W` struct-field store. 300 is load-bearing: it does not fit in one
 // byte, so a stray one-byte load reads back 44 (0x2C) instead — any value
 // under 256 would not catch the bug.
 extern fn malloc(size: usize) -> *u8;
@@ -28,7 +28,7 @@ fn rd_plain(c: *i32) -> i32 { return *c; }
 
 fn rd_mut(c: *mut i32) -> i32 { return *c; }
 
-fn wr_const_field(w: *const W) -> void { w.v = 7; }
+fn wr_mut_field(w: *mut W) -> void { w.v = 7; }
 
 fn main() ![io] {
     let raw: *u8 = malloc(64 as usize);
@@ -40,6 +40,6 @@ fn main() ![io] {
     let m: *mut i32 = raw as *mut i32;
     print("cast_const=${*c} cast_mut=${*m}");
     let w: *W = raw as *W;
-    wr_const_field(w);
+    wr_mut_field(w);
     print("field=${w.v}");
 }
