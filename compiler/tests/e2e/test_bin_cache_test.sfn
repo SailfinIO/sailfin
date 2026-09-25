@@ -123,85 +123,57 @@ fn _truth_two() -> string {
     return "test \"trivial truth\" {\n    assert 2 == 2;\n}\n";
 }
 
-// ---- Test 1: cold run misses, hit_rate 0.0000 ----
-test "cold run: every test misses, hit_rate 0.0000" ![io] {
-    let root = _root("cold");
+// One fixture lifecycle exercises every cache state. Separate cold fixtures
+// repeated two full compiler/link runs without adding a distinct assertion.
+test "test-bin cache: cold, warm, bypass, and source edit" ![io] {
+    let root = _root("lifecycle");
     let cache = root + "/cache";
     let dir = _write_fixture(root, _truth_one());
 
-    let log = _run_suite(dir, cache, [], "cold");
+    let cold = _run_suite(dir, cache, [], "lifecycle");
 
     // The summary line must carry the cache object.
-    assert find(log, "\"cache\":", 0) >= 0;
+    assert find(cold, "\"cache\":", 0) >= 0;
     // The single fixture produces exactly one cold miss.
-    assert find(log, "\"test_bin_hits\":0", 0) >= 0;
-    assert find(log, "\"test_bin_misses\":1", 0) >= 0;
-    assert find(log, "\"test_bin_hit_rate\":0.0000", 0) >= 0;
-    // A populated cache must still serve a runnable binary: the test passes.
-    assert find(log, "\"passed\":1", 0) >= 0;
-    assert find(log, "\"failed\":0", 0) >= 0;
-}
-
-// ---- Test 2: warm rerun hits, hit_rate 1.0000 ----
-test "warm rerun: every test hits, hit_rate 1.0000" ![io] {
-    let root = _root("warm");
-    let cache = root + "/cache";
-    let dir = _write_fixture(root, _truth_one());
-
-    // First run warms the binary cache.
-    let cold = _run_suite(dir, cache, [], "warm");
     assert find(cold, "\"test_bin_hits\":0", 0) >= 0;
     assert find(cold, "\"test_bin_misses\":1", 0) >= 0;
+    assert find(cold, "\"test_bin_hit_rate\":0.0000", 0) >= 0;
+    // A populated cache must still serve a runnable binary: the test passes.
+    assert find(cold, "\"passed\":1", 0) >= 0;
+    assert find(cold, "\"failed\":0", 0) >= 0;
     assert find(cold, "test runner: compile start", 0) >= 0;
     assert find(cold, "test runner: link start", 0) >= 0;
     // Second run with no source change -> every test hits.
-    let log = _run_suite(dir, cache, [], "warm");
+    let warm = _run_suite(dir, cache, [], "lifecycle");
 
-    assert find(log, "\"test_bin_hits\":1", 0) >= 0;
-    assert find(log, "\"test_bin_misses\":0", 0) >= 0;
-    assert find(log, "\"test_bin_hit_rate\":1.0000", 0) >= 0;
+    assert find(warm, "\"test_bin_hits\":1", 0) >= 0;
+    assert find(warm, "\"test_bin_misses\":0", 0) >= 0;
+    assert find(warm, "\"test_bin_hit_rate\":1.0000", 0) >= 0;
     // SFN-1249: a fast rebuild is still a miss. The restored artifact must
     // bypass both lowering and linking, including on native Windows.
-    assert find(log, "test runner: test-bin cache hit (", 0) >= 0;
-    assert find(log, "test runner: compile start", 0) < 0;
-    assert find(log, "test runner: link start", 0) < 0;
+    assert find(warm, "test runner: test-bin cache hit (", 0) >= 0;
+    assert find(warm, "test runner: compile start", 0) < 0;
+    assert find(warm, "test runner: link start", 0) < 0;
     // The cached binary is still RUN -> the test still passes.
-    assert find(log, "\"passed\":1", 0) >= 0;
-    assert find(log, "\"failed\":0", 0) >= 0;
-}
+    assert find(warm, "\"passed\":1", 0) >= 0;
+    assert find(warm, "\"failed\":0", 0) >= 0;
 
-// ---- Test 3: --no-test-cache bypasses read + write, hit_rate 0.0000 ----
-test "--no-test-cache: no read or write, hit_rate 0.0000" ![io] {
-    let root = _root("nocache");
-    let cache = root + "/cache";
-    let dir = _write_fixture(root, _truth_one());
-
-    let log = _run_suite(dir, cache, ["--no-test-cache"], "nocache");
+    let bypass = _run_suite(dir, cache, ["--no-test-cache"], "lifecycle");
 
     // Neither counter advances: hits=0 AND misses=0.
-    assert find(log, "\"test_bin_hits\":0", 0) >= 0;
-    assert find(log, "\"test_bin_misses\":0", 0) >= 0;
-    assert find(log, "\"test_bin_hit_rate\":0.0000", 0) >= 0;
+    assert find(bypass, "\"test_bin_hits\":0", 0) >= 0;
+    assert find(bypass, "\"test_bin_misses\":0", 0) >= 0;
+    assert find(bypass, "\"test_bin_hit_rate\":0.0000", 0) >= 0;
     // Even with the cache bypassed the test compiles and passes.
-    assert find(log, "\"passed\":1", 0) >= 0;
-}
-
-// ---- Test 4: editing the source content-busts the key (miss again) ----
-test "edited source content-busts the key (miss, no stale hit)" ![io] {
-    let root = _root("bust");
-    let cache = root + "/cache";
-    let dir = _write_fixture(root, _truth_one());
-
-    // Warm the cache with the original source.
-    let _warm = _run_suite(dir, cache, [], "bust");
+    assert find(bypass, "\"passed\":1", 0) >= 0;
 
     // Change the source bytes: a changed source -> changed key -> miss
     // (never a stale-binary hit).
     fs.writeFile(dir + "/cache_fixture_test.sfn", _truth_two());
-    let log = _run_suite(dir, cache, [], "bust");
+    let edited = _run_suite(dir, cache, [], "lifecycle");
 
-    assert find(log, "\"test_bin_hits\":0", 0) >= 0;
-    assert find(log, "\"test_bin_misses\":1", 0) >= 0;
+    assert find(edited, "\"test_bin_hits\":0", 0) >= 0;
+    assert find(edited, "\"test_bin_misses\":1", 0) >= 0;
     // The rebuilt binary still passes (the edited assertion holds).
-    assert find(log, "\"passed\":1", 0) >= 0;
+    assert find(edited, "\"passed\":1", 0) >= 0;
 }

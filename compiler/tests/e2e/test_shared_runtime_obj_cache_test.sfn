@@ -113,11 +113,8 @@ fn _run_and_count(label: string, cache_root: string, extra_flag: string) -> int 
 // Populate `cache_root` with a full runtime object set, returning the
 // runtime-module count that cold run emitted.
 //
-// Each test passes its OWN `cache_root` and `label` and pays its own cold
-// populate. That is deliberate, not waste: the second test compares its
-// `--no-test-cache` run against this return value, so the value has to come
-// from a genuinely cold run. Sharing one warm cache root between the tests
-// would make the second test's baseline 0 and the comparison vacuous.
+// One cold population supplies both warm and bypass assertions in the same
+// test. The bypass comparison therefore still uses a genuinely cold baseline.
 fn _populate_cache(label: string, cache_root: string) -> int ![io] {
     // Wipe for the same reason `_run_and_count` wipes its scratch, and it
     // matters more here. `nested_runner_scratch` is a pure function of its
@@ -132,12 +129,12 @@ fn _populate_cache(label: string, cache_root: string) -> int ![io] {
     return _run_and_count(label, cache_root, "");
 }
 
-test "test cache: a warm shared cache serves runtime objects into a fresh scratch" ![io] {
-    let cache_root = nested_runner_scratch("sfn1086-cache-a");
+test "test cache: warm reuse and --no-test-cache bypass" ![io] {
+    let cache_root = nested_runner_scratch("sfn1086-cache");
     // Cold: the shared cache starts empty, so this run must emit the
     // runtime itself. Guards the test against passing vacuously if the
     // runtime were somehow never built at all.
-    let cold = _populate_cache("cold-a", cache_root);
+    let cold = _populate_cache("cold", cache_root);
     // Vacuity guard: if the runtime were never emitted at all, the warm
     // assertion below would pass for the wrong reason.
     assert expect_eq_bool(cold > 0, true).ok;
@@ -147,12 +144,6 @@ test "test cache: a warm shared cache serves runtime objects into a fresh scratc
     // work-dir `.key` sidecars died with the previous scratch.
     let warm = _run_and_count("warm", cache_root, "");
     assert expect_eq_int(warm, 0).ok;
-}
-
-test "test cache: --no-test-cache still cold-builds against a warm shared cache" ![io] {
-    let cache_root = nested_runner_scratch("sfn1086-cache-b");
-    let cold = _populate_cache("cold-b", cache_root);
-    assert expect_eq_bool(cold > 0, true).ok;
 
     // `--no-test-cache` must pass an empty shared root, so this run
     // rebuilds the runtime even though the cache beside it is warm.
