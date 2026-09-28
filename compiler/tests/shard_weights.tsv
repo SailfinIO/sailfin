@@ -9,6 +9,7 @@
 # Targets contributing: windows-x86_64(956 files, 13078s) linux-arm64(956 files, 6175s) macos-arm64(956 files, 6753s)
 # Source: complete run 36129730322 JSONL sidecars (2026-09-25); the CI candidate ran before Windows shards finished.
 # Refresh procedure: docs/conventions/ci-test-topology.md.
+# Rows moved to compiler/tests/nightly are omitted; target counts above describe the source artifacts.
 # An unlisted file gets the median of this table, derived at load
 # time by _shard_default_weight() in
 # compiler/src/cli/commands/test/arg_and_jobs.sfn (SFN-1224). A
@@ -88,7 +89,6 @@ capsules/sfn/test/tests/sfn_bin_test.sfn	4312
 capsules/sfn/test/tests/snapshot_test.sfn	234
 capsules/sfn/toml/tests/toml_test.sfn	294
 compiler/tests/e2e/aarch64_binfmt_probe_test.sfn	757
-compiler/tests/e2e/aarch64_bootstrap_probe_test.sfn	11340
 compiler/tests/e2e/aarch64_seed_mode_test.sfn	890
 compiler/tests/e2e/abi_value_return_test.sfn	335
 compiler/tests/e2e/add_registry_index_test.sfn	3521
@@ -116,17 +116,13 @@ compiler/tests/e2e/atomic_cas_compile_test.sfn	4414
 compiler/tests/e2e/backend_failure_gate_test.sfn	838
 compiler/tests/e2e/bare_struct_literal_annotation_test.sfn	9208
 compiler/tests/e2e/bench_compiler_test.sfn	503
-compiler/tests/e2e/bench_consumer_test.sfn	17907
 compiler/tests/e2e/bench_json_schema_test.sfn	1036
 compiler/tests/e2e/bench_runtime_runner_test.sfn	2118
 compiler/tests/e2e/binary_capsule_walker_test.sfn	3418
 compiler/tests/e2e/bool_numeric_coercion_test.sfn	1194
-compiler/tests/e2e/bootstrap_install_gate_test.sfn	15961
-compiler/tests/e2e/build_clean_runtime_objects_test.sfn	11752
 compiler/tests/e2e/build_diagnostics_format_test.sfn	866
 compiler/tests/e2e/build_directory_argument_test.sfn	247
 compiler/tests/e2e/build_hash_matches_sha256sum_test.sfn	486
-compiler/tests/e2e/build_json_schema_test.sfn	26802
 compiler/tests/e2e/cache_command_test.sfn	5382
 compiler/tests/e2e/call_emission_no_polling_test.sfn	4083
 compiler/tests/e2e/capability_cross_check_test.sfn	531
@@ -152,7 +148,6 @@ compiler/tests/e2e/check_build_agree_frontend_rejection_test.sfn	385
 compiler/tests/e2e/check_build_agree_module_global_test.sfn	970
 compiler/tests/e2e/check_build_agree_spawn_named_fn_test.sfn	738
 compiler/tests/e2e/check_build_agree_unknown_field_test.sfn	330
-compiler/tests/e2e/check_compiler_src_test.sfn	6958
 compiler/tests/e2e/check_cross_module_conformance_test.sfn	408
 compiler/tests/e2e/check_effect_call_site_caret_test.sfn	340
 compiler/tests/e2e/check_effect_try_block_escape_test.sfn	453
@@ -198,8 +193,6 @@ compiler/tests/e2e/cross_module_signature_resolution_test.sfn	1000
 compiler/tests/e2e/cross_target_emit_test.sfn	380
 compiler/tests/e2e/cross_windows_runtime_modules_test.sfn	268
 compiler/tests/e2e/cross_windows_test.sfn	802
-compiler/tests/e2e/dep_closure_prewarm_test.sfn	24826
-compiler/tests/e2e/dep_object_cache_test.sfn	19748
 compiler/tests/e2e/dev_arena_equivalence_test.sfn	1601
 compiler/tests/e2e/dev_bootstrap_prefix_install_test.sfn	5723
 compiler/tests/e2e/dev_bootstrap_test.sfn	271
@@ -269,7 +262,6 @@ compiler/tests/e2e/init_project_flow_test.sfn	7805
 compiler/tests/e2e/init_toolchain_stanza_test.sfn	241
 compiler/tests/e2e/inline_export_cross_module_test.sfn	2078
 compiler/tests/e2e/install_root_pointer_test.sfn	292
-compiler/tests/e2e/installed_toolchain_test_command_test.sfn	21171
 compiler/tests/e2e/int_cast_sign_test.sfn	1611
 compiler/tests/e2e/interface_dispatch_test.sfn	750
 compiler/tests/e2e/interface_vtable_consumer_declares_test.sfn	943
@@ -280,7 +272,6 @@ compiler/tests/e2e/jmp_buf_alignment_test.sfn	8336
 compiler/tests/e2e/lifecycle_hook_ordering_test.sfn	948
 compiler/tests/e2e/linker_selection_test.sfn	1487
 compiler/tests/e2e/llms_txt_sync_test.sfn	224
-compiler/tests/e2e/llvm_object_provider_parity_test.sfn	11627
 compiler/tests/e2e/lock_test.sfn	271
 compiler/tests/e2e/login_test.sfn	276
 compiler/tests/e2e/loop_in_match_arm_dominance_test.sfn	278
@@ -339,7 +330,6 @@ compiler/tests/e2e/publish_test.sfn	2085
 compiler/tests/e2e/push_in_struct_method_test.sfn	1183
 compiler/tests/e2e/rand_effect_gate_test.sfn	376
 compiler/tests/e2e/range_map_test.sfn	3145
-compiler/tests/e2e/recoverable_harness_test.sfn	8532
 compiler/tests/e2e/reexport_test.sfn	318
 compiler/tests/e2e/reexport_transitive_order_test.sfn	1001
 compiler/tests/e2e/rename_only_ir_classifier_test.sfn	262
@@ -349,10 +339,7 @@ compiler/tests/e2e/root_capsule_link_libs_test.sfn	2162
 compiler/tests/e2e/routine_await_receive_test.sfn	1075
 compiler/tests/e2e/routine_nursery_test.sfn	542
 compiler/tests/e2e/routine_spawn_channel_exec_test.sfn	1955
-compiler/tests/e2e/run_cache_flags_test.sfn	28824
-compiler/tests/e2e/run_exe_isolation_test.sfn	7183
 compiler/tests/e2e/run_scratch_isolation_test.sfn	981
-compiler/tests/e2e/runner_jobs_parallel_test.sfn	3586
 compiler/tests/e2e/runner_json_multifile_test.sfn	2501
 compiler/tests/e2e/runner_slowest_summary_test.sfn	3634
 compiler/tests/e2e/runner_state_marker_test.sfn	3205
@@ -362,13 +349,11 @@ compiler/tests/e2e/runtime_adapter_websocket_test.sfn	1582
 compiler/tests/e2e/runtime_array_test.sfn	3756
 compiler/tests/e2e/runtime_capsule_dependency_test.sfn	4992
 compiler/tests/e2e/runtime_char_from_code_test.sfn	1024
-compiler/tests/e2e/runtime_demand_driven_sources_test.sfn	66158
 compiler/tests/e2e/runtime_dir_capsule_link_test.sfn	2029
 compiler/tests/e2e/runtime_exception_frames_test.sfn	1305
 compiler/tests/e2e/runtime_exec_path_test.sfn	573
 compiler/tests/e2e/runtime_helper_declare_integrity_test.sfn	8179
 compiler/tests/e2e/runtime_http_chunked_decode_test.sfn	918
-compiler/tests/e2e/runtime_identity_stamp_test.sfn	8725
 compiler/tests/e2e/runtime_implicit_capsule_link_test.sfn	2148
 compiler/tests/e2e/runtime_int_helpers_legacy_path_test.sfn	378
 compiler/tests/e2e/runtime_io_print_test.sfn	699
@@ -376,7 +361,6 @@ compiler/tests/e2e/runtime_memory_arena_mark_test.sfn	459
 compiler/tests/e2e/runtime_memory_arena_test.sfn	645
 compiler/tests/e2e/runtime_memory_mem_test.sfn	645
 compiler/tests/e2e/runtime_memory_rc_test.sfn	787
-compiler/tests/e2e/runtime_obj_shared_cache_test.sfn	15672
 compiler/tests/e2e/runtime_parallel_combinator_test.sfn	765
 compiler/tests/e2e/runtime_process_test.sfn	592
 compiler/tests/e2e/runtime_scheduler_skeleton_test.sfn	1156
@@ -395,7 +379,6 @@ compiler/tests/e2e/runtime_tls_verify_failure_test.sfn	4068
 compiler/tests/e2e/runtime_type_meta_test.sfn	1417
 compiler/tests/e2e/sailfin_main_entry_test.sfn	1295
 compiler/tests/e2e/sailfin_main_panic_test.sfn	1461
-compiler/tests/e2e/sailfin_trace_link_test.sfn	8660
 compiler/tests/e2e/sc_nprocessors_onln_sentinel_test.sfn	448
 compiler/tests/e2e/secret_buf_runtime_test.sfn	596
 compiler/tests/e2e/secure_zero_optimized_ir_test.sfn	393
@@ -444,16 +427,12 @@ compiler/tests/e2e/substring_no_rescan_test.sfn	263
 compiler/tests/e2e/symbols_json_test.sfn	394
 compiler/tests/e2e/sync_rejects_unimplemented_concurrency_test.sfn	933
 compiler/tests/e2e/syscall_ir_shape_test.sfn	405
-compiler/tests/e2e/target_flag_cache_key_test.sfn	33905
 compiler/tests/e2e/task_join_all_test.sfn	5379
 compiler/tests/e2e/tensor_ir_stablehlo_emit_test.sfn	1970
 compiler/tests/e2e/tensor_matmul_exec_test.sfn	13965
-compiler/tests/e2e/test_bin_cache_test.sfn	19126
-compiler/tests/e2e/test_filter_cache_key_test.sfn	23217
 compiler/tests/e2e/test_filter_zero_match_test.sfn	1256
 compiler/tests/e2e/test_missing_path_test.sfn	282
 compiler/tests/e2e/test_runner_import_inlining_test.sfn	219
-compiler/tests/e2e/test_shared_runtime_obj_cache_test.sfn	28899
 compiler/tests/e2e/test_skip_primitive_test.sfn	1053
 compiler/tests/e2e/thread_local_lowering_test.sfn	702
 compiler/tests/e2e/tls_large_body_test.sfn	4042
@@ -462,13 +441,10 @@ compiler/tests/e2e/tls_record_pointer_differential_test.sfn	616
 compiler/tests/e2e/tls_record_throughput_test.sfn	768
 compiler/tests/e2e/tool_probe_test.sfn	257
 compiler/tests/e2e/toolchain_default_remove_test.sfn	882
-compiler/tests/e2e/toolchain_dispatch_test.sfn	33473
 compiler/tests/e2e/toolchain_index_producer_test.sfn	509
 compiler/tests/e2e/toolchain_inspect_json_test.sfn	563
 compiler/tests/e2e/toolchain_install_test.sfn	6671
-compiler/tests/e2e/toolchain_management_test.sfn	14964
 compiler/tests/e2e/toolchain_owner_report_test.sfn	286
-compiler/tests/e2e/toolchain_revocation_test.sfn	7527
 compiler/tests/e2e/toolchain_update_notice_test.sfn	1193
 compiler/tests/e2e/toolchain_update_test.sfn	664
 compiler/tests/e2e/tostring_member_access_test.sfn	711
@@ -483,7 +459,6 @@ compiler/tests/e2e/unsigned_ops_test.sfn	1888
 compiler/tests/e2e/untyped_lambda_callback_test.sfn	6246
 compiler/tests/e2e/update_snapshots_flag_test.sfn	1108
 compiler/tests/e2e/user_config_effect_boundary_test.sfn	676
-compiler/tests/e2e/user_config_precedence_test.sfn	35299
 compiler/tests/e2e/value_if_char_literal_diag_test.sfn	292
 compiler/tests/e2e/websocket_serve_loopback_test.sfn	3042
 compiler/tests/e2e/while_statement_test.sfn	348
@@ -492,10 +467,8 @@ compiler/tests/e2e/windows_exe_suffix_test.sfn	15884
 compiler/tests/e2e/windows_host_patterns_guard_test.sfn	377
 compiler/tests/e2e/windows_runtime_siblings_test.sfn	1047
 compiler/tests/e2e/windows_socket_ops_test.sfn	2349
-compiler/tests/e2e/windows_test_scratch_root_test.sfn	31273
 compiler/tests/e2e/work_dir_flag_test.sfn	1921
 compiler/tests/e2e/workspace_capability_gate_test.sfn	707
-compiler/tests/e2e/workspace_default_members_cli_test.sfn	55139
 compiler/tests/e2e/workspace_member_declaration_test.sfn	1899
 compiler/tests/integration/assert_fail_record_test.sfn	662
 compiler/tests/integration/async_advanced_test.sfn	661

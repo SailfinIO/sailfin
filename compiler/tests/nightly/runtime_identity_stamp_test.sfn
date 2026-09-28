@@ -1,4 +1,4 @@
-// compiler/tests/e2e/runtime_identity_stamp_test.sfn
+// compiler/tests/nightly/runtime_identity_stamp_test.sfn
 //
 // Regression tests for the invocation-scoped runtime-identity stamp
 // (#1996, SFEP-0044 §3-A).

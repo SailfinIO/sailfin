@@ -1,4 +1,4 @@
-// compiler/tests/e2e/toolchain_management_test.sfn
+// compiler/tests/nightly/toolchain_management_test.sfn
 //
 // End-to-end coverage for `sfn toolchain <leaf>` management-command routing
 // (SFEP-0073 §3.5, SFN-1067). Native (no-bash) `*_test.sfn` per

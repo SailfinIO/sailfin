@@ -7,9 +7,11 @@ are in `.claude/rules/no-bash-e2e.md`; this is the full pattern reference.
 ## Write e2e tests like this
 
 An e2e test is an ordinary `*_test.sfn` with `test "..." { }` blocks. It
-runs under `sailfin test compiler/tests/e2e` alongside unit/integration
-tests. Use the runtime `process.*` builtins to drive a subprocess and the
-`sfn/test` matchers to assert on the result:
+runs under `sailfin test compiler/tests/e2e` in PR CI. Exhaustive scenarios
+under `compiler/tests/nightly` run in the scheduled workflow; run a changed
+nightly file directly during development. Use the runtime `process.*`
+builtins to drive a subprocess and the `sfn/test` matchers to assert on the
+result:
 
 See `compiler/tests/e2e/guillermo_test.sfn` for the full canonical
 exemplar. The shape:

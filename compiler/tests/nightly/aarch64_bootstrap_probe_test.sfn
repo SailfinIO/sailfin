@@ -1,4 +1,4 @@
-// compiler/tests/e2e/aarch64_bootstrap_probe_test.sfn
+// compiler/tests/nightly/aarch64_bootstrap_probe_test.sfn
 //
 // Runs the SFN-472 native bring-up probe on every supported host so its
 // aggregate-return, try/throw, and permission checks cannot silently rot.

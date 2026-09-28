@@ -1,4 +1,4 @@
-// compiler/tests/e2e/user_config_precedence_test.sfn
+// compiler/tests/nightly/user_config_precedence_test.sfn
 //
 // End-to-end precedence coverage for SFN-1259 / SFEP-0076 section 3.3 rung 4
 // (`~/.sfn/config.toml`) at the real link call site (`_resolve_linker` in

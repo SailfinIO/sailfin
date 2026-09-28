@@ -76,7 +76,7 @@ test "cli runtime root: probe line count matches candidate count" ![pure] {
 // repo root as cwd, where `runtime/capsule.toml` already exists, so the
 // cwd-relative candidate always resolves and that assertion would be wrong
 // for this suite's cwd. That case belongs to
-// `compiler/tests/e2e/installed_toolchain_test_command_test.sfn`, which
+// `compiler/tests/nightly/installed_toolchain_test_command_test.sfn`, which
 // controls cwd via a child process.
 test "cli runtime root: resolves a real bundle root over the io boundary" ![io] {
     let outcome = with_tmp_dir(fn (dir: string) -> int {
