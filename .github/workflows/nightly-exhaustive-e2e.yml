@@ -1,0 +1,118 @@
+name: Nightly exhaustive e2e
+
+# Slow compiler CLI and cache scenarios run independently of the fixed-point
+# nightlies, whose own build gates can fail or exhaust their job budget before
+# reaching tests. PR shards keep the faster regression surface.
+on:
+  schedule:
+    # Start after the 07:00 fixed-point nightly's three-hour job cap.
+    - cron: "15 10 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-exhaustive-e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  unix:
+    name: Exhaustive e2e [${{ matrix.target }}]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    env:
+      SAILFIN_USE_ARENA: "1"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux-x86_64
+            clang: clang-18
+          - os: macos-26
+            target: macos-arm64
+            clang: clang
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve pinned seed
+        id: seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          pin="$(awk '
+            /^\[[^]]+\]/ { section=$0 }
+            section == "[seed]" && /^version[[:space:]]*=/ { gsub(/"/, "", $3); print $3; exit }
+          ' bootstrap.toml)"
+          [ -n "$pin" ] || { echo "bootstrap.toml [seed].version is missing" >&2; exit 1; }
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
+      - name: Install Linux compiler tools
+        if: ${{ runner.os == 'Linux' }}
+        uses: ./.github/actions/apt-install
+        timeout-minutes: 20
+        with:
+          packages: clang-18 llvm-18 lld jq
+
+      - name: Install macOS compiler tools
+        if: ${{ runner.os == 'macOS' }}
+        shell: bash
+        run: |
+          brew install jq llvm@18
+          echo "$(brew --prefix llvm@18)/bin" >> "$GITHUB_PATH"
+
+      - name: Build native compiler
+        uses: ./.github/actions/sailfin-build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLANG: ${{ matrix.clang }}
+        with:
+          mode: build-only
+          target: ${{ matrix.target }}
+          clang: ${{ matrix.clang }}
+          seed_version: ${{ steps.seed.outputs.seed_version }}
+          package: "false"
+
+      - name: Run exhaustive e2e tests
+        shell: bash
+        timeout-minutes: 150
+        env:
+          SAILFIN_BOOTSTRAP: "off"
+          SAILFIN_TEST_TIMEOUT: "1800"
+          SAILFIN_CC: ${{ matrix.clang }}
+        run: build/bin/sfn test compiler/tests/nightly --no-test-cache
+
+  windows:
+    name: Exhaustive e2e [windows-x86_64]
+    runs-on: windows-2025
+    timeout-minutes: 180
+    env:
+      SAILFIN_TARGET_OS: Windows
+      SAILFIN_USE_ARENA: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build native Windows compiler
+        id: build
+        uses: ./.github/actions/sailfin-build-windows
+
+      - name: Stage compiler executable
+        shell: pwsh
+        env:
+          NATIVE_SFN: ${{ steps.build.outputs.native_sfn_relative }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force build/bin | Out-Null
+          Copy-Item -LiteralPath $env:NATIVE_SFN -Destination build/bin/sfn.exe
+
+      - name: Run exhaustive e2e tests
+        shell: pwsh
+        timeout-minutes: 150
+        env:
+          SAILFIN_BOOTSTRAP: "off"
+          SAILFIN_RUNTIME_ROOT: ${{ github.workspace }}/runtime
+          SAILFIN_TEST_TIMEOUT: "1800"
+        run: |
+          & build/bin/sfn.exe test compiler/tests/nightly --no-test-cache
+          exit $LASTEXITCODE

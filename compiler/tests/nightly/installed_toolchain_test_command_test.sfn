@@ -1,4 +1,4 @@
-// compiler/tests/e2e/installed_toolchain_test_command_test.sfn
+// compiler/tests/nightly/installed_toolchain_test_command_test.sfn
 //
 // End-to-end regression for SFN-1088: `sfn test` resolves its runtime-bundle
 // root through the shared `cli/runtime_root.sfn` contract, the same way

@@ -1,4 +1,4 @@
-// compiler/tests/e2e/test_shared_runtime_obj_cache_test.sfn
+// compiler/tests/nightly/test_shared_runtime_obj_cache_test.sfn
 //
 // Regression coverage for SFN-1086: the `sfn test` link path assembles
 // runtime objects against the shared content-addressed cache

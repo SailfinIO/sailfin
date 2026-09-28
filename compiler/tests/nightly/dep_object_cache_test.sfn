@@ -1,4 +1,4 @@
-// compiler/tests/e2e/dep_object_cache_test.sfn
+// compiler/tests/nightly/dep_object_cache_test.sfn
 //
 // End-to-end regression coverage for the object-only test link cache
 // (#2013, SFN-453).

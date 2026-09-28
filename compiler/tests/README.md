@@ -14,6 +14,10 @@ The test runner discovers files named `*_test.sfn` under `<path>` (recursively),
 - `unit/` — fast, deterministic, refactor-friendly checks (no filesystem/network/model effects by default).
 - `integration/` — multi-subsystem or effectful tests (async/runtime bridging, capability enforcement, IO/net/model adapters).
 - `e2e/` — CLI-level and test-runner-level behavior (file discovery, relative import inlining, exit codes).
+- `nightly/` — exhaustive CLI, cache, toolchain, and platform scenarios.
+  `nightly-exhaustive-e2e.yml` runs them independently each night on Linux,
+  macOS, and Windows. Run a changed file directly during development with
+  `build/bin/sfn test compiler/tests/nightly/<name>_test.sfn`.
 
 Capsule-flavored tests (functions, types, and behaviors that belong to a
 capsule, not the compiler itself) live under

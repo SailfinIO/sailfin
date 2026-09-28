@@ -10,6 +10,17 @@ this file is read.
 
 ## Shard taxonomy
 
+The expensive CLI, cache, toolchain, and platform matrix cases under
+`compiler/tests/nightly` run in the independent scheduled
+`nightly-exhaustive-e2e.yml` workflow on Linux x86_64, macOS arm64, and
+native Windows. They are outside the eight PR shards. The nightly workflow
+builds a native compiler and runs `sfn test compiler/tests/nightly
+--no-test-cache` without waiting for the fixed-point self-host gates in the
+other nightly workflows. Run a changed nightly test directly on a PR branch;
+the related unit, integration, and smaller e2e tests stay in the PR suite.
+See the [September 28 follow-up](../measurements/test-time-2026-09-28.md)
+for the measured cost and selection.
+
 Exhaustive compiler work-directory parity lives in `compiler/tests/soak`,
 outside the ordinary workspace test inventory and the eight PR shards.
 `nightly-selfhost.yml` runs it on Linux x86_64 and macOS arm64;

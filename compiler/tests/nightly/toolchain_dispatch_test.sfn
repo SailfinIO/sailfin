@@ -1,4 +1,4 @@
-// compiler/tests/e2e/toolchain_dispatch_test.sfn
+// compiler/tests/nightly/toolchain_dispatch_test.sfn
 //
 // End-to-end coverage for toolchain re-exec dispatch + the
 // `SAILFIN_TOOLCHAIN` knob (SFEP-0046 §3.5, Phase 2 "use"; SFN-172).

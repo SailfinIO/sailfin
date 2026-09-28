@@ -7,7 +7,7 @@
 // directory, which would be non-hermetic and, on CI, silently vacuous. The
 // no-argument `user_config_linker` / `user_config_cc` (which read the real
 // `~/.sfn`) are deliberately never called here; the e2e precedence contract
-// lives in `compiler/tests/e2e/user_config_precedence_test.sfn`.
+// lives in `compiler/tests/nightly/user_config_precedence_test.sfn`.
 import { scratch_root } from "sfn/test";
 
 import { toml_section_key_names, toml_section_malformed_lines } from "../../src/toml_parser";
