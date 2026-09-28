@@ -247,7 +247,7 @@ fn _bare_serve_source() -> string {
         + "}\n";
 }
 
-test "runtime gates: hello-world builds, runs, and stages no crypto" ![io] {
+test "runtime gates: hello-world runs with a small staged set and no crypto" ![io] {
     let scratch = nested_runner_scratch("runtime-gates-hello");
     fs.createDirectory(scratch, true);
     let src = scratch + "/fixture.sfn";
@@ -272,19 +272,8 @@ test "runtime gates: hello-world builds, runs, and stages no crypto" ![io] {
         i += 1;
     }
     assert ! asm_has_crypto;
-}
-
-test "runtime gates: module count stays under the ceiling" ![io] {
-    let scratch = nested_runner_scratch("runtime-gates-count");
-    fs.createDirectory(scratch, true);
-    let src = scratch + "/fixture.sfn";
-    fs.writeFile(src, _hello_source());
-
-    let run = _build_in_scratch("runtime-gates-count", src, []);
-    assert run.exit == 0;
-
-    let leaves = _collect_leaves(run.scratch, [], 0);
-    let asm = _sfn_asm_files(leaves);
+    // The same build also pins the staged module ceiling. It needs no
+    // second cold compile of an identical print-only source.
     // A ceiling, not an exact band — before this change it was 69; after,
     // ~29. An exact count is a cross-platform flake generator.
     //
@@ -314,23 +303,6 @@ test "runtime gates: module count stays under the ceiling" ![io] {
             + int_to_string(limit));
     }
     assert asm.length <= limit;
-}
-
-test "runtime gates: a net-demanding program still links and runs" ![io] {
-    let scratch = nested_runner_scratch("runtime-gates-net-serve");
-    fs.createDirectory(scratch, true);
-    let src = scratch + "/fixture.sfn";
-    let marker = scratch + "/marker.txt";
-    fs.writeFile(src, _serve_source(marker));
-
-    let run = _build_in_scratch("runtime-gates-net-serve", src, []);
-    assert run.exit == 0;
-
-    let output = _run_binary(run.scratch);
-    assert contains(output, "net-gate-ok");
-
-    let leaves = _collect_leaves(run.scratch, [], 0);
-    assert _any_contains(leaves, "sfn/crypto");
 }
 
 test "runtime gates: manifest [capabilities] required opens the gate" ![io] {
@@ -437,8 +409,10 @@ test "runtime gates: a reused scratch prunes a shrinking staged set (SFN-1087)" 
     fs.writeFile(wide_src, _serve_source(marker));
     let wide_exit = _build_in_dir("runtime-gates-shrink-wide", scratch, wide_src, []);
     assert wide_exit == 0;
+    let output = _run_binary(scratch);
+    assert contains(output, "net-gate-ok");
 
-    // Sanity: the wide set really is wider, or the test proves nothing.
+    // The wide build must stage crypto before the narrow build prunes it.
     let wide_ctx = _rt_context_leaves(_collect_leaves(scratch, [], 0));
     assert _any_contains(wide_ctx, "sfn/crypto");
 

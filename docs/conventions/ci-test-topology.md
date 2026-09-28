@@ -170,9 +170,12 @@ Do not hand-add
 a median: a derived number nothing recomputes is how the previous header's
 "median (282)" became a stale authority.
 
-Every run's `shard-weights-candidate` job (`ci.yml`) runs the same script on
-that run's sidecars and uploads the result plus a drift summary, so a
-candidate usually already exists — check it before downloading anything. A
+Every run's `shard-weights-candidate` job (`ci.yml`) waits for the Linux,
+macOS, Linux arm64, and Windows shard matrices, then runs the same script on
+that run's sidecars and uploads the result plus a drift summary. Candidates
+from runs before this dependency included only the Windows shards that had
+finished when the advisory job started; check the header's per-target file
+counts before using one. A
 regeneration that disagrees with the candidate for the same run is a bug in
 one of the two, not a judgement call.
 
