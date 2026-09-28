@@ -2700,6 +2700,9 @@ jobs:
       - build-linux
       - build-macos
       - build-aarch64-linux
+      # Wait for every Windows shard before collecting its timing sidecars;
+      # otherwise a successful candidate can contain only early finishers.
+      - build-windows
     # Gated on the same scope signal as the legs that feed it. `ci-scope`
     # sets `source=false` for `schedule` (:80-84), so a scheduled run
     # executes no shard leg and produces no `ci-test-timing-*` sidecar.

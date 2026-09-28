@@ -4,16 +4,14 @@
 // epic #842). Verifies that `sfn run` honours the same cache contract as
 // `sfn build`:
 //
-//   1. Backwards-compat `sfn run <file>` (no flags) still works.
-//   2. Cold default run stays quiet unless telemetry is requested.
-//   3. Warm `--cache-trace` run prints a summary with hits>=1, misses=0.
-//   4. `--no-cache` suppresses the `[cache]` summary line entirely.
-//   5. `--cache-trace` emits per-module `[cache hit]` lines.
-//   6. `--clean` wipes `<cache_root>/v3/...` before building.
-//   7. `--clean` also wipes the staged import-context tree, not just the
+//   1. Backwards-compat `sfn run <file>` (no flags) works and stays quiet.
+//   2. Warm `--cache-trace` reports hits>=1, misses=0, and per-module hits.
+//   3. `--no-cache` suppresses the `[cache]` summary line entirely.
+//   4. `--clean` wipes `<cache_root>/v3/...` before building.
+//   5. `--clean` also wipes the staged import-context tree, not just the
 //      shared cache root (SFN-872).
 //
-// Tests 1-5 share a fixture capsule importing `sfn/math`, so the module
+// The cache tests share a fixture capsule importing `sfn/math`, so the module
 // cache has work to do. It lives under `build/` — CWD-relative, i.e. the
 // repo root — so the repo's own `workspace.toml` resolves `sfn/math` with
 // no symlink and no hardcoded absolute path (see `_ensure_fixture`). The
@@ -33,7 +31,7 @@
 // (`build/compiler/import-context/`, SFN-872). That tree is rooted at a
 // fixed, CWD-relative path with NO `SAILFIN_TEST_SCRATCH` override, and
 // `sfn run` has no `--work-dir` to redirect it — cwd is the only lever.
-// Tests 6 and 7 therefore run `sfn run --clean` against a private per-test
+// The `--clean` tests therefore run `sfn run --clean` against a private per-test
 // fixture directory as the CHILD's cwd (via `process.run_capture_cwd`),
 // never this repo's own cwd: a `--clean` started from the repo root would
 // wipe the repo's own staged tree, which other e2e tests read or write and
@@ -165,8 +163,9 @@ fn _run_with_cwd(dir: string, test_scratch: string, cache_dir: string, extra_fla
     return Run { exit: exit, log: out + err };
 }
 
-// ---- Test 1: backwards compat — `sfn run <file>` with no flags ----
-test "sfn run <file> still works (no flags)" ![io] {
+// A cold no-flag invocation covers both backwards compatibility and the
+// default telemetry contract without compiling the same fixture twice.
+test "sfn run <file> works and stays quiet by default" ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
     if base.length == 0 { base = default_scratch_dir(); }
     let root = base + "/sfn-rcf-t1";
@@ -188,29 +187,8 @@ test "sfn run <file> still works (no flags)" ![io] {
     assert find(log, "[link]", 0) < 0;
 }
 
-// ---- Test 2: cold default run stays quiet unless telemetry is requested ----
-// With a per-test fresh SAILFIN_TEST_SCRATCH, the runtime .o cache is also
-// cold — matching the bash original's mktemp-fresh scratch semantics.
-// The cache still does the work; it just does not leak telemetry into a
-// normal `sfn run` unless `--cache-trace` is requested.
-test "first run suppresses cache summary by default" ![io] {
-    let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = default_scratch_dir(); }
-    let root = base + "/sfn-rcf-t2";
-    let test_scratch = root + "/scratch";
-    let cache_dir = root + "/cache";
-    fs.createDirectory(test_scratch, true);
-    let main_sfn = _ensure_fixture();
-
-    let log = _run_with(main_sfn, test_scratch, cache_dir, []);
-
-    assert find(log, "OK", 0) >= 0;
-    assert find(log, "[cache]", 0) < 0;
-    assert find(log, "[link]", 0) < 0;
-}
-
-// ---- Test 3: warm --cache-trace run prints summary with misses=0 ----
-test "warm run with --cache-trace prints warm cache summary (hits>=1, misses=0)" ![io] {
+// One fixture lifecycle checks the warm trace and the --no-cache override.
+test "sfn run cache flags report warm hits and suppress no-cache telemetry" ![io] {
     let mut base = env.get("SAILFIN_TEST_SCRATCH");
     if base.length == 0 { base = default_scratch_dir(); }
     let root = base + "/sfn-rcf-t3";
@@ -227,48 +205,16 @@ test "warm run with --cache-trace prints warm cache summary (hits>=1, misses=0)"
     assert find(log, "OK", 0) >= 0;
     // Warm run: all modules are now cached → misses=0.
     assert find(log, "misses=0", 0) >= 0;
-}
-
-// ---- Test 4: --no-cache suppresses the [cache] summary line ----
-test "sfn run --no-cache prints no '[cache]' summary" ![io] {
-    let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = default_scratch_dir(); }
-    let root = base + "/sfn-rcf-t4";
-    let test_scratch = root + "/scratch";
-    let cache_dir = root + "/cache";
-    fs.createDirectory(test_scratch, true);
-    let main_sfn = _ensure_fixture();
-
-    // Warm the cache first.
-    let _ = _run_with(main_sfn, test_scratch, cache_dir, []);
-    // Run with --no-cache.
-    let log = _run_with(main_sfn, test_scratch, cache_dir, ["--no-cache"]);
-
-    assert find(log, "OK", 0) >= 0;
-    // No [cache] summary line must appear.
-    assert find(log, "[cache]", 0) < 0;
-}
-
-// ---- Test 5: --cache-trace emits per-module [cache hit] lines ----
-test "sfn run --cache-trace prints '[cache hit] sfn/math'" ![io] {
-    let mut base = env.get("SAILFIN_TEST_SCRATCH");
-    if base.length == 0 { base = default_scratch_dir(); }
-    let root = base + "/sfn-rcf-t5";
-    let test_scratch = root + "/scratch";
-    let cache_dir = root + "/cache";
-    fs.createDirectory(test_scratch, true);
-    let main_sfn = _ensure_fixture();
-
-    // Warm the cache first.
-    let _ = _run_with(main_sfn, test_scratch, cache_dir, []);
-    // Run with --cache-trace: sfn/math must report a cache hit.
-    let log = _run_with(main_sfn, test_scratch, cache_dir, ["--cache-trace"]);
-
-    assert find(log, "OK", 0) >= 0;
     assert find(log, "[cache hit] sfn/math", 0) >= 0;
+
+    let no_cache_log = _run_with(main_sfn, test_scratch, cache_dir, ["--no-cache"]);
+
+    assert find(no_cache_log, "OK", 0) >= 0;
+    // No [cache] summary line must appear.
+    assert find(no_cache_log, "[cache]", 0) < 0;
 }
 
-// ---- Test 6: --clean wipes the cache and forces a fresh miss ----
+// --clean wipes the cache and forces a fresh miss.
 // Uses the private-cwd fixture (see file header): `--clean` also wipes the
 // CWD-fixed staged import-context tree, so this must not run with the
 // repo itself as cwd.
@@ -281,7 +227,7 @@ test "sfn run --clean wipes the cache and rebuilds" ![io] {
     fs.createDirectory(test_scratch, true);
     let fixture_dir = _ensure_private_fixture("sfn-rcf-t6-fixture");
 
-    // Two warm runs to populate the cache.
+    // Keep the original two-run setup before checking the v3 cache.
     let _ = _run_with_cwd(fixture_dir, test_scratch, cache_dir, []);
     let _ = _run_with_cwd(fixture_dir, test_scratch, cache_dir, []);
 
@@ -314,10 +260,9 @@ test "sfn run --clean wipes the cache and rebuilds" ![io] {
     assert find(cache_line, "misses=0", 0) < 0;
 }
 
-// ---- Test 7: --clean wipes the staged import-context tree (SFN-872) ----
-// Distinct from test 6: this proves `--clean` reaches the CWD-fixed staged
+// The staged-tree case proves `--clean` reaches the CWD-fixed staged
 // import-context tree (`build/compiler/import-context/`), not just the
-// shared `SAILFIN_BUILD_CACHE_DIR` root that tests 3-6 exercise. Uses a
+// shared `SAILFIN_BUILD_CACHE_DIR` root exercised above. Uses a
 // small (sub-threshold) fixture, so the shared stage cache is disabled
 // in-process (`_cr_resolve_stage_cache_ctx` requires `sailfin_exe`, unset
 // below the subprocess-isolation module count) and no `[stage cache]` trace
