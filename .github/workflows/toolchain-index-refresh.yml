@@ -12,12 +12,8 @@ name: Toolchain index refresh
 # Recovery from an already-expired index: docs/runbooks/toolchain-index-refresh.md
 
 on:
-  schedule:
-    # Wednesday 06:00 UTC. Deliberately off the Monday release-train cadence so
-    # a refresh does not contend with a release cut on the shared
-    # `release-publication` concurrency group. Weekly against a 35-day window
-    # leaves roughly four missed runs of margin.
-    - cron: "0 6 * * 3"
+  # `schedule:` trigger removed while the project is on hiatus; restore it
+  # from git history when development resumes. Manual dispatch still works.
   workflow_dispatch:
     inputs:
       dry_run:
