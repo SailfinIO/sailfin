@@ -20,8 +20,8 @@ name: Nightly self-host check
 # edit.
 
 on:
-  schedule:
-    - cron: '0 7 * * *'
+  # `schedule:` trigger removed while the project is on hiatus; restore it
+  # from git history when development resumes. Manual dispatch still works.
   workflow_dispatch:
     inputs:
       seed_version:

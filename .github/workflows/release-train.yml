@@ -44,10 +44,8 @@ name: Release Train (weekly stable)
 # enriches the tracker the train opens).
 
 on:
-  schedule:
-    # Every Monday 09:00 UTC — weekly cadence boundary. A maintainer can always
-    # run off-cadence via workflow_dispatch.
-    - cron: "0 9 * * 1"
+  # `schedule:` trigger removed while the project is on hiatus; restore it
+  # from git history when development resumes. Manual dispatch still works.
   # Re-evaluate whenever a nightly self-host check finishes: a cut only fires
   # once a GREEN nightly covers the current `main` HEAD (its commit is an
   # ancestor of HEAD with no self-host-relevant change since), so the nightly's

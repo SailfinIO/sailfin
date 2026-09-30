@@ -56,9 +56,8 @@ test "Windows CI: shard artifacts preserve the direct-link LLVM family" ![io] {
     assert contains(action, "lib\\clang\\18\\lib\\windows\\clang_rt.builtins-x86_64.lib");
 }
 
-test "Windows CI: full native self-host runs nightly, not after each merge" ![io] {
+test "Windows CI: full native self-host does not run after each merge" ![io] {
     let workflow = fs.readFile(".github/workflows/windows-native-selfhost.yml");
-    assert contains(workflow, "  schedule:\n    - cron: \"0 8 * * *\"");
     assert contains(workflow, "  workflow_dispatch:");
     assert ! contains(workflow, "\n  push:");
 }

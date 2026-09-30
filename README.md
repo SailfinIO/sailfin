@@ -25,7 +25,13 @@
   <a href="https://github.com/SailfinIO/sailfin/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/SailfinIO/sailfin?style=flat"></a>
 </p>
 
-> **Status:** Sailfin is pre-1.0 and under active development. The native
+> [!IMPORTANT]
+> **On hiatus.** Sailfin is paused while the maintainer takes a break.
+> Scheduled automation (nightlies, the weekly release train) is turned off, no
+> new releases are planned, and issues and pull requests may go unanswered for
+> a while. Existing releases stay available. Development will resume later.
+
+> **Status:** Sailfin is pre-1.0. The native
 > compiler is self-hosted and the runtime is written in Sailfin. The current
 > backend still lowers through LLVM and links with the platform toolchain;
 > LLVM/clang independence is a project goal, not the current shipping state. For
